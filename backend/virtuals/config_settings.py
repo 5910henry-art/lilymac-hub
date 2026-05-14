@@ -8,21 +8,21 @@ DEBUG = ENV == "development"
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 
 # ---------------- DATABASE ----------------
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql://henry:kyu@localhost:5432/virtualfootball",
-)
+DATABASE_URL = os.getenv("DATABASE_URL")
 
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
-DB_SCHEMA = os.getenv("DB_SCHEMA", "henry_schema")
+REDIS_URL = os.getenv("REDIS_URL")
+
+DB_SCHEMA = os.getenv("DB_SCHEMA", "public")
+
 USE_SQLITE_FALLBACK = not DATABASE_URL
 
 if USE_SQLITE_FALLBACK:
     BASE_DIR = os.path.abspath(os.path.dirname(__file__))
     DB_PATH = os.path.join(BASE_DIR, "football.db")
     DATABASE_URL = f"sqlite:///{DB_PATH}"
-
 SCHEMA = None if USE_SQLITE_FALLBACK else DB_SCHEMA
 
 # ---------------- JWT ----------------
