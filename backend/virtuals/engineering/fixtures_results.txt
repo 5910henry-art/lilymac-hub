@@ -1,0 +1,300 @@
+espanyol vs real sociedad | 2.22 3.17 3.35 | 2-1
+athletic bilbao vs alaves | 2.22 3.17 3.35 | 0-0
+mallorca vs osasuna | 2.19 3.19 3.39 | 2-1
+barcelona vs granada | 1.36 4.61 9.00 | 3-2
+sevilla vs levante | 1.91 3.42 4.02 | 0-1
+almeria vs valencia | 2.68 3.39 2.53 | 2-1
+real madrid vs atletico madrid | 2.50 3.27 2.79 | 1-2
+celta vigo vs betis | 2.53 3.29 2.74 | 5-1
+valladolid vs villarreal | 2.62 3.34 2.61 | 3-0
+leganes vs getafe | 2.68 3.40 2.52 | 0-0
+levante vs espanyol | 2.54 3.27 2.75 | 0-0
+valencia vs valladolid | 1.65 3.80 5.15 | 2-1
+real sociedad vs athletic bilbao | 2.38 3.17 3.04 | 0-1
+osasuna vs barcelona | 4.63 4.44 1.61 | 2-0
+villarreal vs alaves | 2.45 3.23 2.88 | 0-1
+getafe vs real madrid | 2.53 3.30 2.74 | 1-1
+atletico madrid vs almeria | 1.65 3.77 5.17 | 0-1
+betis vs sevilla | 2.53 3.28 2.74 | 3-0
+mallorca vs leganes | 2.41 3.19 2.99 | 2-1
+granada vs celta vigo | 2.50 3.29 2.78 | 2-0
+real madrid vs mallorca | 1.68 3.72 4.97 | 1-1
+real sociedad vs levante | 2.13 3.24 3.49 | 1-1
+espanyol vs betis | 2.22 3.17 3.35 | 0-2
+alaves vs valencia | 2.59 3.33 2.65 | 2-0
+almeria vs getafe | 2.62 3.35 2.61 | 0-1
+barcelona vs leganes | 1.48 4.18 6.80 | 0-1
+valladolid vs atletico madrid | 4.15 4.24 1.70 | 2-1
+sevilla vs granada | 1.70 3.69 4.88 | 1-2
+athletic bilbao vs villarreal | 2.06 3.28 3.66 | 1-1
+celta vigo vs osasuna | 2.19 3.19 3.40 | 1-2
+valencia vs villarreal | 1.87 3.48 4.15 | 3-1
+barcelona vs real madrid | 1.83 3.49 4.31 | 1-1
+betis vs real sociedad | 2.32 3.11 3.21 | 1-4
+mallorca vs almeria | 2.45 3.23 2.88 | 0-3
+getafe vs valladolid | 1.68 3.72 4.97 | 2-2
+granada vs espanyol | 2.88 3.54 2.30 | 3-1
+osasuna vs sevilla | 2.95 3.59 2.24 | 2-0
+atletico madrid vs alaves | 1.70 3.69 4.88 | 1-0
+levante vs athletic bilbao | 2.53 3.28 2.74 | 0-0
+leganes vs celta vigo | 2.20 3.19 3.40 | 2-0
+espanyol vs osasuna | 1.89 3.45 4.08 | 2-1
+almeria vs barcelona | 3.87 4.09 1.78 | 1-0
+celta vigo vs real madrid | 3.17 3.71 2.09 | 0-1
+villarreal vs atletico madrid | 3.40 3.86 1.96 | 4-2
+athletic bilbao vs valencia | 2.51 3.26 2.79 | 2-0
+sevilla vs leganes | 1.94 3.39 3.96 | 0-1
+levante vs betis | 2.46 3.22 2.89 | 1-2
+valladolid vs mallorca | 2.53 3.29 2.74 | 0-0
+alaves vs getafe | 2.53 3.29 2.74 | 1-0
+real sociedad vs granada | 1.87 3.47 4.16 | 2-0
+getafe vs villarreal | 1.91 3.43 4.01 | 2-0
+real madrid vs sevilla | 2.05 3.30 3.65 | 1-1
+barcelona vs valladolid | 1.35 4.66 9.20 | 1-4
+atletico madrid vs valencia | 1.92 3.39 4.03 | 0-1
+leganes vs espanyol | 2.50 3.28 2.78 | 1-2
+betis vs athletic bilbao | 2.39 3.14 3.05 | 1-0
+mallorca vs alaves | 2.53 3.30 2.74 | 0-1
+granada vs levante | 2.59 3.32 2.65 | 3-0
+celta vigo vs almeria | 2.45 3.23 2.88 | 1-1
+osasuna vs real sociedad | 2.65 3.36 2.57 | 1-1
+valencia vs getafe | 2.25 3.15 3.30 | 0-0
+alaves vs barcelona | 3.68 4.02 1.84 | 0-0
+espanyol vs real madrid | 2.71 3.43 2.48 | 2-0
+levante vs osasuna | 2.10 3.27 3.54 | 3-1
+villarreal vs mallorca | 2.22 3.17 3.35 | 2-1
+valladolid vs celta vigo | 2.53 3.29 2.74 | 0-2
+real sociedad vs leganes | 2.17 3.20 3.45 | 1-2
+betis vs granada | 1.87 3.47 4.16 | 4-1
+athletic bilbao vs atletico madrid | 2.99 3.62 2.21 | 2-2
+sevilla vs almeria | 1.98 3.36 3.83 | 3-1
+celta vigo vs alaves | 2.53 3.29 2.74 | 3-1
+mallorca vs valencia | 2.89 3.52 2.31 | 5-1
+getafe vs atletico madrid | 2.77 3.47 2.41 | 0-0
+granada vs athletic bilbao | 2.88 3.55 2.30 | 3-2
+barcelona vs villarreal | 1.47 4.20 6.90 | 2-1
+sevilla vs valladolid | 1.69 3.69 4.98 | 3-1
+almeria vs espanyol | 2.46 3.22 2.89 | 0-3
+leganes vs levante | 2.28 3.14 3.25 | 2-1
+real madrid vs real sociedad | 1.85 3.50 4.22 | 2-0
+osasuna vs betis | 2.65 3.36 2.57 | 3-1
+betis vs leganes | 2.17 3.20 3.45 | 3-0
+athletic bilbao vs getafe | 2.46 3.23 2.88 | 0-2
+espanyol vs valladolid | 1.79 3.55 4.46 | 3-1
+granada vs osasuna | 2.41 3.18 2.99 | 3-2
+valencia vs barcelona | 3.12 3.68 2.12 | 1-0
+levante vs real madrid | 3.04 3.64 2.18 | 3-2
+real sociedad vs almeria | 2.22 3.17 3.35 | 1-1
+villarreal vs celta vigo | 2.23 3.17 3.35 | 0-1
+atletico madrid vs mallorca | 1.57 3.94 5.83 | 0-1
+alaves vs sevilla | 2.53 3.31 2.73 | 0-1
+espanyol vs alaves | 2.23 3.16 3.35 | 1-1
+osasuna vs athletic bilbao | 2.74 3.45 2.45 | 0-1
+sevilla vs villarreal | 1.91 3.43 4.02 | 2-2
+barcelona vs atletico madrid | 2.01 3.34 3.77 | 3-0
+real madrid vs betis | 1.85 3.50 4.22 | 0-0
+leganes vs granada | 1.99 3.34 3.84 | 0-0
+mallorca vs getafe | 2.81 3.49 2.37 | 2-1
+valladolid vs real sociedad | 2.80 3.51 2.37 | 1-1
+celta vigo vs valencia | 2.87 3.55 2.30 | 2-4
+almeria vs levante | 2.22 3.17 3.35 | 0-1
+betis vs almeria | 2.22 3.17 3.34 | 2-4
+getafe vs barcelona | 3.21 3.74 2.06 | 3-1
+valencia vs sevilla | 2.25 3.15 3.30 | 1-4
+villarreal vs espanyol | 2.53 3.29 2.74 | 1-0
+levante vs valladolid | 1.99 3.32 3.84 | 0-1
+osasuna vs leganes | 2.51 3.26 2.79 | 0-2
+granada vs real madrid | 3.57 3.94 1.89 | 0-1
+real sociedad vs alaves | 2.32 3.12 3.21 | 1-0
+atletico madrid vs celta vigo | 1.57 3.94 5.83 | 0-4
+athletic bilbao vs mallorca | 1.99 3.34 3.84 | 1-0
+espanyol vs valencia | 2.51 3.27 2.79 | 0-1
+real madrid vs osasuna | 1.62 3.81 5.38 | 1-0
+leganes vs athletic bilbao | 2.51 3.27 2.79 | 2-1
+real sociedad vs villarreal | 2.14 3.23 3.50 | 2-0
+valladolid vs betis | 2.80 3.51 2.37 | 0-0
+celta vigo vs getafe | 2.81 3.49 2.37 | 0-0
+alaves vs levante | 2.14 3.22 3.50 | 0-0
+almeria vs granada | 1.94 3.38 3.96 | 2-1
+barcelona vs mallorca | 1.44 4.31 7.40 | 1-1
+sevilla vs atletico madrid | 2.77 3.48 2.41 | 0-1
+granada vs valladolid | 2.29 3.13 3.26 | 0-1
+betis vs alaves | 2.32 3.10 3.22 | 3-1
+osasuna vs almeria | 2.56 3.30 2.70 | 2-1
+leganes vs real madrid | 2.99 3.63 2.20 | 0-3
+valencia vs real sociedad | 2.00 3.35 3.76 | 1-3
+getafe vs sevilla | 2.32 3.11 3.21 | 0-1
+athletic bilbao vs barcelona | 3.52 3.90 1.91 | 2-1
+atletico madrid vs espanyol | 1.75 3.61 4.62 | 3-1
+levante vs villarreal | 2.32 3.11 3.21 | 0-0
+mallorca vs celta vigo | 2.32 3.12 3.21 | 1-3
+valladolid vs osasuna | 2.43 3.21 2.93 | 1-1
+real sociedad vs atletico madrid | 3.12 3.70 2.11 | 0-1
+alaves vs granada | 1.87 3.47 4.16 | 0-3
+celta vigo vs barcelona | 4.30 4.30 1.67 | 3-1
+levante vs valencia | 2.77 3.47 2.41 | 1-0
+real madrid vs athletic bilbao | 1.91 3.45 4.01 | 2-2
+almeria vs leganes | 2.26 3.12 3.31 | 2-2
+villarreal vs betis | 2.45 3.23 2.88 | 0-3
+espanyol vs getafe | 2.45 3.24 2.88 | 0-0
+sevilla vs mallorca | 1.85 3.49 4.22 | 1-1
+osasuna vs alaves | 2.65 3.37 2.57 | 3-0
+mallorca vs espanyol | 2.62 3.36 2.61 | 2-2
+leganes vs valladolid | 1.96 3.38 3.89 | 2-1
+barcelona vs sevilla | 1.67 3.72 5.08 | 1-3
+atletico madrid vs levante | 1.61 3.87 5.48 | 1-4
+real madrid vs almeria | 1.79 3.56 4.45 | 3-3
+getafe vs real sociedad | 2.05 3.31 3.65 | 1-0
+betis vs valencia | 2.59 3.33 2.65 | 1-2
+athletic bilbao vs celta vigo | 1.98 3.38 3.82 | 0-1
+granada vs villarreal | 2.59 3.34 2.65 | 2-1
+real sociedad vs mallorca | 2.06 3.30 3.65 | 2-4
+valencia vs granada | 1.67 3.76 5.06 | 2-3
+almeria vs athletic bilbao | 2.45 3.23 2.88 | 3-0
+valladolid vs real madrid | 3.62 3.98 1.86 | 2-1
+villarreal vs osasuna | 2.11 3.25 3.54 | 2-0
+sevilla vs celta vigo | 1.85 3.47 4.23 | 2-2
+betis vs atletico madrid | 3.11 3.72 2.11 | 2-0
+levante vs getafe | 2.71 3.42 2.49 | 0-0
+espanyol vs barcelona | 3.51 3.92 1.91 | 1-0
+alaves vs leganes | 2.17 3.21 3.44 | 3-2
+getafe vs betis | 2.06 3.27 3.66 | 1-2
+barcelona vs real sociedad | 1.54 3.99 6.10 | 1-1
+mallorca vs levante | 2.38 3.17 3.04 | 1-2
+real madrid vs alaves | 1.85 3.47 4.24 | 0-0
+athletic bilbao vs sevilla | 2.45 3.23 2.88 | 1-1
+leganes vs villarreal | 2.29 3.12 3.26 | 1-1
+almeria vs valladolid | 1.91 3.42 4.02 | 1-2
+osasuna vs valencia | 3.03 3.64 2.18 | 0-1
+celta vigo vs espanyol | 2.61 3.37 2.60 | 0-0
+atletico madrid vs granada | 1.47 4.18 6.90 | 3-0
+barcelona vs levante | 1.47 4.17 6.90 | 4-2
+atletico madrid vs osasuna | 1.51 4.07 6.30 | 3-0
+valencia vs leganes | 1.89 3.43 4.09 | 2-1
+espanyol vs sevilla | 2.45 3.26 2.87 | 2-2
+mallorca vs betis | 2.54 3.28 2.74 | 2-1
+villarreal vs real madrid | 3.03 3.66 2.17 | 2-1
+athletic bilbao vs valladolid | 1.79 3.58 4.45 | 2-2
+real sociedad vs celta vigo | 2.06 3.29 3.65 | 0-0
+alaves vs almeria | 2.22 3.18 3.34 | 1-3
+getafe vs granada | 1.70 3.69 4.88 | 4-0
+levante vs celta vigo | 2.22 3.17 3.35 | 0-0
+atletico madrid vs leganes | 1.62 3.86 5.36 | 2-2
+mallorca vs granada | 2.08 3.27 3.60 | 1-0
+espanyol vs athletic bilbao | 2.32 3.10 3.22 | 2-2
+barcelona vs betis | 1.54 3.98 6.10 | 1-2
+osasuna vs getafe | 2.96 3.59 2.24 | 1-1
+almeria vs villarreal | 2.23 3.16 3.35 | 1-0
+valladolid vs alaves | 2.81 3.49 2.37 | 3-3
+real madrid vs valencia | 2.11 3.25 3.55 | 2-0
+sevilla vs real sociedad | 2.06 3.28 3.66 | 1-3
+valencia vs almeria | 1.94 3.39 3.96 | 2-2
+granada vs barcelona | 5.00 4.60 1.55 | 2-0
+atletico madrid vs real madrid | 2.08 3.27 3.60 | 2-2
+alaves vs athletic bilbao | 2.38 3.17 3.04 | 2-3
+getafe vs leganes | 1.94 3.39 3.96 | 0-0
+osasuna vs mallorca | 2.41 3.19 2.99 | 4-1
+real sociedad vs espanyol | 2.38 3.17 3.04 | 1-0
+betis vs celta vigo | 2.06 3.29 3.65 | 0-4
+villarreal vs valladolid | 1.98 3.35 3.83 | 1-2
+levante vs sevilla | 2.71 3.42 2.49 | 1-1
+espanyol vs levante | 2.06 3.29 3.65 | 2-2
+athletic bilbao vs real sociedad | 2.22 3.17 3.35 | 1-1
+celta vigo vs granada | 2.08 3.26 3.60 | 0-1
+sevilla vs betis | 2.05 3.30 3.65 | 0-1
+almeria vs atletico madrid | 3.26 3.77 2.03 | 3-0
+barcelona vs osasuna | 1.40 4.45 8.10 | 0-1
+real madrid vs getafe | 2.06 3.28 3.66 | 2-2
+leganes vs mallorca | 2.20 3.16 3.41 | 0-0
+alaves vs villarreal | 2.13 3.24 3.49 | 1-2
+valladolid vs valencia | 3.26 3.75 2.04 | 0-1
+villarreal vs athletic bilbao | 2.54 3.27 2.75 | 2-0
+osasuna vs celta vigo | 2.41 3.18 2.99 | 1-0
+getafe vs almeria | 1.98 3.37 3.82 | 0-2
+betis vs espanyol | 2.39 3.16 3.05 | 1-2
+mallorca vs real madrid | 3.17 3.71 2.09 | 4-2
+levante vs real sociedad | 2.45 3.23 2.88 | 3-3
+leganes vs barcelona | 4.01 4.16 1.74 | 0-1
+granada vs sevilla | 3.12 3.70 2.12 | 0-0
+valencia vs alaves | 2.01 3.33 3.77 | 0-0
+atletico madrid vs valladolid | 1.46 4.25 7.10 | 2-2
+real madrid vs barcelona | 2.84 3.52 2.34 | 1-0
+villarreal vs valencia | 2.77 3.47 2.41 | 0-3
+espanyol vs granada | 1.81 3.54 4.38 | 2-0
+almeria vs mallorca | 2.14 3.21 3.50 | 2-2
+real sociedad vs betis | 2.32 3.11 3.21 | 0-3
+sevilla vs osasuna | 1.77 3.60 4.53 | 1-2
+athletic bilbao vs levante | 2.05 3.30 3.65 | 0-1
+valladolid vs getafe | 3.16 3.72 2.09 | 3-2
+alaves vs atletico madrid | 3.12 3.70 2.12 | 3-2
+celta vigo vs leganes | 2.40 3.20 2.98 | 2-1
+mallorca vs valladolid | 2.05 3.30 3.65 | 0-1
+getafe vs alaves | 2.06 3.29 3.65 | 1-3
+osasuna vs espanyol | 2.74 3.45 2.45 | 0-1
+valencia vs athletic bilbao | 2.08 3.30 3.59 | 0-1
+leganes vs sevilla | 2.68 3.39 2.53 | 0-0
+betis vs levante | 2.13 3.24 3.49 | 2-0
+real madrid vs celta vigo | 1.69 3.70 4.98 | 2-1
+granada vs real sociedad | 2.77 3.47 2.41 | 4-1
+atletico madrid vs villarreal | 1.61 3.85 5.48 | 3-3
+barcelona vs almeria | 1.50 4.10 6.50 | 1-1
+valencia vs atletico madrid | 2.70 3.44 2.48 | 3-1
+villarreal vs getafe | 2.71 3.42 2.49 | 3-1
+valladolid vs barcelona | 5.09 4.67 1.53 | 0-0
+levante vs granada | 2.01 3.32 3.77 | 1-1
+alaves vs mallorca | 2.05 3.30 3.65 | 1-2
+almeria vs celta vigo | 2.14 3.23 3.50 | 1-1
+sevilla vs real madrid | 2.53 3.29 2.74 | 2-0
+espanyol vs leganes | 2.08 3.27 3.60 | 2-0
+athletic bilbao vs betis | 2.23 3.17 3.35 | 2-3
+real sociedad vs osasuna | 1.96 3.37 3.89 | 1-2
+getafe vs valencia | 2.36 3.15 3.10 | 2-2
+almeria vs sevilla | 2.62 3.34 2.61 | 3-0
+real madrid vs espanyol | 1.91 3.43 4.02 | 2-2
+celta vigo vs valladolid | 2.06 3.29 3.66 | 0-2
+atletico madrid vs athletic bilbao | 1.75 3.62 4.61 | 0-1
+osasuna vs levante | 2.48 3.26 2.83 | 2-2
+leganes vs real sociedad | 2.43 3.20 2.94 | 0-0
+granada vs betis | 2.77 3.48 2.41 | 3-1
+barcelona vs alaves | 1.54 3.99 6.10 | 2-0
+mallorca vs villarreal | 2.38 3.17 3.04 | 2-3
+real sociedad vs real madrid | 2.81 3.49 2.37 | 2-1
+valladolid vs sevilla | 3.16 3.72 2.09 | 1-1
+alaves vs celta vigo | 2.06 3.27 3.66 | 3-0
+espanyol vs almeria | 2.14 3.22 3.50 | 1-1
+levante vs leganes | 2.34 3.13 3.16 | 2-1
+villarreal vs barcelona | 4.08 4.19 1.72 | 0-0
+betis vs osasuna | 1.96 3.38 3.89 | 2-1
+atletico madrid vs getafe | 1.87 3.47 4.16 | 1-3
+valencia vs mallorca | 1.81 3.53 4.38 | 0-1
+athletic bilbao vs granada | 1.81 3.53 4.38 | 0-2
+celta vigo vs villarreal | 2.39 3.17 3.04 | 0-0
+almeria vs real sociedad | 2.38 3.18 3.04 | 3-1
+getafe vs athletic bilbao | 2.13 3.25 3.49 | 1-0
+real madrid vs levante | 1.74 3.62 4.71 | 2-3
+leganes vs betis | 2.44 3.18 2.94 | 2-3
+sevilla vs alaves | 2.06 3.28 3.66 | 1-0
+mallorca vs atletico madrid | 3.57 3.95 1.88 | 3-1
+osasuna vs granada | 2.19 3.20 3.39 | 1-2
+valladolid vs espanyol | 2.92 3.55 2.27 | 3-0
+barcelona vs valencia | 1.70 3.68 4.88 | 1-3
+getafe vs mallorca | 1.85 3.47 4.24 | 3-0
+granada vs leganes | 2.61 3.36 2.60 | 3-1
+valencia vs celta vigo | 1.81 3.54 4.38 | 0-2
+levante vs almeria | 2.39 3.15 3.05 | 2-1
+villarreal vs sevilla | 2.71 3.43 2.48 | 2-0
+athletic bilbao vs osasuna | 1.89 3.44 4.09 | 1-2
+atletico madrid vs barcelona | 2.59 3.33 2.65 | 2-0
+betis vs real madrid | 2.81 3.49 2.37 | 2-0
+real sociedad vs valladolid | 1.85 3.49 4.23 | 0-1
+alaves vs espanyol | 2.38 3.17 3.04 | 1-0
+sevilla vs valencia | 2.36 3.15 3.10 | 1-1
+celta vigo vs atletico madrid | 3.57 3.94 1.89 | 0-1
+almeria vs betis | 2.38 3.18 3.04 | 1-1
+barcelona vs getafe | 1.67 3.73 5.08 | 1-3
+espanyol vs villarreal | 2.06 3.29 3.65 | 0-3
+real madrid vs granada | 1.56 3.97 5.81 | 3-1
+mallorca vs athletic bilbao | 2.62 3.34 2.61 | 3-1
+leganes vs osasuna | 2.08 3.26 3.60 | 3-0
+alaves vs real sociedad | 2.32 3.12 3.21 | 2-1
+valladolid vs levante | 2.62 3.35 2.61 | 0-0

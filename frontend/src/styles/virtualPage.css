@@ -1,0 +1,41 @@
+.virtual-container {
+  width: 100%;
+  max-width: 100%;
+}
+
+/* Tabs */
+.virtual-tabs {
+  display: flex;
+  gap: 5px;
+  padding: 5px;
+  background: #0f172a;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.virtual-tabs button {
+  flex: 1;
+  padding: 10px;
+  border: none;
+  background: #1e293b;
+  color: #cbd5f5;
+  font-weight: 600;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: 0.2s;
+}
+
+.virtual-tabs button.active {
+  background: #22c55e;
+  color: #000;
+}
+
+.virtual-tabs button:hover {
+  background: #334155;
+}
+
+/* Content */
+.virtual-content {
+  padding: 5px;
+}

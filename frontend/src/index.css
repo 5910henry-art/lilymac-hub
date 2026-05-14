@@ -1,0 +1,131 @@
+@reference "tailwindcss";
+
+/* Tailwind base imports */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Smooth scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Body background and text */
+body {
+  @apply bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100 font-sans antialiased transition-colors duration-300;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-thumb {
+  @apply bg-gray-400 dark:bg-gray-700 rounded-full;
+}
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-gray-500 dark:bg-gray-600;
+}
+
+/* Container helper */
+.container {
+  @apply max-w-7xl mx-auto px-4 sm:px-6 lg:px-8;
+}
+
+/* Mobile padding fix */
+main {
+  @apply pb-16;
+}
+
+/* Accent colors */
+.text-accent {
+  @apply text-indigo-600 dark:text-indigo-400;
+}
+.bg-accent {
+  @apply bg-indigo-600 dark:bg-indigo-500 text-white;
+}
+.bg-accent:hover {
+  @apply bg-indigo-700 dark:bg-indigo-600;
+}
+
+/* Smooth card hover */
+.card {
+  @apply transition-all duration-300 transform hover:-translate-y-1 hover:shadow-xl;
+}
+
+/* Dark/light surface backgrounds */
+.bg-surface-light {
+  @apply bg-white;
+}
+.bg-surface-dark {
+  @apply bg-gray-900;
+}
+/* ---------------- Custom Green Theme ---------------- */
+
+/* Page background */
+.bg-faint-green {
+  @apply bg-[#0f2a0f] text-white;
+}
+
+/* Card backgrounds */
+.bg-card-green {
+  @apply bg-[#1f3a1f]/70;
+}
+
+/* Card hover */
+.hover\:bg-card-green-hover:hover {
+  @apply bg-[#3b7d3b]/80;
+}
+
+/* Date buttons */
+.bg-date-green {
+  @apply bg-[#1f3a1f] text-slate-200;
+}
+.bg-date-green:hover {
+  @apply bg-[#2a5c2a] text-white;
+}
+.bg-date-green-active {
+  @apply bg-gradient-to-r from-green-400 to-green-600 text-white shadow-lg;
+}
+
+/* Text accents */
+.text-green-light {
+  @apply text-green-200;
+}
+.text-green-medium {
+  @apply text-green-300;
+}
+.animate-bounce-short {
+  animation: bounceShort 0.5s;
+}
+
+@keyframes bounceShort {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.15); }
+  100% { transform: scale(1); }
+}
+/* ---------------- Bottom Navigation ---------------- */
+
+.bottom-nav {
+  @apply fixed bottom-4 left-1/2 -translate-x-1/2 z-[9999]
+  flex items-center justify-around
+  px-4 py-2 rounded-2xl
+  bg-slate-900/95 backdrop-blur
+  border border-slate-700
+  shadow-xl w-full max-w-md;
+}
+
+.bottom-nav-btn {
+  @apply flex flex-col items-center text-white text-xs px-3 py-1 transition;
+}
+
+.bottom-nav-btn:hover {
+  @apply text-green-400;
+}
+
+.bottom-nav-icon {
+  @apply text-lg;
+}
+
+.bottom-nav-label {
+  @apply text-[11px] font-medium;
+}

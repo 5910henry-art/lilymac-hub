@@ -1,0 +1,329 @@
+/* ===============================
+   PAGE
+================================ */
+
+.virtualPage{
+  background:#0b1d2b;
+  color:#fff;
+  font-family:Arial, Helvetica, sans-serif;
+  min-height:100vh;
+  padding-bottom:80px;
+}
+
+
+/* ===============================
+   ROUND TABS (TIME BAR)
+================================ */
+
+.roundTabs{
+  display:flex;
+  overflow-x:auto;
+  gap:6px;
+  padding:8px;
+  background:#081622;
+}
+
+.roundTabs button{
+  min-width:70px;
+  background:#102739;
+  border:none;
+  border-radius:6px;
+  padding:6px;
+  color:#fff;
+  font-size:12px;
+  cursor:pointer;
+}
+
+.roundTabs button small{
+  display:block;
+  opacity:.7;
+}
+
+.liveRound{
+  background:#d23b3b !important;
+}
+
+
+/* ===============================
+   MARKET TABS
+================================ */
+
+.marketTabs{
+  display:flex;
+  overflow-x:auto;
+  background:#0e2435;
+  border-bottom:1px solid #132f44;
+}
+
+.marketTabs button{
+  border:none;
+  background:none;
+  color:#cfd8e3;
+  padding:12px 16px;
+  font-size:13px;
+  cursor:pointer;
+  white-space:nowrap;
+}
+
+.marketTabs button.active{
+  color:#00ff9d;
+  border-bottom:3px solid #00ff9d;
+}
+
+
+/* ===============================
+   MATCH LIST
+================================ */
+
+.matchList{
+  width:100%;
+}
+
+
+/* ===============================
+   MATCH ROW
+================================ */
+
+.matchRow{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  padding:12px;
+  border-bottom:1px solid #162e42;
+}
+
+.matchRow:hover{
+  background:#0e2435;
+}
+
+
+/* ===============================
+   TEAMS
+================================ */
+
+.teams{
+  width:55%;
+  font-size:14px;
+}
+
+.teams div{
+  line-height:18px;
+}
+
+.teams small{
+  font-size:11px;
+  opacity:.7;
+}
+
+
+/* ===============================
+   ODDS
+================================ */
+
+.oddsRow{
+  display:flex;
+  gap:6px;
+}
+
+.oddBtn{
+  background:#1c3246;
+  border:none;
+  padding:10px 14px;
+  border-radius:6px;
+  color:#fff;
+  cursor:pointer;
+  min-width:60px;
+  text-align:center;
+  transition:0.15s;
+}
+
+.oddBtn span{
+  display:block;
+  font-size:11px;
+  opacity:.6;
+}
+
+.oddBtn b{
+  font-size:14px;
+}
+
+.oddBtn:hover{
+  background:#2d4c66;
+}
+
+
+/* ===============================
+   SELECTED BET
+================================ */
+
+.oddBtn.selected{
+  background:#ffb400;
+  color:#000;
+}
+
+
+/* ===============================
+   ODDS FLASH
+================================ */
+
+.flash-up{
+  animation:flashUp .6s;
+}
+
+.flash-down{
+  animation:flashDown .6s;
+}
+
+@keyframes flashUp{
+  0%{background:#1c3246;}
+  50%{background:#2ecc71;}
+  100%{background:#1c3246;}
+}
+
+@keyframes flashDown{
+  0%{background:#1c3246;}
+  50%{background:#e74c3c;}
+  100%{background:#1c3246;}
+}
+
+
+/* ===============================
+   LIVE EVENTS
+================================ */
+
+.liveEvents{
+  background:#071421;
+  padding:12px;
+  border-top:1px solid #152f45;
+}
+
+.liveEvents h3{
+  margin-bottom:8px;
+}
+
+.liveEvents div{
+  font-size:12px;
+  padding:4px 0;
+}
+
+
+/* ===============================
+   BET SLIP PANEL
+================================ */
+
+.betSlipPanel{
+  position:fixed;
+  bottom:60px;
+  left:0;
+  right:0;
+  background:#071421;
+  border-top:2px solid #162e42;
+  padding:12px;
+}
+
+.betSlipPanel input {
+  width: 100%;
+  padding: 12px;
+  font-size: 16px;
+  color: #000 !important;         
+  background: #ffffff !important;  
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  outline: none;
+  margin-bottom: 10px;
+}
+.betSlipPanel button{
+  width:100%;
+  padding:12px;
+  margin-top:10px;
+  background:#00c47a;
+  border:none;
+  border-radius:6px;
+  color:#fff;
+  font-weight:bold;
+}
+
+/* Placeholder visibility */
+.betSlipPanel input::placeholder {
+  color: #666;
+}
+
+/* ===============================
+   FLOATING BET SLIP BAR
+================================ */
+
+.floatingSlip{
+  position:fixed;
+  bottom:0;
+  left:0;
+  right:0;
+  height:60px;
+  background:#06131e;
+  display:flex;
+  align-items:center;
+  padding:10px;
+  justify-content:space-between;
+  border-top:1px solid #152f45;
+}
+
+.slipCount{
+  background:#ffb400;
+  color:#000;
+  width:32px;
+  height:32px;
+  border-radius:50%;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-weight:bold;
+}
+
+.slipInfo{
+  flex:1;
+  margin-left:10px;
+}
+
+.slipInfo small{
+  opacity:.7;
+}
+
+.floatingSlip button{
+  background:#2c3e50;
+  border:none;
+  padding:10px 18px;
+  color:#fff;
+  border-radius:6px;
+  cursor:pointer;
+}
+
+
+/* ===============================
+   MOBILE RESPONSIVE
+================================ */
+
+@media(max-width:768px){
+
+  .teams{
+    font-size:13px;
+  }
+
+  .oddBtn{
+    min-width:52px;
+    padding:8px;
+  }
+
+}
+.preLiveRound {
+  background-color: #28a745 !important;  
+  color: white !important;
+  border: 1px solid #1e7e34 !important;
+}
+
+.liveTicker{
+  font-size:11px;
+  margin-top:4px;
+  color:#ffd54a;
+}
+.roundTabs button.selectedRound {
+  border: 2px solid #1E90FF; /* DodgerBlue border */
+}

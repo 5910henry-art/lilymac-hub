@@ -1,0 +1,1057 @@
+week,home_team,away_team,home_goals,away_goals,result
+1,Alaves,Athletic Bilbao,0,0,D
+1,Alaves,Levante,1,1,D
+1,Alaves,Real Betis,2,2,D
+1,Almeria,Getafe,2,2,D
+1,Atletico Madrid,Real Madrid,1,2,A
+1,Barcelona,Real Sociedad,3,1,H
+1,Celta Vigo,Sevilla,3,1,H
+1,Espanyol,Athletic Bilbao,2,0,H
+1,Getafe,Leganes,0,0,D
+1,Getafe,Levante,1,0,H
+1,Granada,Almeria,4,0,H
+1,Granada,Barcelona,3,2,H
+1,Granada,Villarreal,3,2,H
+1,Leganes,Valladolid,1,0,H
+1,Leganes,Villarreal,3,0,H
+1,Levante,Sevilla,0,1,A
+1,Mallorca,Atletico Madrid,2,0,H
+1,Mallorca,Barcelona,1,2,A
+1,Osasuna,Espanyol,2,4,A
+1,Osasuna,Mallorca,2,1,H
+1,Osasuna,Valencia,0,3,A
+1,Real Betis,Athletic Bilbao,0,1,A
+1,Real Betis,Celta Vigo,5,1,H
+1,Real Madrid,Atletico Madrid,0,4,A
+1,Real Sociedad,Espanyol,2,1,H
+1,Sevilla,Real Madrid,3,0,H
+1,Valencia,Almeria,2,1,H
+1,Valencia,Real Sociedad,3,2,H
+1,Valladolid,Celta Vigo,0,2,A
+1,Villarreal,Valladolid,3,0,H
+2,Alaves,Osasuna,3,1,H
+2,Alaves,Villarreal,0,1,A
+2,Almeria,Atletico Madrid,0,1,A
+2,Almeria,Leganes,2,2,D
+2,Athletic Bilbao,Getafe,2,2,D
+2,Athletic Bilbao,Real Sociedad,0,1,A
+2,Athletic Bilbao,Valencia,0,1,A
+2,Atletico Madrid,Barcelona,0,0,D
+2,Atletico Madrid,Barcelona,0,1,A
+2,Barcelona,Osasuna,2,0,H
+2,Celta Vigo,Granada,2,0,H
+2,Celta Vigo,Mallorca,4,0,H
+2,Espanyol,Celta Vigo,0,0,D
+2,Espanyol,Levante,0,0,D
+2,Getafe,Alaves,1,3,A
+2,Granada,Osasuna,0,4,A
+2,Leganes,Mallorca,2,1,H
+2,Levante,Mallorca,0,1,A
+2,Real Betis,Sevilla,2,1,H
+2,Real Madrid,Getafe,1,1,D
+2,Real Madrid,Granada,4,2,H
+2,Real Sociedad,Almeria,1,0,H
+2,Real Sociedad,Levante,1,1,D
+2,Sevilla,Leganes,1,1,D
+2,Sevilla,Real Betis,3,0,H
+2,Valencia,Valladolid,1,3,A
+2,Valladolid,Real Madrid,2,3,A
+2,Valladolid,Valencia,2,1,H
+2,Villarreal,Espanyol,1,2,A
+2,Villarreal,Real Betis,0,0,D
+3,Alaves,Osasuna,3,1,H
+3,Alaves,Real Betis,2,2,D
+3,Almeria,Athletic Bilbao,0,2,A
+3,Almeria,Leganes,2,2,D
+3,Athletic Bilbao,Getafe,2,2,D
+3,Atletico Madrid,Barcelona,0,1,A
+3,Atletico Madrid,Real Madrid,0,1,A
+3,Atletico Madrid,Valladolid,2,1,H
+3,Barcelona,Celta Vigo,4,1,H
+3,Barcelona,Real Sociedad,3,1,H
+3,Barcelona,Valladolid,4,1,H
+3,Celta Vigo,Granada,2,3,A
+3,Celta Vigo,Mallorca,4,0,H
+3,Espanyol,Almeria,2,3,A
+3,Espanyol,Athletic Bilbao,2,0,H
+3,Espanyol,Mallorca,0,2,A
+3,Getafe,Alaves,1,0,H
+3,Getafe,Almeria,0,1,A
+3,Getafe,Levante,1,0,H
+3,Getafe,Villarreal,1,0,H
+3,Granada,Almeria,4,0,H
+3,Granada,Sevilla,1,2,A
+3,Leganes,Barcelona,0,1,A
+3,Leganes,Real Madrid,1,1,D
+3,Leganes,Villarreal,3,0,H
+3,Levante,Atletico Madrid,0,0,D
+3,Levante,Real Sociedad,1,1,D
+3,Levante,Valencia,0,1,A
+3,Mallorca,Atletico Madrid,2,0,H
+3,Mallorca,Real Madrid,1,1,D
+3,Mallorca,Valencia,1,1,D
+3,Osasuna,Celta Vigo,1,2,A
+3,Osasuna,Real Betis,2,3,A
+3,Osasuna,Valencia,0,3,A
+3,Osasuna,Villarreal,0,0,D
+3,Real Betis,Espanyol,0,2,A
+3,Real Betis,Leganes,1,1,D
+3,Real Betis,Sevilla,2,1,H
+3,Real Madrid,Granada,4,2,H
+3,Real Sociedad,Athletic Bilbao,1,1,D
+3,Real Sociedad,Levante,1,1,D
+3,Real Sociedad,Sevilla,0,2,A
+3,Sevilla,Real Madrid,3,0,H
+3,Valencia,Alaves,2,0,H
+3,Valencia,Valladolid,1,3,A
+3,Valladolid,Alaves,0,2,A
+3,Valladolid,Celta Vigo,0,2,A
+3,Villarreal,Athletic Bilbao,1,1,D
+3,Villarreal,Espanyol,1,2,A
+4,Alaves,Atletico Madrid,1,0,H
+4,Alaves,Mallorca,2,2,D
+4,Almeria,Getafe,1,3,A
+4,Almeria,Mallorca,0,3,A
+4,Athletic Bilbao,Alaves,1,1,D
+4,Athletic Bilbao,Levante,0,0,D
+4,Atletico Madrid,Athletic Bilbao,2,3,A
+4,Celta Vigo,Leganes,2,0,H
+4,Celta Vigo,Levante,1,1,D
+4,Espanyol,Granada,3,1,H
+4,Espanyol,Real Madrid,1,5,A
+4,Getafe,Atletico Madrid,2,4,A
+4,Granada,Valladolid,0,0,D
+4,Levante,Osasuna,2,0,H
+4,Mallorca,Leganes,0,2,A
+4,Osasuna,Valladolid,1,1,D
+4,Real Betis,Almeria,1,1,D
+4,Real Betis,Granada,3,0,H
+4,Real Madrid,Barcelona,1,1,D
+4,Real Madrid,Espanyol,0,0,D
+4,Real Sociedad,Celta Vigo,1,2,A
+4,Real Sociedad,Real Betis,1,4,A
+4,Sevilla,Barcelona,1,1,D
+4,Sevilla,Leganes,1,0,H
+4,Sevilla,Osasuna,2,0,H
+4,Valencia,Barcelona,3,3,D
+4,Valladolid,Getafe,2,2,D
+4,Villarreal,Real Sociedad,1,1,D
+4,Villarreal,Valencia,1,1,D
+4,Villarreal,Valencia,3,1,H
+5,Alaves,Real Betis,0,1,A
+5,Almeria,Valencia,1,1,D
+5,Athletic Bilbao,Celta Vigo,0,1,A
+5,Atletico Madrid,Real Sociedad,3,0,H
+5,Atletico Madrid,Villarreal,3,0,H
+5,Atletico Madrid,Villarreal,4,2,H
+5,Barcelona,Alaves,3,1,H
+5,Barcelona,Almeria,1,0,H
+5,Barcelona,Espanyol,1,0,H
+5,Celta Vigo,Villarreal,1,1,D
+5,Espanyol,Sevilla,2,3,A
+5,Getafe,Alaves,1,0,H
+5,Getafe,Real Madrid,2,1,H
+5,Granada,Real Sociedad,2,0,H
+5,Leganes,Granada,1,1,D
+5,Leganes,Osasuna,2,1,H
+5,Leganes,Sevilla,0,1,A
+5,Levante,Sevilla,3,2,H
+5,Levante,Valencia,0,0,D
+5,Mallorca,Athletic Bilbao,2,1,H
+5,Mallorca,Osasuna,0,0,D
+5,Mallorca,Valladolid,0,0,D
+5,Osasuna,Espanyol,2,1,H
+5,Real Betis,Levante,1,2,A
+5,Real Madrid,Celta Vigo,0,1,A
+5,Real Madrid,Granada,4,2,H
+5,Real Sociedad,Almeria,1,1,D
+5,Valencia,Athletic Bilbao,2,0,H
+5,Valladolid,Getafe,1,2,A
+5,Valladolid,Real Betis,1,3,A
+6,Alaves,Levante,1,3,A
+6,Alaves,Mallorca,0,1,A
+6,Almeria,Atletico Madrid,0,1,A
+6,Almeria,Celta Vigo,1,1,D
+6,Athletic Bilbao,Atletico Madrid,0,2,A
+6,Athletic Bilbao,Real Betis,1,0,H
+6,Celta Vigo,Leganes,2,0,H
+6,Celta Vigo,Villarreal,2,0,H
+6,Espanyol,Leganes,1,2,A
+6,Espanyol,Levante,0,3,A
+6,Granada,Barcelona,1,2,A
+6,Granada,Espanyol,0,2,A
+6,Levante,Granada,3,0,H
+6,Osasuna,Barcelona,0,0,D
+6,Osasuna,Real Madrid,1,0,H
+6,Real Betis,Leganes,2,1,H
+6,Real Betis,Mallorca,3,1,H
+6,Real Madrid,Real Sociedad,3,0,H
+6,Real Sociedad,Osasuna,1,1,D
+6,Real Sociedad,Valladolid,2,1,H
+6,Sevilla,Getafe,2,2,D
+6,Sevilla,Getafe,3,1,H
+6,Sevilla,Real Madrid,1,1,D
+6,Valencia,Alaves,1,4,A
+6,Valencia,Athletic Bilbao,2,1,H
+6,Valencia,Atletico Madrid,0,1,A
+6,Valladolid,Barcelona,1,4,A
+6,Valladolid,Mallorca,4,1,H
+6,Villarreal,Almeria,2,2,D
+6,Villarreal,Getafe,2,0,H
+7,Almeria,Sevilla,3,1,H
+7,Athletic Bilbao,Alaves,1,0,H
+7,Athletic Bilbao,Almeria,0,0,D
+7,Atletico Madrid,Athletic Bilbao,2,2,D
+7,Atletico Madrid,Getafe,3,3,D
+7,Atletico Madrid,Real Madrid,1,1,D
+7,Barcelona,Alaves,0,0,D
+7,Barcelona,Espanyol,0,0,D
+7,Barcelona,Valladolid,3,0,H
+7,Celta Vigo,Almeria,1,2,A
+7,Celta Vigo,Valladolid,0,2,A
+7,Espanyol,Leganes,2,1,H
+7,Getafe,Granada,1,0,H
+7,Getafe,Valencia,0,0,D
+7,Granada,Real Betis,4,1,H
+7,Leganes,Real Sociedad,1,2,A
+7,Leganes,Villarreal,1,0,H
+7,Levante,Granada,3,0,H
+7,Levante,Osasuna,1,0,H
+7,Mallorca,Real Betis,2,0,H
+7,Mallorca,Valencia,1,2,A
+7,Mallorca,Villarreal,2,1,H
+7,Osasuna,Alaves,0,2,A
+7,Osasuna,Levante,3,1,H
+7,Real Madrid,Celta Vigo,3,2,H
+7,Real Madrid,Espanyol,2,0,H
+7,Real Sociedad,Sevilla,0,1,A
+7,Sevilla,Real Sociedad,0,0,D
+7,Valladolid,Athletic Bilbao,1,2,A
+7,Villarreal,Valencia,1,0,H
+8,Alaves,Celta Vigo,3,1,H
+8,Alaves,Villarreal,3,1,H
+8,Almeria,Mallorca,3,1,H
+8,Athletic Bilbao,Granada,3,2,H
+8,Athletic Bilbao,Sevilla,0,0,D
+8,Atletico Madrid,Getafe,0,0,D
+8,Celta Vigo,Barcelona,1,3,A
+8,Espanyol,Almeria,0,3,A
+8,Espanyol,Real Sociedad,4,0,H
+8,Granada,Getafe,0,3,A
+8,Granada,Real Sociedad,1,1,D
+8,Leganes,Getafe,1,2,A
+8,Leganes,Real Madrid,2,1,H
+8,Levante,Leganes,2,1,H
+8,Mallorca,Barcelona,1,3,A
+8,Osasuna,Athletic Bilbao,3,3,D
+8,Osasuna,Levante,2,2,D
+8,Real Betis,Espanyol,0,1,A
+8,Real Betis,Osasuna,3,1,H
+8,Real Betis,Valladolid,3,3,D
+8,Real Madrid,Celta Vigo,2,0,H
+8,Real Sociedad,Real Madrid,2,0,H
+8,Sevilla,Atletico Madrid,1,1,D
+8,Valencia,Almeria,2,0,H
+8,Valencia,Atletico Madrid,1,4,A
+8,Valencia,Mallorca,5,1,H
+8,Valladolid,Levante,2,1,H
+8,Valladolid,Sevilla,3,1,H
+8,Villarreal,Alaves,0,0,D
+8,Villarreal,Barcelona,2,1,H
+9,Almeria,Alaves,0,0,D
+9,Almeria,Real Sociedad,1,1,D
+9,Athletic Bilbao,Valladolid,1,0,H
+9,Atletico Madrid,Almeria,2,1,H
+9,Atletico Madrid,Granada,3,2,H
+9,Barcelona,Leganes,2,2,D
+9,Barcelona,Real Betis,4,2,H
+9,Barcelona,Valencia,1,0,H
+9,Celta Vigo,Sevilla,2,2,D
+9,Celta Vigo,Villarreal,0,1,A
+9,Espanyol,Athletic Bilbao,0,2,A
+9,Getafe,Athletic Bilbao,0,2,A
+9,Getafe,Espanyol,3,1,H
+9,Getafe,Osasuna,1,2,A
+9,Leganes,Real Betis,3,0,H
+9,Levante,Celta Vigo,0,0,D
+9,Levante,Mallorca,0,1,A
+9,Mallorca,Alaves,0,0,D
+9,Mallorca,Atletico Madrid,0,1,A
+9,Osasuna,Granada,3,2,H
+9,Real Madrid,Levante,3,2,H
+9,Real Madrid,Villarreal,1,2,A
+9,Real Sociedad,Granada,0,1,A
+9,Real Sociedad,Leganes,2,2,D
+9,Sevilla,Alaves,0,1,A
+9,Sevilla,Real Betis,2,1,H
+9,Valencia,Real Madrid,2,2,D
+9,Valladolid,Espanyol,3,1,H
+9,Valladolid,Valencia,0,1,A
+9,Villarreal,Osasuna,1,1,D
+10,Alaves,Atletico Madrid,1,1,D
+10,Alaves,Espanyol,1,1,D
+10,Alaves,Real Madrid,0,0,D
+10,Almeria,Valladolid,1,0,H
+10,Athletic Bilbao,Osasuna,0,1,A
+10,Atletico Madrid,Barcelona,3,0,H
+10,Barcelona,Levante,3,1,H
+10,Celta Vigo,Getafe,1,3,A
+10,Espanyol,Real Sociedad,0,0,D
+10,Getafe,Mallorca,2,1,H
+10,Granada,Athletic Bilbao,2,0,H
+10,Granada,Celta Vigo,0,1,A
+10,Granada,Leganes,0,0,D
+10,Leganes,Atletico Madrid,2,2,D
+10,Leganes,Levante,1,1,D
+10,Levante,Almeria,0,1,A
+10,Mallorca,Athletic Bilbao,1,1,D
+10,Osasuna,Almeria,1,3,A
+10,Osasuna,Real Sociedad,2,4,A
+10,Real Betis,Espanyol,1,1,D
+10,Real Betis,Getafe,1,1,D
+10,Real Betis,Real Madrid,0,0,D
+10,Real Madrid,Barcelona,1,2,A
+10,Real Sociedad,Valladolid,1,1,D
+10,Sevilla,Valencia,2,2,D
+10,Valencia,Celta Vigo,2,4,A
+10,Valencia,Sevilla,0,0,D
+10,Valladolid,Villarreal,0,1,A
+10,Villarreal,Mallorca,1,0,H
+10,Villarreal,Sevilla,2,2,D
+11,Alaves,Real Sociedad,1,0,H
+11,Alaves,Sevilla,2,3,A
+11,Almeria,Real Betis,2,4,A
+11,Almeria,Valladolid,1,0,H
+11,Athletic Bilbao,Barcelona,3,0,H
+11,Athletic Bilbao,Osasuna,3,1,H
+11,Atletico Madrid,Espanyol,2,0,H
+11,Atletico Madrid,Mallorca,0,0,D
+11,Barcelona,Getafe,3,1,H
+11,Barcelona,Villarreal,0,0,D
+11,Celta Vigo,Atletico Madrid,0,4,A
+11,Celta Vigo,Leganes,2,0,H
+11,Espanyol,Valencia,1,0,H
+11,Espanyol,Villarreal,1,0,H
+11,Getafe,Leganes,3,1,H
+11,Granada,Real Betis,2,3,A
+11,Leganes,Osasuna,0,2,A
+11,Levante,Real Betis,0,0,D
+11,Levante,Real Madrid,0,1,A
+11,Mallorca,Athletic Bilbao,1,0,H
+11,Real Madrid,Granada,0,1,A
+11,Real Madrid,Osasuna,1,2,A
+11,Real Sociedad,Celta Vigo,1,4,A
+11,Real Sociedad,Getafe,1,0,H
+11,Sevilla,Almeria,2,1,H
+11,Sevilla,Valencia,1,4,A
+11,Valencia,Granada,1,2,A
+11,Valladolid,Alaves,1,0,H
+11,Valladolid,Levante,0,1,A
+11,Villarreal,Mallorca,1,2,A
+12,Alaves,Sevilla,0,2,A
+12,Almeria,Espanyol,1,1,D
+12,Athletic Bilbao,Leganes,2,1,H
+12,Atletico Madrid,Sevilla,0,1,A
+12,Barcelona,Levante,4,1,H
+12,Barcelona,Villarreal,2,2,D
+12,Celta Vigo,Athletic Bilbao,0,2,A
+12,Espanyol,Celta Vigo,2,0,H
+12,Getafe,Atletico Madrid,0,1,A
+12,Getafe,Celta Vigo,0,0,D
+12,Granada,Alaves,2,1,H
+12,Granada,Almeria,2,1,H
+12,Leganes,Real Sociedad,0,0,D
+12,Leganes,Valencia,1,2,A
+12,Levante,Alaves,0,0,D
+12,Levante,Athletic Bilbao,2,1,H
+12,Mallorca,Almeria,1,1,D
+12,Mallorca,Barcelona,1,1,D
+12,Mallorca,Valladolid,1,2,A
+12,Osasuna,Real Betis,1,0,H
+12,Osasuna,Real Madrid,1,0,H
+12,Osasuna,Sevilla,1,1,D
+12,Real Betis,Real Sociedad,2,3,A
+12,Real Betis,Valladolid,0,0,D
+12,Real Madrid,Getafe,2,1,H
+12,Valencia,Espanyol,0,1,A
+12,Valencia,Granada,1,0,H
+12,Valladolid,Real Madrid,0,1,A
+12,Villarreal,Atletico Madrid,3,0,H
+12,Villarreal,Real Sociedad,2,0,H
+13,Alaves,Leganes,0,0,D
+13,Alaves,Real Betis,3,1,H
+13,Almeria,Barcelona,1,0,H
+13,Almeria,Osasuna,2,1,H
+13,Athletic Bilbao,Leganes,2,2,D
+13,Athletic Bilbao,Real Betis,3,3,D
+13,Atletico Madrid,Real Sociedad,1,0,H
+13,Barcelona,Athletic Bilbao,2,1,H
+13,Celta Vigo,Getafe,2,1,H
+13,Celta Vigo,Mallorca,1,3,A
+13,Espanyol,Alaves,2,2,D
+13,Espanyol,Atletico Madrid,3,1,H
+13,Getafe,Barcelona,1,3,A
+13,Granada,Almeria,3,3,D
+13,Levante,Villarreal,1,1,D
+13,Osasuna,Granada,2,0,H
+13,Osasuna,Valencia,1,2,A
+13,Real Betis,Celta Vigo,2,2,D
+13,Real Madrid,Leganes,0,3,A
+13,Real Madrid,Mallorca,3,0,H
+13,Real Sociedad,Real Madrid,2,1,H
+13,Real Sociedad,Valencia,1,3,A
+13,Sevilla,Getafe,0,1,A
+13,Sevilla,Mallorca,2,2,D
+13,Sevilla,Valladolid,2,0,H
+13,Valencia,Espanyol,2,0,H
+13,Valladolid,Atletico Madrid,0,1,A
+13,Valladolid,Granada,0,1,A
+13,Villarreal,Levante,0,0,D
+13,Villarreal,Levante,2,0,H
+14,Alaves,Granada,2,1,H
+14,Almeria,Osasuna,2,1,H
+14,Athletic Bilbao,Real Madrid,2,2,D
+14,Athletic Bilbao,Villarreal,3,2,H
+14,Atletico Madrid,Real Sociedad,0,1,A
+14,Atletico Madrid,Sevilla,1,1,D
+14,Barcelona,Celta Vigo,3,1,H
+14,Barcelona,Real Madrid,0,0,D
+14,Barcelona,Real Sociedad,2,1,H
+14,Celta Vigo,Valencia,2,0,H
+14,Espanyol,Alaves,1,1,D
+14,Getafe,Espanyol,0,0,D
+14,Getafe,Valencia,2,1,H
+14,Granada,Alaves,0,3,A
+14,Leganes,Almeria,2,2,D
+14,Leganes,Osasuna,1,0,H
+14,Leganes,Real Betis,0,0,D
+14,Levante,Almeria,1,2,A
+14,Levante,Getafe,0,2,A
+14,Mallorca,Espanyol,2,2,D
+14,Mallorca,Sevilla,1,1,D
+14,Mallorca,Sevilla,1,2,A
+14,Osasuna,Valladolid,1,1,D
+14,Real Betis,Atletico Madrid,3,2,H
+14,Real Betis,Villarreal,0,3,A
+14,Real Madrid,Athletic Bilbao,4,0,H
+14,Real Sociedad,Celta Vigo,2,1,H
+14,Valencia,Levante,1,0,H
+14,Valladolid,Granada,3,2,H
+14,Villarreal,Valladolid,0,0,D
+15,Alaves,Getafe,1,1,D
+15,Alaves,Osasuna,3,0,H
+15,Almeria,Athletic Bilbao,3,1,H
+15,Almeria,Real Madrid,3,3,D
+15,Athletic Bilbao,Barcelona,0,3,A
+15,Celta Vigo,Almeria,0,1,A
+15,Celta Vigo,Athletic Bilbao,0,1,A
+15,Celta Vigo,Atletico Madrid,0,2,A
+15,Espanyol,Atletico Madrid,1,3,A
+15,Espanyol,Mallorca,2,2,D
+15,Getafe,Villarreal,0,1,A
+15,Granada,Mallorca,0,2,A
+15,Granada,Mallorca,1,4,A
+15,Levante,Atletico Madrid,1,4,A
+15,Osasuna,Alaves,0,5,A
+15,Osasuna,Espanyol,2,1,H
+15,Real Betis,Real Madrid,1,1,D
+15,Real Madrid,Levante,3,2,H
+15,Real Sociedad,Getafe,1,0,H
+15,Real Sociedad,Levante,1,0,H
+15,Sevilla,Barcelona,0,0,D
+15,Sevilla,Barcelona,1,3,A
+15,Sevilla,Valladolid,0,0,D
+15,Valencia,Leganes,1,0,H
+15,Valencia,Real Betis,1,2,A
+15,Valencia,Real Sociedad,2,0,H
+15,Valladolid,Leganes,2,1,H
+15,Valladolid,Leganes,2,2,D
+15,Villarreal,Granada,2,1,H
+15,Villarreal,Real Betis,1,2,A
+16,Alaves,Celta Vigo,0,1,A
+16,Athletic Bilbao,Almeria,3,0,H
+16,Athletic Bilbao,Real Madrid,0,1,A
+16,Atletico Madrid,Granada,3,0,H
+16,Atletico Madrid,Real Betis,2,0,H
+16,Atletico Madrid,Valencia,2,4,A
+16,Barcelona,Espanyol,1,0,H
+16,Barcelona,Granada,3,0,H
+16,Barcelona,Real Betis,4,1,H
+16,Celta Vigo,Sevilla,2,2,D
+16,Espanyol,Valladolid,0,0,D
+16,Getafe,Levante,0,0,D
+16,Getafe,Osasuna,2,2,D
+16,Getafe,Real Sociedad,0,1,A
+16,Granada,Valencia,2,3,A
+16,Leganes,Alaves,3,2,H
+16,Leganes,Almeria,0,1,A
+16,Levante,Athletic Bilbao,1,4,A
+16,Levante,Sevilla,2,0,H
+16,Mallorca,Leganes,1,1,D
+16,Mallorca,Osasuna,1,2,A
+16,Mallorca,Real Sociedad,2,4,A
+16,Osasuna,Villarreal,2,0,H
+16,Real Betis,Celta Vigo,2,0,H
+16,Real Madrid,Valencia,1,0,H
+16,Real Madrid,Valladolid,2,1,H
+16,Real Sociedad,Alaves,1,1,D
+16,Valladolid,Espanyol,0,1,A
+16,Villarreal,Almeria,2,2,D
+16,Villarreal,Sevilla,0,1,A
+17,Alaves,Atletico Madrid,1,4,A
+17,Alaves,Real Madrid,0,0,D
+17,Almeria,Real Betis,2,4,A
+17,Almeria,Real Madrid,2,2,D
+17,Athletic Bilbao,Getafe,2,1,H
+17,Atletico Madrid,Granada,3,0,H
+17,Celta Vigo,Mallorca,1,0,H
+17,Espanyol,Celta Vigo,0,0,D
+17,Espanyol,Sevilla,0,1,A
+17,Granada,Levante,3,1,H
+17,Granada,Valladolid,2,0,H
+17,Leganes,Alaves,2,3,A
+17,Leganes,Barcelona,0,2,A
+17,Levante,Mallorca,1,2,A
+17,Mallorca,Espanyol,2,0,H
+17,Osasuna,Atletico Madrid,1,1,D
+17,Osasuna,Real Sociedad,1,1,D
+17,Real Betis,Getafe,1,2,A
+17,Real Betis,Levante,2,1,H
+17,Real Madrid,Villarreal,2,1,H
+17,Real Sociedad,Barcelona,1,1,D
+17,Real Sociedad,Villarreal,2,1,H
+17,Sevilla,Athletic Bilbao,1,1,D
+17,Valencia,Barcelona,1,1,D
+17,Valencia,Celta Vigo,1,3,A
+17,Valencia,Osasuna,0,1,A
+17,Valladolid,Almeria,1,2,A
+17,Valladolid,Getafe,1,1,D
+17,Villarreal,Leganes,1,1,D
+18,Almeria,Alaves,1,3,A
+18,Almeria,Real Madrid,2,3,A
+18,Athletic Bilbao,Granada,3,0,H
+18,Athletic Bilbao,Valladolid,2,2,D
+18,Atletico Madrid,Celta Vigo,4,2,H
+18,Atletico Madrid,Osasuna,3,0,H
+18,Barcelona,Almeria,1,0,H
+18,Barcelona,Espanyol,1,4,A
+18,Barcelona,Levante,4,2,H
+18,Celta Vigo,Alaves,0,3,A
+18,Celta Vigo,Real Sociedad,0,0,D
+18,Getafe,Granada,4,0,H
+18,Getafe,Mallorca,1,2,A
+18,Getafe,Real Betis,1,1,D
+18,Leganes,Valencia,2,1,H
+18,Levante,Leganes,1,1,D
+18,Levante,Valencia,1,1,D
+18,Mallorca,Leganes,0,1,A
+18,Mallorca,Real Betis,2,1,H
+18,Osasuna,Atletico Madrid,3,0,H
+18,Real Betis,Valencia,3,0,H
+18,Real Madrid,Alaves,2,2,D
+18,Real Madrid,Villarreal,2,1,H
+18,Real Sociedad,Athletic Bilbao,0,1,A
+18,Real Sociedad,Valladolid,2,1,H
+18,Sevilla,Espanyol,2,2,D
+18,Sevilla,Granada,1,0,H
+18,Valladolid,Osasuna,2,0,H
+18,Villarreal,Espanyol,2,2,D
+18,Villarreal,Sevilla,1,1,D
+19,Alaves,Barcelona,1,2,A
+19,Alaves,Valencia,3,1,H
+19,Alaves,Valladolid,3,3,D
+19,Almeria,Levante,2,1,H
+19,Athletic Bilbao,Real Betis,1,0,H
+19,Athletic Bilbao,Villarreal,0,1,A
+19,Atletico Madrid,Leganes,2,2,D
+19,Barcelona,Getafe,4,1,H
+19,Celta Vigo,Valladolid,2,1,H
+19,Espanyol,Athletic Bilbao,2,2,D
+19,Espanyol,Levante,3,2,H
+19,Getafe,Osasuna,1,1,D
+19,Granada,Espanyol,0,0,D
+19,Granada,Mallorca,1,0,H
+19,Granada,Villarreal,2,3,A
+19,Leganes,Athletic Bilbao,2,0,H
+19,Leganes,Atletico Madrid,1,3,A
+19,Levante,Celta Vigo,0,0,D
+19,Mallorca,Real Sociedad,0,5,A
+19,Osasuna,Celta Vigo,0,1,A
+19,Osasuna,Sevilla,2,1,H
+19,Real Betis,Barcelona,1,2,A
+19,Real Betis,Real Sociedad,4,1,H
+19,Real Madrid,Mallorca,4,2,H
+19,Real Madrid,Real Betis,2,1,H
+19,Real Sociedad,Sevilla,1,3,A
+19,Sevilla,Almeria,3,1,H
+19,Valencia,Getafe,1,1,D
+19,Valencia,Real Madrid,2,0,H
+19,Valladolid,Atletico Madrid,0,2,A
+19,Villarreal,Almeria,1,0,H
+20,Almeria,Granada,2,2,D
+20,Almeria,Valencia,2,2,D
+20,Athletic Bilbao,Alaves,2,3,A
+20,Athletic Bilbao,Espanyol,1,0,H
+20,Athletic Bilbao,Real Betis,1,0,H
+20,Atletico Madrid,Mallorca,1,0,H
+20,Atletico Madrid,Real Madrid,3,0,H
+20,Barcelona,Granada,2,0,H
+20,Barcelona,Mallorca,0,2,A
+20,Celta Vigo,Real Betis,0,4,A
+20,Celta Vigo,Valladolid,1,1,D
+20,Espanyol,Osasuna,3,0,H
+20,Espanyol,Real Sociedad,1,0,H
+20,Getafe,Almeria,0,1,A
+20,Leganes,Getafe,0,0,D
+20,Levante,Alaves,2,2,D
+20,Levante,Getafe,1,1,D
+20,Mallorca,Osasuna,4,1,H
+20,Real Betis,Alaves,3,2,H
+20,Real Madrid,Atletico Madrid,2,2,D
+20,Real Madrid,Sevilla,2,0,H
+20,Real Sociedad,Barcelona,3,3,D
+20,Real Sociedad,Valencia,1,1,D
+20,Sevilla,Celta Vigo,2,0,H
+20,Sevilla,Levante,1,1,D
+20,Valencia,Osasuna,3,0,H
+20,Valladolid,Leganes,2,0,H
+20,Valladolid,Villarreal,1,2,A
+20,Villarreal,Granada,2,0,H
+20,Villarreal,Leganes,0,0,D
+21,Alaves,Getafe,0,1,A
+21,Almeria,Real Sociedad,0,2,A
+21,Atletico Madrid,Almeria,3,0,H
+21,Barcelona,Atletico Madrid,1,0,H
+21,Celta Vigo,Espanyol,1,1,D
+21,Getafe,Real Madrid,2,2,D
+21,Granada,Celta Vigo,0,1,A
+21,Leganes,Sevilla,1,2,A
+21,Levante,Espanyol,2,2,D
+21,Mallorca,Leganes,0,0,D
+21,Mallorca,Levante,3,0,H
+21,Osasuna,Barcelona,0,1,A
+21,Osasuna,Granada,2,1,H
+21,Real Betis,Sevilla,0,1,A
+21,Real Betis,Villarreal,0,1,A
+21,Real Madrid,Valladolid,1,1,D
+21,Real Sociedad,Athletic Bilbao,1,1,D
+21,Valencia,Athletic Bilbao,0,2,A
+21,Valencia,Valladolid,0,1,A
+21,Villarreal,Alaves,1,2,A
+22,Alaves,Valencia,0,0,D
+22,Almeria,Getafe,0,2,A
+22,Athletic Bilbao,Almeria,2,0,H
+22,Athletic Bilbao,Villarreal,2,0,H
+22,Atletico Madrid,Levante,2,1,H
+22,Barcelona,Leganes,0,1,A
+22,Barcelona,Valladolid,2,1,H
+22,Celta Vigo,Granada,2,1,H
+22,Celta Vigo,Osasuna,1,0,H
+22,Espanyol,Leganes,1,1,D
+22,Espanyol,Real Betis,1,2,A
+22,Getafe,Mallorca,3,2,H
+22,Real Betis,Valencia,0,0,D
+22,Real Madrid,Mallorca,4,2,H
+22,Real Sociedad,Alaves,2,0,H
+22,Real Sociedad,Levante,3,3,D
+22,Sevilla,Granada,0,0,D
+22,Sevilla,Real Madrid,1,1,D
+22,Valladolid,Atletico Madrid,2,2,D
+22,Villarreal,Osasuna,1,0,H
+23,Alaves,Athletic Bilbao,2,0,H
+23,Alaves,Valladolid,0,0,D
+23,Almeria,Espanyol,2,2,D
+23,Almeria,Real Betis,2,2,D
+23,Athletic Bilbao,Atletico Madrid,2,0,H
+23,Athletic Bilbao,Real Sociedad,2,1,H
+23,Atletico Madrid,Alaves,3,2,H
+23,Atletico Madrid,Levante,3,2,H
+23,Barcelona,Atletico Madrid,1,2,A
+23,Barcelona,Real Madrid,1,0,H
+23,Barcelona,Valencia,0,2,A
+23,Celta Vigo,Barcelona,2,2,D
+23,Celta Vigo,Osasuna,2,0,H
+23,Espanyol,Real Madrid,2,3,A
+23,Espanyol,Villarreal,5,1,H
+23,Getafe,Almeria,2,1,H
+23,Getafe,Athletic Bilbao,1,1,D
+23,Getafe,Atletico Madrid,1,0,H
+23,Getafe,Valladolid,3,2,H
+23,Granada,Espanyol,2,0,H
+23,Granada,Real Betis,1,2,A
+23,Granada,Real Madrid,2,1,H
+23,Leganes,Almeria,1,0,H
+23,Leganes,Celta Vigo,2,1,H
+23,Leganes,Granada,2,1,H
+23,Leganes,Sevilla,0,1,A
+23,Levante,Athletic Bilbao,0,1,A
+23,Levante,Celta Vigo,1,0,H
+23,Levante,Real Sociedad,0,1,A
+23,Mallorca,Alaves,1,1,D
+23,Mallorca,Almeria,2,2,D
+23,Mallorca,Celta Vigo,0,1,A
+23,Osasuna,Alaves,1,2,A
+23,Osasuna,Sevilla,1,2,A
+23,Real Betis,Osasuna,2,0,H
+23,Real Betis,Real Sociedad,0,3,A
+23,Real Madrid,Espanyol,4,2,H
+23,Real Madrid,Leganes,0,0,D
+23,Real Sociedad,Mallorca,3,1,H
+23,Real Sociedad,Villarreal,2,1,H
+23,Sevilla,Barcelona,3,2,H
+23,Sevilla,Granada,2,0,H
+23,Sevilla,Real Betis,1,3,A
+23,Valencia,Mallorca,0,0,D
+23,Valencia,Villarreal,0,3,A
+23,Valencia,Villarreal,2,0,H
+23,Valladolid,Levante,1,0,H
+23,Valladolid,Osasuna,1,2,A
+23,Valladolid,Valencia,2,1,H
+23,Villarreal,Getafe,1,0,H
+24,Alaves,Barcelona,2,2,D
+24,Alaves,Getafe,1,3,A
+24,Almeria,Barcelona,1,1,D
+24,Almeria,Real Sociedad,1,0,H
+24,Athletic Bilbao,Mallorca,0,1,A
+24,Athletic Bilbao,Valencia,0,1,A
+24,Celta Vigo,Athletic Bilbao,3,0,H
+24,Celta Vigo,Real Madrid,2,1,H
+24,Espanyol,Barcelona,0,2,A
+24,Espanyol,Osasuna,0,1,A
+24,Getafe,Valladolid,0,0,D
+24,Granada,Leganes,2,4,A
+24,Granada,Real Madrid,2,2,D
+24,Levante,Real Betis,2,0,H
+24,Osasuna,Leganes,2,2,D
+24,Osasuna,Mallorca,3,1,H
+24,Real Betis,Alaves,1,1,D
+24,Real Betis,Valladolid,0,3,A
+24,Real Madrid,Getafe,0,0,D
+24,Real Sociedad,Atletico Madrid,0,2,A
+24,Real Sociedad,Granada,4,1,H
+24,Sevilla,Espanyol,2,2,D
+24,Sevilla,Leganes,0,0,D
+24,Sevilla,Levante,2,1,H
+24,Valencia,Almeria,2,2,D
+24,Valencia,Levante,0,1,A
+24,Valladolid,Mallorca,0,1,A
+24,Villarreal,Atletico Madrid,2,1,H
+24,Villarreal,Atletico Madrid,3,3,D
+24,Villarreal,Celta Vigo,3,1,H
+25,Alaves,Valencia,1,0,H
+25,Almeria,Villarreal,2,2,D
+25,Athletic Bilbao,Valencia,0,2,A
+25,Atletico Madrid,Almeria,2,1,H
+25,Atletico Madrid,Athletic Bilbao,0,1,A
+25,Atletico Madrid,Valencia,3,1,H
+25,Barcelona,Granada,0,0,D
+25,Barcelona,Osasuna,2,0,H
+25,Barcelona,Valladolid,0,0,D
+25,Celta Vigo,Almeria,1,1,D
+25,Espanyol,Granada,1,0,H
+25,Getafe,Sevilla,1,1,D
+25,Getafe,Sevilla,1,2,A
+25,Getafe,Villarreal,3,1,H
+25,Granada,Levante,1,1,D
+25,Leganes,Celta Vigo,0,1,A
+25,Leganes,Espanyol,2,0,H
+25,Leganes,Real Betis,2,0,H
+25,Levante,Alaves,2,1,H
+25,Levante,Espanyol,2,2,D
+25,Mallorca,Alaves,1,2,A
+25,Mallorca,Real Betis,2,3,A
+25,Mallorca,Valladolid,2,2,D
+25,Osasuna,Real Sociedad,1,2,A
+25,Real Betis,Athletic Bilbao,2,3,A
+25,Real Madrid,Osasuna,1,0,H
+25,Real Madrid,Sevilla,2,0,H
+25,Real Sociedad,Real Madrid,1,0,H
+25,Valladolid,Real Sociedad,0,2,A
+25,Villarreal,Celta Vigo,1,1,D
+26,Alaves,Athletic Bilbao,0,2,A
+26,Alaves,Barcelona,2,0,H
+26,Almeria,Alaves,1,1,D
+26,Almeria,Celta Vigo,1,2,A
+26,Athletic Bilbao,Atletico Madrid,0,1,A
+26,Athletic Bilbao,Valladolid,0,1,A
+26,Celta Vigo,Real Madrid,2,1,H
+26,Espanyol,Getafe,3,1,H
+26,Espanyol,Real Madrid,2,2,D
+26,Granada,Getafe,0,0,D
+26,Granada,Levante,1,4,A
+26,Leganes,Espanyol,3,2,H
+26,Levante,Osasuna,2,2,D
+26,Osasuna,Barcelona,2,2,D
+26,Osasuna,Levante,1,1,D
+26,Real Betis,Atletico Madrid,0,0,D
+26,Real Betis,Granada,3,1,H
+26,Real Betis,Mallorca,3,1,H
+26,Real Madrid,Atletico Madrid,1,2,A
+26,Real Sociedad,Leganes,0,0,D
+26,Real Sociedad,Sevilla,0,4,A
+26,Sevilla,Almeria,3,0,H
+26,Sevilla,Real Sociedad,0,0,D
+26,Valencia,Getafe,2,2,D
+26,Valencia,Mallorca,0,2,A
+26,Valencia,Villarreal,3,2,H
+26,Valladolid,Barcelona,1,1,D
+26,Valladolid,Celta Vigo,0,2,A
+26,Villarreal,Leganes,0,1,A
+26,Villarreal,Mallorca,2,3,A
+27,Alaves,Villarreal,1,3,A
+27,Almeria,Espanyol,1,1,D
+27,Almeria,Valencia,1,0,H
+27,Athletic Bilbao,Osasuna,2,2,D
+27,Atletico Madrid,Sevilla,0,0,D
+27,Atletico Madrid,Valencia,4,0,H
+27,Barcelona,Celta Vigo,1,2,A
+27,Barcelona,Mallorca,2,1,H
+27,Barcelona,Villarreal,0,0,D
+27,Celta Vigo,Alaves,3,0,H
+27,Celta Vigo,Real Madrid,1,2,A
+27,Espanyol,Real Betis,3,2,H
+27,Getafe,Atletico Madrid,1,3,A
+27,Getafe,Granada,2,0,H
+27,Getafe,Leganes,0,0,D
+27,Granada,Athletic Bilbao,0,2,A
+27,Leganes,Levante,2,1,H
+27,Levante,Osasuna,3,0,H
+27,Levante,Valladolid,2,2,D
+27,Mallorca,Almeria,3,2,H
+27,Mallorca,Valencia,0,1,A
+27,Osasuna,Real Betis,2,1,H
+27,Real Madrid,Leganes,0,0,D
+27,Real Madrid,Real Sociedad,2,1,H
+27,Real Sociedad,Espanyol,1,0,H
+27,Real Sociedad,Granada,1,2,A
+27,Sevilla,Athletic Bilbao,1,3,A
+27,Sevilla,Valladolid,1,1,D
+27,Valladolid,Real Betis,0,0,D
+27,Villarreal,Alaves,0,0,D
+28,Alaves,Almeria,3,1,H
+28,Alaves,Mallorca,2,1,H
+28,Alaves,Sevilla,1,0,H
+28,Almeria,Atletico Madrid,1,1,D
+28,Athletic Bilbao,Espanyol,3,0,H
+28,Athletic Bilbao,Getafe,1,0,H
+28,Atletico Madrid,Mallorca,3,1,H
+28,Celta Vigo,Levante,0,1,A
+28,Espanyol,Getafe,1,2,A
+28,Espanyol,Valladolid,3,0,H
+28,Granada,Atletico Madrid,1,1,D
+28,Granada,Osasuna,1,2,A
+28,Granada,Real Sociedad,0,1,A
+28,Leganes,Barcelona,1,1,D
+28,Leganes,Real Sociedad,1,1,D
+28,Levante,Real Madrid,2,3,A
+28,Mallorca,Levante,1,1,D
+28,Osasuna,Getafe,1,3,A
+28,Osasuna,Villarreal,0,2,A
+28,Real Betis,Barcelona,1,4,A
+28,Real Betis,Leganes,2,3,A
+28,Real Betis,Sevilla,0,1,A
+28,Real Madrid,Valencia,1,1,D
+28,Real Sociedad,Almeria,3,1,H
+28,Sevilla,Celta Vigo,1,0,H
+28,Valencia,Barcelona,1,3,A
+28,Valencia,Valladolid,0,1,A
+28,Valladolid,Athletic Bilbao,1,1,D
+28,Villarreal,Celta Vigo,0,0,D
+28,Villarreal,Real Madrid,2,3,A
+29,Almeria,Levante,2,1,H
+29,Athletic Bilbao,Granada,3,0,H
+29,Atletico Madrid,Alaves,2,0,H
+29,Barcelona,Atletico Madrid,2,0,H
+29,Barcelona,Real Madrid,2,1,H
+29,Celta Vigo,Valencia,0,2,A
+29,Espanyol,Alaves,1,0,H
+29,Espanyol,Real Betis,2,2,D
+29,Getafe,Celta Vigo,3,0,H
+29,Leganes,Granada,3,1,H
+29,Levante,Leganes,1,0,H
+29,Mallorca,Getafe,3,0,H
+29,Mallorca,Villarreal,0,1,A
+29,Osasuna,Athletic Bilbao,1,2,A
+29,Real Madrid,Real Betis,2,0,H
+29,Real Sociedad,Osasuna,4,1,H
+29,Sevilla,Valencia,2,0,H
+29,Sevilla,Villarreal,2,0,H
+29,Valladolid,Almeria,0,1,A
+29,Valladolid,Real Sociedad,0,1,A
+30,Alaves,Valladolid,2,1,H
+30,Almeria,Sevilla,1,1,D
+30,Athletic Bilbao,Mallorca,3,1,H
+30,Atletico Madrid,Celta Vigo,0,1,A
+30,Celta Vigo,Real Sociedad,2,2,D
+30,Getafe,Barcelona,1,3,A
+30,Granada,Real Madrid,3,1,H
+30,Leganes,Getafe,2,0,H
+30,Levante,Valladolid,0,0,D
+30,Mallorca,Atletico Madrid,2,0,H
+30,Osasuna,Athletic Bilbao,0,0,D
+30,Osasuna,Leganes,3,0,H
+30,Real Betis,Almeria,1,1,D
+30,Real Betis,Granada,1,2,A
+30,Real Madrid,Levante,5,0,H
+30,Real Sociedad,Alaves,2,1,H
+30,Valencia,Espanyol,3,2,H
+30,Valencia,Sevilla,1,1,D
+30,Villarreal,Barcelona,2,2,D
+30,Villarreal,Espanyol,0,3,A
+31,Alaves,Granada,5,0,H
+31,Almeria,Mallorca,0,0,D
+31,Almeria,Osasuna,2,1,H
+31,Athletic Bilbao,Celta Vigo,1,0,H
+31,Athletic Bilbao,Levante,4,0,H
+31,Athletic Bilbao,Mallorca,1,0,H
+31,Atletico Madrid,Getafe,2,0,H
+31,Atletico Madrid,Leganes,0,1,A
+31,Atletico Madrid,Villarreal,1,1,D
+31,Barcelona,Athletic Bilbao,2,0,H
+31,Celta Vigo,Espanyol,0,1,A
+31,Celta Vigo,Granada,0,4,A
+31,Espanyol,Almeria,3,1,H
+31,Espanyol,Atletico Madrid,2,0,H
+31,Getafe,Real Betis,0,3,A
+31,Getafe,Real Madrid,1,0,H
+31,Getafe,Real Sociedad,1,1,D
+31,Granada,Valencia,0,2,A
+31,Granada,Valencia,2,0,H
+31,Leganes,Celta Vigo,2,1,H
+31,Levante,Barcelona,1,0,H
+31,Mallorca,Villarreal,0,0,D
+31,Osasuna,Real Madrid,1,0,H
+31,Real Betis,Levante,0,0,D
+31,Real Betis,Osasuna,4,2,H
+31,Real Madrid,Alaves,2,1,H
+31,Real Madrid,Valladolid,4,1,H
+31,Real Sociedad,Espanyol,0,0,D
+31,Real Sociedad,Leganes,1,0,H
+31,Real Sociedad,Real Betis,2,2,D
+31,Sevilla,Alaves,0,1,A
+31,Sevilla,Alaves,3,2,H
+31,Valencia,Leganes,1,3,A
+31,Valencia,Sevilla,2,3,A
+31,Valladolid,Almeria,3,3,D
+31,Valladolid,Mallorca,2,1,H
+31,Villarreal,Barcelona,3,1,H
+31,Villarreal,Valladolid,1,0,H
+32,Alaves,Espanyol,2,1,H
+32,Almeria,Granada,2,0,H
+32,Atletico Madrid,Valladolid,0,0,D
+32,Barcelona,Almeria,1,0,H
+32,Barcelona,Getafe,0,2,A
+32,Celta Vigo,Real Betis,1,2,A
+32,Espanyol,Valencia,3,3,D
+32,Getafe,Celta Vigo,1,1,D
+32,Granada,Osasuna,0,2,A
+32,Leganes,Alaves,1,0,H
+32,Leganes,Athletic Bilbao,4,0,H
+32,Levante,Villarreal,2,1,H
+32,Mallorca,Real Madrid,1,1,D
+32,Mallorca,Sevilla,3,2,H
+32,Real Betis,Athletic Bilbao,1,0,H
+32,Real Madrid,Real Sociedad,1,1,D
+32,Real Sociedad,Atletico Madrid,1,0,H
+32,Valencia,Osasuna,0,1,A
+32,Valladolid,Sevilla,1,0,H
+32,Villarreal,Levante,0,2,A
+33,Alaves,Espanyol,1,0,H
+33,Almeria,Levante,2,0,H
+33,Athletic Bilbao,Real Madrid,2,1,H
+33,Atletico Madrid,Real Betis,1,1,D
+33,Celta Vigo,Real Sociedad,3,1,H
+33,Espanyol,Mallorca,1,0,H
+33,Getafe,Levante,1,1,D
+33,Granada,Alaves,3,3,D
+33,Granada,Valladolid,2,2,D
+33,Osasuna,Almeria,0,0,D
+33,Osasuna,Leganes,3,1,H
+33,Real Betis,Leganes,3,0,H
+33,Real Madrid,Barcelona,4,1,H
+33,Real Sociedad,Barcelona,0,2,A
+33,Sevilla,Atletico Madrid,1,1,D
+33,Sevilla,Mallorca,1,3,A
+33,Valencia,Celta Vigo,1,1,D
+33,Valencia,Getafe,1,2,A
+33,Valladolid,Villarreal,2,2,D
+33,Villarreal,Athletic Bilbao,3,0,H
+34,Alaves,Osasuna,0,1,A
+34,Almeria,Celta Vigo,0,1,A
+34,Athletic Bilbao,Almeria,1,0,H
+34,Atletico Madrid,Celta Vigo,3,2,H
+34,Atletico Madrid,Espanyol,1,0,H
+34,Barcelona,Athletic Bilbao,1,1,D
+34,Barcelona,Sevilla,3,0,H
+34,Espanyol,Osasuna,2,1,H
+34,Getafe,Alaves,2,2,D
+34,Leganes,Valencia,1,2,A
+34,Leganes,Valladolid,3,1,H
+34,Levante,Real Madrid,1,1,D
+34,Levante,Real Sociedad,2,3,A
+34,Mallorca,Granada,3,1,H
+34,Real Betis,Villarreal,3,0,H
+34,Real Madrid,Real Betis,2,4,A
+34,Real Sociedad,Valencia,1,3,A
+34,Valladolid,Sevilla,0,2,A
+34,Villarreal,Getafe,1,2,A
+35,Alaves,Real Sociedad,2,2,D
+35,Almeria,Leganes,0,2,A
+35,Almeria,Villarreal,0,3,A
+35,Athletic Bilbao,Levante,0,1,A
+35,Celta Vigo,Alaves,0,1,A
+35,Celta Vigo,Real Betis,1,0,H
+35,Espanyol,Valladolid,2,2,D
+35,Granada,Atletico Madrid,2,2,D
+35,Granada,Barcelona,2,4,A
+35,Leganes,Mallorca,2,0,H
+35,Osasuna,Getafe,1,1,D
+35,Osasuna,Mallorca,1,1,D
+35,Real Betis,Barcelona,0,1,A
+35,Real Madrid,Athletic Bilbao,2,4,A
+35,Real Sociedad,Getafe,0,0,D
+35,Sevilla,Levante,3,1,H
+35,Sevilla,Villarreal,3,0,H
+35,Valencia,Atletico Madrid,1,1,D
+35,Valencia,Real Madrid,1,1,D
+35,Valladolid,Espanyol,1,3,A
+36,Alaves,Leganes,0,3,A
+36,Alaves,Real Sociedad,1,1,D
+36,Almeria,Osasuna,2,0,H
+36,Athletic Bilbao,Sevilla,0,1,A
+36,Atletico Madrid,Getafe,2,1,H
+36,Atletico Madrid,Osasuna,4,0,H
+36,Barcelona,Leganes,2,1,H
+36,Barcelona,Valencia,1,1,D
+36,Espanyol,Mallorca,1,0,H
+36,Getafe,Athletic Bilbao,1,1,D
+36,Levante,Granada,1,0,H
+36,Levante,Real Betis,0,0,D
+36,Mallorca,Celta Vigo,2,2,D
+36,Real Madrid,Almeria,2,1,H
+36,Real Madrid,Celta Vigo,1,0,H
+36,Sevilla,Espanyol,2,1,H
+36,Valencia,Real Betis,1,2,A
+36,Valladolid,Granada,3,1,H
+36,Villarreal,Real Sociedad,1,2,A
+36,Villarreal,Valladolid,0,3,A
+37,Alaves,Real Madrid,1,0,H
+37,Almeria,Real Sociedad,1,4,A
+37,Barcelona,Villarreal,1,1,D
+37,Celta Vigo,Atletico Madrid,2,1,H
+37,Granada,Sevilla,4,1,H
+37,Leganes,Mallorca,1,2,A
+37,Levante,Espanyol,3,2,H
+37,Osasuna,Valladolid,2,2,D
+37,Real Betis,Getafe,2,1,H
+37,Valencia,Athletic Bilbao,0,1,A
+38,Atletico Madrid,Leganes,4,2,H
+38,Barcelona,Alaves,4,0,H
+38,Espanyol,Granada,0,1,A
+38,Getafe,Valencia,1,1,D
+38,Levante,Almeria,0,0,D
+38,Mallorca,Real Madrid,0,0,D
+38,Real Sociedad,Real Betis,0,3,A
+38,Sevilla,Osasuna,1,2,A
+38,Valladolid,Celta Vigo,2,1,H
+38,Villarreal,Athletic Bilbao,2,1,H

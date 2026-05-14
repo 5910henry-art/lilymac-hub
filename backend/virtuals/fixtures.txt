@@ -1,0 +1,725 @@
+Alaves | Almeria | 2.22 | 3.18 | 3.34
+Alaves | Athletic Bilbao | 2.38 | 3.17 | 3.04
+Alaves | Athletic Bilbao | 2.39 | 3.16 | 3.04
+Alaves | Atletico Madrid | 3.12 | 3.69 | 2.12
+Alaves | Atletico Madrid | 3.12 | 3.70 | 2.12
+Alaves | Barcelona | 3.68 | 4.02 | 1.84
+Alaves | Barcelona | 3.68 | 4.01 | 1.84
+Alaves | Betis | 2.32 | 3.11 | 3.22
+Alaves | Betis | 2.32 | 3.11 | 3.21
+Alaves | Celta Vigo | 2.05 | 3.30 | 3.65
+Alaves | Celta Vigo | 2.06 | 3.27 | 3.66
+Alaves | Espanyol | 2.38 | 3.17 | 3.04
+Alaves | Getafe | 2.53 | 3.29 | 2.74
+Alaves | Granada | 1.87 | 3.48 | 4.15
+Alaves | Granada | 1.87 | 3.47 | 4.16
+Alaves | Leganes | 2.16 | 3.22 | 3.44
+Alaves | Leganes | 2.17 | 3.21 | 3.44
+Alaves | Leganes | 2.16 | 3.21 | 3.44
+Alaves | Levante | 2.14 | 3.23 | 3.50
+Alaves | Levante | 2.14 | 3.22 | 3.50
+Alaves | Mallorca | 2.06 | 3.27 | 3.66
+Alaves | Mallorca | 2.05 | 3.30 | 3.65
+Alaves | Mallorca | 2.06 | 3.30 | 3.65
+Alaves | Osasuna | 1.95 | 3.40 | 3.88
+Alaves | Osasuna | 1.96 | 3.38 | 3.89
+Alaves | Real Madrid | 2.81 | 3.50 | 2.37
+Alaves | Real Madrid | 2.82 | 3.46 | 2.38
+Alaves | Real Sociedad | 2.32 | 3.11 | 3.21
+Alaves | Real Sociedad | 2.32 | 3.12 | 3.21
+Alaves | Sevilla | 2.53 | 3.29 | 2.74
+Alaves | Sevilla | 2.53 | 3.31 | 2.73
+Alaves | Sevilla | 2.53 | 3.30 | 2.74
+Alaves | Valencia | 2.59 | 3.32 | 2.65
+Alaves | Valencia | 2.59 | 3.33 | 2.65
+Alaves | Valladolid | 1.85 | 3.47 | 4.24
+Alaves | Valladolid | 1.85 | 3.48 | 4.23
+Alaves | Villarreal | 2.13 | 3.24 | 3.49
+Almeria | Alaves | 2.38 | 3.17 | 3.04
+Almeria | Athletic Bilbao | 2.45 | 3.23 | 2.88
+Almeria | Atletico Madrid | 3.26 | 3.77 | 2.03
+Almeria | Barcelona | 3.87 | 4.10 | 1.78
+Almeria | Barcelona | 3.87 | 4.09 | 1.78
+Almeria | Betis | 2.38 | 3.17 | 3.04
+Almeria | Betis | 2.38 | 3.18 | 3.04
+Almeria | Celta Vigo | 2.14 | 3.24 | 3.49
+Almeria | Celta Vigo | 2.14 | 3.23 | 3.50
+Almeria | Espanyol | 2.11 | 2.45 | 3.24
+Almeria | Espanyol | 2.46 | 3.22 | 2.89
+Almeria | Espanyol | 2.45 | 3.23 | 2.88
+Almeria | Getafe | 2.62 | 3.36 | 2.61
+Almeria | Getafe | 2.62 | 3.35 | 2.61
+Almeria | Granada | 1.94 | 3.38 | 3.96
+Almeria | Granada | 1.94 | 3.40 | 3.95
+Almeria | Granada | 1.93 | 3.41 | 3.95
+Almeria | Leganes | 2.25 | 3.18 | 3.29
+Almeria | Leganes | 2.26 | 3.12 | 3.31
+Almeria | Leganes | 2.25 | 3.16 | 3.30
+Almeria | Levante | 2.22 | 3.18 | 3.34
+Almeria | Levante | 2.22 | 3.17 | 3.35
+Almeria | Levante | 2.23 | 3.16 | 3.35
+Almeria | Mallorca | 2.14 | 3.21 | 3.50
+Almeria | Mallorca | 2.13 | 3.24 | 3.49
+Almeria | Osasuna | 2.03 | 3.30 | 3.72
+Almeria | Osasuna | 2.03 | 3.31 | 3.71
+Almeria | Real Madrid | 2.92 | 3.57 | 2.27
+Almeria | Real Madrid | 2.91 | 3.58 | 2.27
+Almeria | Real Sociedad | 2.38 | 3.18 | 3.04
+Almeria | Sevilla | 2.62 | 3.34 | 2.61
+Almeria | Valencia | 2.68 | 3.39 | 2.53
+Almeria | Valladolid | 1.91 | 3.42 | 4.02
+Almeria | Villarreal | 2.22 | 3.17 | 3.35
+Almeria | Villarreal | 2.23 | 3.16 | 3.35
+Athletic Bilbao | Alaves | 2.22 | 3.17 | 3.35
+Athletic Bilbao | Almeria | 2.14 | 3.23 | 3.49
+Athletic Bilbao | Almeria | 2.14 | 3.23 | 3.50
+Athletic Bilbao | Atletico Madrid | 2.99 | 3.62 | 2.21
+Athletic Bilbao | Barcelona | 3.51 | 3.93 | 1.91
+Athletic Bilbao | Barcelona | 3.52 | 3.90 | 1.91
+Athletic Bilbao | Barcelona | 3.51 | 3.91 | 1.91
+Athletic Bilbao | Betis | 2.23 | 3.17 | 3.35
+Athletic Bilbao | Celta Vigo | 1.98 | 3.35 | 3.83
+Athletic Bilbao | Celta Vigo | 1.98 | 3.38 | 3.82
+Athletic Bilbao | Espanyol | 2.32 | 3.11 | 3.21
+Athletic Bilbao | Getafe | 2.45 | 3.23 | 2.88
+Athletic Bilbao | Getafe | 2.46 | 3.23 | 2.88
+Athletic Bilbao | Granada | 1.81 | 3.53 | 4.38
+Athletic Bilbao | Granada | 1.81 | 3.55 | 4.37
+Athletic Bilbao | Leganes | 2.08 | 3.27 | 3.60
+Athletic Bilbao | Levante | 2.06 | 3.29 | 3.66
+Athletic Bilbao | Levante | 2.05 | 3.30 | 3.65
+Athletic Bilbao | Mallorca | 1.99 | 3.34 | 3.84
+Athletic Bilbao | Osasuna | 1.89 | 3.45 | 4.08
+Athletic Bilbao | Osasuna | 1.89 | 3.44 | 4.09
+Athletic Bilbao | Real Madrid | 2.71 | 3.42 | 2.49
+Athletic Bilbao | Real Madrid | 2.70 | 3.44 | 2.48
+Athletic Bilbao | Real Sociedad | 2.22 | 3.17 | 3.35
+Athletic Bilbao | Sevilla | 2.45 | 3.23 | 2.88
+Athletic Bilbao | Valencia | 2.51 | 3.27 | 2.79
+Athletic Bilbao | Valencia | 2.51 | 3.26 | 2.79
+Athletic Bilbao | Valencia | 2.51 | 3.25 | 2.79
+Athletic Bilbao | Valladolid | 1.79 | 3.55 | 4.46
+Athletic Bilbao | Valladolid | 1.79 | 3.58 | 4.45
+Athletic Bilbao | Valladolid | 1.79 | 3.56 | 4.46
+Athletic Bilbao | Villarreal | 2.06 | 3.29 | 3.66
+Athletic Bilbao | Villarreal | 2.06 | 3.28 | 3.66
+Atletico Madrid | Alaves | 1.70 | 3.69 | 4.88
+Atletico Madrid | Almeria | 1.65 | 3.78 | 5.16
+Atletico Madrid | Almeria | 1.65 | 3.77 | 5.17
+Atletico Madrid | Athletic Bilbao | 1.75 | 3.61 | 4.62
+Atletico Madrid | Athletic Bilbao | 1.75 | 3.62 | 4.61
+Atletico Madrid | Barcelona | 2.59 | 3.33 | 2.65
+Atletico Madrid | Betis | 1.70 | 3.70 | 4.87
+Atletico Madrid | Betis | 1.70 | 3.69 | 4.88
+Atletico Madrid | Celta Vigo | 1.57 | 3.94 | 5.83
+Atletico Madrid | Celta Vigo | 1.57 | 3.95 | 5.83
+Atletico Madrid | Espanyol | 1.75 | 3.62 | 4.61
+Atletico Madrid | Espanyol | 1.75 | 3.61 | 4.62
+Atletico Madrid | Getafe | 1.87 | 3.47 | 4.16
+Atletico Madrid | Granada | 1.47 | 4.20 | 6.90
+Atletico Madrid | Granada | 1.47 | 4.18 | 6.90
+Atletico Madrid | Leganes | 1.62 | 3.82 | 5.38
+Atletico Madrid | Leganes | 1.62 | 3.86 | 5.36
+Atletico Madrid | Levante | 1.61 | 3.86 | 5.48
+Atletico Madrid | Levante | 1.61 | 3.87 | 5.48
+Atletico Madrid | Mallorca | 1.57 | 3.95 | 5.83
+Atletico Madrid | Mallorca | 1.57 | 3.94 | 5.83
+Atletico Madrid | Osasuna | 1.52 | 4.05 | 6.30
+Atletico Madrid | Osasuna | 1.51 | 4.07 | 6.30
+Atletico Madrid | Real Madrid | 2.08 | 3.27 | 3.60
+Atletico Madrid | Real Sociedad | 1.70 | 3.70 | 4.88
+Atletico Madrid | Real Sociedad | 1.70 | 3.69 | 4.88
+Atletico Madrid | Sevilla | 1.87 | 3.46 | 4.16
+Atletico Madrid | Sevilla | 1.86 | 3.50 | 4.14
+Atletico Madrid | Sevilla | 1.87 | 3.48 | 4.15
+Atletico Madrid | Valencia | 1.91 | 3.44 | 4.01
+Atletico Madrid | Valencia | 1.92 | 3.39 | 4.03
+Atletico Madrid | Valencia | 1.91 | 3.45 | 4.01
+Atletico Madrid | Valladolid | 1.46 | 4.23 | 7.10
+Atletico Madrid | Valladolid | 1.46 | 4.25 | 7.10
+Atletico Madrid | Villarreal | 1.61 | 3.85 | 5.48
+Barcelona | Alaves | 1.54 | 4.00 | 6.10
+Barcelona | Alaves | 1.54 | 3.99 | 6.10
+Barcelona | Almeria | 1.50 | 4.11 | 6.50
+Barcelona | Almeria | 1.50 | 4.10 | 6.50
+Barcelona | Athletic Bilbao | 1.58 | 3.91 | 5.71
+Barcelona | Atletico Madrid | 2.01 | 3.31 | 3.78
+Barcelona | Atletico Madrid | 2.01 | 3.34 | 3.77
+Barcelona | Atletico Madrid | 2.00 | 3.34 | 3.76
+Barcelona | Betis | 1.54 | 4.00 | 6.10
+Barcelona | Betis | 1.54 | 3.98 | 6.10
+Barcelona | Celta Vigo | 1.43 | 4.33 | 7.40
+Barcelona | Espanyol | 1.58 | 3.92 | 5.71
+Barcelona | Espanyol | 1.58 | 3.90 | 5.71
+Barcelona | Getafe | 1.67 | 3.72 | 5.08
+Barcelona | Getafe | 1.67 | 3.73 | 5.08
+Barcelona | Granada | 1.36 | 4.63 | 8.90
+Barcelona | Granada | 1.36 | 4.61 | 9.00
+Barcelona | Granada | 1.55 | 4.60 | 5.00
+Barcelona | Leganes | 1.48 | 4.17 | 6.80
+Barcelona | Leganes | 1.48 | 4.18 | 6.80
+Barcelona | Levante | 1.47 | 4.16 | 6.90
+Barcelona | Levante | 1.47 | 4.17 | 6.90
+Barcelona | Levante | 1.47 | 4.22 | 6.90
+Barcelona | Mallorca | 1.44 | 4.30 | 7.40
+Barcelona | Mallorca | 1.44 | 4.31 | 7.40
+Barcelona | Osasuna | 1.40 | 4.45 | 8.10
+Barcelona | Osasuna | 1.40 | 4.44 | 8.10
+Barcelona | Real Madrid | 1.83 | 3.51 | 4.30
+Barcelona | Real Madrid | 1.83 | 3.49 | 4.31
+Barcelona | Real Madrid | 1.83 | 3.50 | 4.31
+Barcelona | Real Sociedad | 1.54 | 4.02 | 6.10
+Barcelona | Real Sociedad | 1.54 | 3.99 | 6.10
+Barcelona | Sevilla | 1.67 | 3.72 | 5.08
+Barcelona | Valencia | 1.70 | 3.68 | 4.88
+Barcelona | Valladolid | 1.35 | 4.67 | 9.20
+Barcelona | Valladolid | 1.35 | 4.66 | 9.20
+Barcelona | Valladolid | 1.35 | 4.64 | 9.20
+Barcelona | Villarreal | 1.47 | 4.20 | 6.90
+Betis | Alaves | 2.32 | 3.11 | 3.21
+Betis | Alaves | 2.32 | 3.10 | 3.22
+Betis | Almeria | 2.22 | 3.17 | 3.34
+Betis | Athletic Bilbao | 2.39 | 3.16 | 3.04
+Betis | Athletic Bilbao | 2.39 | 3.14 | 3.05
+Betis | Athletic Bilbao | 2.38 | 3.17 | 3.04
+Betis | Atletico Madrid | 3.11 | 3.72 | 2.11
+Betis | Barcelona | 3.68 | 3.91 | 1.84
+Betis | Barcelona | 3.68 | 4.01 | 1.84
+Betis | Barcelona | 3.69 | 3.99 | 1.84
+Betis | Celta Vigo | 2.06 | 3.29 | 3.65
+Betis | Espanyol | 2.39 | 3.16 | 3.05
+Betis | Espanyol | 2.38 | 3.17 | 3.04
+Betis | Getafe | 2.53 | 3.29 | 2.74
+Betis | Getafe | 2.52 | 3.31 | 2.73
+Betis | Getafe | 2.53 | 3.30 | 2.74
+Betis | Granada | 1.87 | 3.47 | 4.15
+Betis | Granada | 1.87 | 3.47 | 4.16
+Betis | Leganes | 2.17 | 3.21 | 3.44
+Betis | Leganes | 2.17 | 3.20 | 3.45
+Betis | Levante | 2.13 | 3.24 | 3.49
+Betis | Levante | 2.14 | 3.22 | 3.50
+Betis | Mallorca | 2.06 | 3.28 | 3.66
+Betis | Osasuna | 1.95 | 3.41 | 3.88
+Betis | Osasuna | 1.96 | 3.38 | 3.89
+Betis | Osasuna | 1.96 | 3.36 | 3.90
+Betis | Real Madrid | 2.81 | 3.50 | 2.37
+Betis | Real Madrid | 2.81 | 3.49 | 2.37
+Betis | Real Sociedad | 2.32 | 3.11 | 3.21
+Betis | Sevilla | 2.53 | 3.28 | 2.74
+Betis | Valencia | 2.59 | 3.33 | 2.65
+Betis | Valencia | 2.59 | 3.32 | 2.65
+Betis | Valladolid | 1.85 | 3.48 | 4.23
+Betis | Villarreal | 2.14 | 3.23 | 3.50
+Betis | Villarreal | 2.14 | 3.23 | 3.49
+Celta Vigo | Alaves | 2.53 | 3.29 | 2.74
+Celta Vigo | Alaves | 2.53 | 3.31 | 2.73
+Celta Vigo | Almeria | 2.45 | 3.23 | 2.88
+Celta Vigo | Almeria | 2.45 | 3.24 | 2.88
+Celta Vigo | Athletic Bilbao | 2.61 | 3.36 | 2.60
+Celta Vigo | Athletic Bilbao | 2.62 | 3.36 | 2.61
+Celta Vigo | Atletico Madrid | 3.57 | 3.94 | 1.89
+Celta Vigo | Barcelona | 4.29 | 4.32 | 1.67
+Celta Vigo | Barcelona | 4.30 | 4.30 | 1.67
+Celta Vigo | Betis | 2.54 | 3.27 | 2.75
+Celta Vigo | Betis | 2.53 | 3.29 | 2.74
+Celta Vigo | Betis | 2.53 | 3.30 | 2.74
+Celta Vigo | Espanyol | 2.62 | 3.35 | 2.61
+Celta Vigo | Espanyol | 2.61 | 3.37 | 2.60
+Celta Vigo | Getafe | 2.80 | 3.50 | 2.37
+Celta Vigo | Getafe | 2.81 | 3.49 | 2.37
+Celta Vigo | Granada | 2.05 | 3.30 | 3.65
+Celta Vigo | Granada | 2.08 | 3.26 | 3.60
+Celta Vigo | Granada | 2.08 | 3.27 | 3.60
+Celta Vigo | Leganes | 2.41 | 3.19 | 2.99
+Celta Vigo | Leganes | 2.40 | 3.20 | 2.98
+Celta Vigo | Levante | 2.38 | 3.17 | 3.04
+Celta Vigo | Mallorca | 2.32 | 3.11 | 3.21
+Celta Vigo | Mallorca | 2.31 | 3.13 | 3.21
+Celta Vigo | Osasuna | 2.20 | 3.18 | 3.40
+Celta Vigo | Osasuna | 2.19 | 3.19 | 3.40
+Celta Vigo | Real Madrid | 3.16 | 3.73 | 2.09
+Celta Vigo | Real Madrid | 3.17 | 3.71 | 2.09
+Celta Vigo | Real Sociedad | 2.53 | 3.29 | 2.74
+Celta Vigo | Real Sociedad | 2.53 | 3.31 | 2.73
+Celta Vigo | Sevilla | 2.82 | 3.46 | 2.38
+Celta Vigo | Sevilla | 2.81 | 3.49 | 2.37
+Celta Vigo | Valencia | 2.88 | 3.54 | 2.30
+Celta Vigo | Valencia | 2.87 | 3.55 | 2.30
+Celta Vigo | Valladolid | 2.06 | 3.29 | 3.66
+Celta Vigo | Villarreal | 2.39 | 3.16 | 3.05
+Celta Vigo | Villarreal | 2.39 | 3.17 | 3.04
+Celta Vigo | Villarreal | 2.38 | 3.17 | 3.04
+Espanyol | Alaves | 2.23 | 3.16 | 3.35
+Espanyol | Almeria | 2.14 | 3.22 | 3.50
+Espanyol | Athletic Bilbao | 2.32 | 3.11 | 3.22
+Espanyol | Athletic Bilbao | 2.32 | 3.10 | 3.22
+Espanyol | Atletico Madrid | 3.00 | 3.59 | 2.21
+Espanyol | Atletico Madrid | 3.00 | 3.61 | 2.21
+Espanyol | Atletico Madrid | 2.99 | 3.62 | 2.20
+Espanyol | Barcelona | 3.51 | 3.92 | 1.91
+Espanyol | Betis | 2.22 | 3.17 | 3.35
+Espanyol | Celta Vigo | 1.98 | 3.36 | 3.82
+Espanyol | Celta Vigo | 1.98 | 3.35 | 3.83
+Espanyol | Getafe | 2.45 | 3.24 | 2.88
+Espanyol | Granada | 1.81 | 3.54 | 4.37
+Espanyol | Granada | 1.81 | 3.54 | 4.38
+Espanyol | Granada | 1.81 | 3.56 | 4.37
+Espanyol | Leganes | 2.08 | 3.26 | 3.60
+Espanyol | Leganes | 2.08 | 3.27 | 3.60
+Espanyol | Levante | 2.06 | 3.29 | 3.65
+Espanyol | Mallorca | 1.98 | 3.34 | 3.83
+Espanyol | Mallorca | 1.98 | 3.35 | 3.83
+Espanyol | Mallorca | 1.98 | 3.37 | 3.82
+Espanyol | Osasuna | 1.90 | 3.42 | 4.10
+Espanyol | Osasuna | 1.89 | 3.45 | 4.08
+Espanyol | Real Madrid | 2.71 | 3.43 | 2.48
+Espanyol | Real Sociedad | 2.22 | 3.18 | 3.34
+Espanyol | Real Sociedad | 2.22 | 3.17 | 3.35
+Espanyol | Sevilla | 2.45 | 3.26 | 2.87
+Espanyol | Sevilla | 2.46 | 3.20 | 2.90
+Espanyol | Sevilla | 2.46 | 3.23 | 2.88
+Espanyol | Valencia | 2.51 | 3.27 | 2.79
+Espanyol | Valladolid | 1.79 | 3.56 | 4.45
+Espanyol | Valladolid | 1.79 | 3.55 | 4.46
+Espanyol | Villarreal | 2.06 | 3.29 | 3.65
+Getafe | Alaves | 2.06 | 3.28 | 3.66
+Getafe | Alaves | 2.06 | 3.29 | 3.65
+Getafe | Almeria | 1.99 | 3.34 | 3.84
+Getafe | Almeria | 1.98 | 3.37 | 3.82
+Getafe | Almeria | 1.98 | 3.36 | 3.83
+Getafe | Athletic Bilbao | 2.13 | 3.25 | 3.49
+Getafe | Athletic Bilbao | 2.14 | 3.21 | 3.50
+Getafe | Atletico Madrid | 2.77 | 3.47 | 2.41
+Getafe | Barcelona | 3.21 | 3.74 | 2.06
+Getafe | Betis | 2.06 | 3.29 | 3.65
+Getafe | Betis | 2.06 | 3.27 | 3.66
+Getafe | Celta Vigo | 1.85 | 3.48 | 4.23
+Getafe | Celta Vigo | 1.85 | 3.47 | 4.23
+Getafe | Celta Vigo | 1.85 | 3.51 | 4.22
+Getafe | Espanyol | 2.14 | 3.23 | 3.49
+Getafe | Espanyol | 2.14 | 3.22 | 3.50
+Getafe | Granada | 1.70 | 3.72 | 4.87
+Getafe | Granada | 1.70 | 3.69 | 4.88
+Getafe | Leganes | 1.93 | 3.40 | 3.95
+Getafe | Leganes | 1.94 | 3.39 | 3.96
+Getafe | Levante | 1.92 | 3.41 | 4.03
+Getafe | Levante | 1.91 | 3.43 | 4.02
+Getafe | Levante | 1.91 | 3.42 | 4.02
+Getafe | Mallorca | 1.85 | 3.49 | 4.23
+Getafe | Mallorca | 1.85 | 3.47 | 4.24
+Getafe | Mallorca | 1.85 | 3.50 | 4.22
+Getafe | Osasuna | 1.77 | 3.59 | 4.53
+Getafe | Osasuna | 1.77 | 3.60 | 4.53
+Getafe | Real Madrid | 2.53 | 3.29 | 2.74
+Getafe | Real Madrid | 2.53 | 3.30 | 2.74
+Getafe | Real Sociedad | 2.05 | 3.31 | 3.65
+Getafe | Sevilla | 2.32 | 3.10 | 3.22
+Getafe | Sevilla | 2.32 | 3.11 | 3.21
+Getafe | Valencia | 2.36 | 3.16 | 3.09
+Getafe | Valencia | 2.36 | 3.15 | 3.10
+Getafe | Valencia | 2.36 | 3.14 | 3.10
+Getafe | Valladolid | 1.68 | 3.72 | 4.97
+Getafe | Villarreal | 1.92 | 3.41 | 4.02
+Getafe | Villarreal | 1.91 | 3.43 | 4.01
+Granada | Alaves | 2.78 | 3.46 | 2.41
+Granada | Alaves | 2.77 | 3.47 | 2.41
+Granada | Almeria | 2.68 | 3.40 | 2.53
+Granada | Athletic Bilbao | 2.87 | 3.56 | 2.30
+Granada | Athletic Bilbao | 2.88 | 3.55 | 2.30
+Granada | Atletico Madrid | 4.24 | 2.81 | 1.72
+Granada | Barcelona | 5.00 | 4.60 | 1.55
+Granada | Betis | 2.77 | 3.49 | 2.40
+Granada | Betis | 2.77 | 3.48 | 2.41
+Granada | Celta Vigo | 2.51 | 3.27 | 2.79
+Granada | Celta Vigo | 2.50 | 3.29 | 2.78
+Granada | Espanyol | 2.88 | 3.54 | 2.30
+Granada | Espanyol | 2.89 | 3.52 | 2.31
+Granada | Getafe | 3.11 | 3.71 | 2.11
+Granada | Getafe | 3.12 | 3.69 | 2.12
+Granada | Leganes | 2.61 | 3.36 | 2.61
+Granada | Leganes | 2.61 | 3.36 | 2.60
+Granada | Levante | 2.59 | 3.32 | 2.65
+Granada | Mallorca | 2.51 | 3.27 | 2.79
+Granada | Osasuna | 2.41 | 3.19 | 2.99
+Granada | Osasuna | 2.41 | 3.18 | 2.99
+Granada | Real Madrid | 3.56 | 3.96 | 1.88
+Granada | Real Madrid | 3.57 | 3.94 | 1.89
+Granada | Real Sociedad | 2.78 | 3.45 | 2.41
+Granada | Real Sociedad | 2.77 | 3.47 | 2.41
+Granada | Sevilla | 3.12 | 3.70 | 2.12
+Granada | Valencia | 3.20 | 3.78 | 2.06
+Granada | Valencia | 3.21 | 3.74 | 2.06
+Granada | Valladolid | 2.29 | 3.13 | 3.26
+Granada | Valladolid | 2.29 | 3.11 | 3.27
+Granada | Villarreal | 2.59 | 3.34 | 2.65
+Leganes | Alaves | 2.44 | 3.19 | 2.94
+Leganes | Alaves | 2.43 | 3.20 | 2.94
+Leganes | Almeria | 2.36 | 3.16 | 3.09
+Leganes | Almeria | 2.36 | 3.14 | 3.10
+Leganes | Athletic Bilbao | 2.51 | 3.25 | 2.79
+Leganes | Athletic Bilbao | 2.51 | 3.27 | 2.79
+Leganes | Atletico Madrid | 3.36 | 3.83 | 1.98
+Leganes | Barcelona | 4.00 | 4.19 | 1.74
+Leganes | Barcelona | 4.01 | 4.16 | 1.74
+Leganes | Betis | 2.43 | 3.21 | 2.93
+Leganes | Betis | 2.44 | 3.18 | 2.94
+Leganes | Celta Vigo | 2.20 | 3.17 | 3.40
+Leganes | Celta Vigo | 2.20 | 3.19 | 3.40
+Leganes | Celta Vigo | 2.19 | 3.21 | 3.39
+Leganes | Espanyol | 2.50 | 3.28 | 2.78
+Leganes | Getafe | 2.68 | 3.39 | 2.53
+Leganes | Getafe | 2.68 | 3.40 | 2.52
+Leganes | Getafe | 2.68 | 3.40 | 2.53
+Leganes | Granada | 1.94 | 3.39 | 3.96
+Leganes | Granada | 1.99 | 3.34 | 3.84
+Leganes | Granada | 1.99 | 3.32 | 3.84
+Leganes | Levante | 2.29 | 3.11 | 3.26
+Leganes | Levante | 2.28 | 3.14 | 3.25
+Leganes | Mallorca | 2.19 | 3.19 | 3.40
+Leganes | Mallorca | 2.20 | 3.16 | 3.41
+Leganes | Osasuna | 2.08 | 3.26 | 3.60
+Leganes | Real Madrid | 2.99 | 3.63 | 2.20
+Leganes | Real Madrid | 3.00 | 3.60 | 2.21
+Leganes | Real Sociedad | 2.43 | 3.20 | 2.94
+Leganes | Real Sociedad | 2.43 | 3.21 | 2.93
+Leganes | Sevilla | 2.68 | 3.39 | 2.53
+Leganes | Sevilla | 2.68 | 3.40 | 2.53
+Leganes | Valencia | 2.74 | 3.44 | 2.45
+Leganes | Valladolid | 1.96 | 3.38 | 3.89
+Leganes | Villarreal | 2.29 | 3.13 | 3.26
+Leganes | Villarreal | 2.29 | 3.12 | 3.26
+Levante | Alaves | 2.45 | 3.26 | 2.87
+Levante | Alaves | 2.45 | 3.23 | 2.88
+Levante | Almeria | 2.38 | 3.17 | 3.04
+Levante | Almeria | 2.39 | 3.15 | 3.05
+Levante | Athletic Bilbao | 2.53 | 3.29 | 2.74
+Levante | Athletic Bilbao | 2.53 | 3.28 | 2.74
+Levante | Atletico Madrid | 3.41 | 3.86 | 1.96
+Levante | Atletico Madrid | 3.41 | 3.85 | 1.96
+Levante | Barcelona |4.08 |4.18|1.73
+Levante | Betis | 2.46 | 3.23 | 2.88
+Levante | Betis | 2.46 | 3.22 | 2.89
+Levante | Celta Vigo | 2.23 | 3.16 | 3.35
+Levante | Celta Vigo | 2.22 | 3.17 | 3.35
+Levante | Espanyol | 2.53 | 3.29 | 2.74
+Levante | Espanyol | 2.54 | 3.27 | 2.75
+Levante | Getafe | 2.71 | 3.42 | 2.49
+Levante | Granada | 2.01 | 3.33 | 3.77
+Levante | Granada | 2.01 | 3.32 | 3.77
+Levante | Leganes | 2.34 | 3.13 | 3.15
+Levante | Leganes | 2.34 | 3.13 | 3.16
+Levante | Mallorca | 2.22 | 3.19 | 3.34
+Levante | Mallorca | 2.22 | 3.17 | 3.35
+Levante | Osasuna | 2.11 | 3.23 | 3.55
+Levante | Osasuna | 2.10 | 3.27 | 3.54
+Levante | Real Madrid | 3.03 | 3.65 | 2.17
+Levante | Real Madrid | 3.04 | 3.64 | 2.18
+Levante | Real Sociedad | 2.45 | 3.24 | 2.88
+Levante | Real Sociedad | 2.45 | 3.23 | 2.88
+Levante | Real Sociedad | 2.46 | 3.23 | 2.88
+Levante | Sevilla | 2.71 | 3.42 | 2.49
+Levante | Valencia | 2.77 | 3.47 | 2.41
+Levante | Valencia | 2.77 | 3.46 | 2.41
+Levante | Valladolid | 1.99 | 3.34 | 3.84
+Levante | Valladolid | 1.99 | 3.32 | 3.84
+Levante | Valladolid | 1.98 | 3.36 | 3.83
+Levante | Villarreal | 2.32 | 3.10 | 3.22
+Levante | Villarreal | 2.32 | 3.11 | 3.21
+Mallorca | Alaves | 2.53 | 3.29 | 2.74
+Mallorca | Alaves | 2.53 | 3.30 | 2.74
+Mallorca | Almeria | 2.45 | 3.24 | 2.88
+Mallorca | Almeria | 2.45 | 3.23 | 2.88
+Mallorca | Athletic Bilbao | 2.62 | 3.35 | 2.61
+Mallorca | Athletic Bilbao | 2.62 | 3.34 | 2.61
+Mallorca | Atletico Madrid | 3.57 | 3.95 | 1.88
+Mallorca | Barcelona | 4.29 | 4.33 | 1.67
+Mallorca | Barcelona | 4.30 | 4.31 | 1.67
+Mallorca | Betis | 2.53 | 3.29 | 2.74
+Mallorca | Betis | 2.54 | 3.28 | 2.74
+Mallorca | Celta Vigo | 2.32 | 3.11 | 3.21
+Mallorca | Celta Vigo | 2.32 | 3.12 | 3.21
+Mallorca | Celta Vigo | 2.32 | 3.10 | 3.22
+Mallorca | Espanyol | 2.62 | 3.36 | 2.61
+Mallorca | Getafe | 2.81 | 3.47 | 2.38
+Mallorca | Getafe | 2.81 | 3.49 | 2.37
+Mallorca | Granada | 2.08 | 3.28 | 3.60
+Mallorca | Granada | 2.08 | 3.27 | 3.60
+Mallorca | Leganes | 2.41 | 3.19 | 2.99
+Mallorca | Levante | 2.38 | 3.17 | 3.04
+Mallorca | Osasuna | 2.19 | 3.19 | 3.39
+Mallorca | Osasuna | 2.20 | 3.18 | 3.40
+Mallorca | Real Madrid | 3.16 | 3.72 | 2.09
+Mallorca | Real Madrid | 3.17 | 3.71 | 2.09
+Mallorca | Real Madrid | 3.16 | 3.74 | 2.09
+Mallorca | Real Sociedad | 2.54 | 3.27 | 2.75
+Mallorca | Sevilla | 2.81 | 3.50 | 2.37
+Mallorca | Sevilla | 2.81 | 3.49 | 2.37
+Mallorca | Valencia | 2.87 | 3.57 | 2.30
+Mallorca | Valencia | 2.89 | 3.52 | 2.31
+Mallorca | Valladolid | 2.06 | 3.28 | 3.66
+Mallorca | Valladolid | 2.05 | 3.30 | 3.65
+Mallorca | Valladolid | 2.06 | 3.29 | 3.65
+Mallorca | Villarreal | 2.38 | 3.17 | 3.04
+Osasuna | Alaves | 2.65 | 3.36 | 2.57
+Osasuna | Alaves | 2.65 | 3.37 | 2.57
+Osasuna | Almeria | 2.56 | 3.31 | 2.69
+Osasuna | Almeria | 2.56 | 3.30 | 2.70
+Osasuna | Athletic Bilbao | 2.74 | 3.45 | 2.45
+Osasuna | Atletico Madrid | 3.82 | 4.03 | 1.81
+Osasuna | Barcelona | 4.62 | 4.48 | 1.60
+Osasuna | Barcelona | 4.63 | 4.44 | 1.61
+Osasuna | Betis | 2.65 | 3.36 | 2.57
+Osasuna | Celta Vigo | 2.40 | 3.20 | 2.98
+Osasuna | Celta Vigo | 2.41 | 3.18 | 2.99
+Osasuna | Espanyol | 2.74 | 3.45 | 2.45
+Osasuna | Getafe | 2.96 | 3.59 | 2.24
+Osasuna | Granada | 2.19 | 3.20 | 3.39
+Osasuna | Leganes | 2.50 | 3.28 | 2.78
+Osasuna | Leganes | 2.51 | 3.26 | 2.79
+Osasuna | Leganes | 2.51 | 3.27 | 2.79
+Osasuna | Levante | 2.47 | 3.28 | 2.83
+Osasuna | Levante | 2.48 | 3.26 | 2.83
+Osasuna | Mallorca | 2.40 | 3.22 | 2.97
+Osasuna | Mallorca | 2.41 | 3.19 | 2.99
+Osasuna | Real Madrid | 3.35 | 3.83 | 1.98
+Osasuna | Real Madrid | 3.35 | 3.84 | 1.98
+Osasuna | Real Sociedad | 2.65 | 3.36 | 2.57
+Osasuna | Real Sociedad | 2.65 | 3.38 | 2.57
+Osasuna | Sevilla | 2.96 | 3.59 | 2.24
+Osasuna | Sevilla | 2.95 | 3.59 | 2.24
+Osasuna | Valencia | 3.04 | 3.64 | 2.18
+Osasuna | Valencia | 3.03 | 3.64 | 2.18
+Osasuna | Valladolid | 2.17 | 3.21 | 3.44
+Osasuna | Valladolid | 2.17 | 3.21 | 3.45
+Osasuna | Villarreal | 2.48 | 3.25 | 2.83
+Real Madrid | Alaves | 1.85 | 3.49 | 4.23
+Real Madrid | Alaves | 1.85 | 3.47 | 4.24
+Real Madrid | Almeria | 1.79 | 3.56 | 4.45
+Real Madrid | Almeria | 1.79 | 3.55 | 4.46
+Real Madrid | Athletic Bilbao | 1.91 | 3.46 | 4.00
+Real Madrid | Athletic Bilbao | 1.91 | 3.45 | 4.01
+Real Madrid | Athletic Bilbao | 1.91 | 3.42 | 4.02
+Real Madrid | Atletico Madrid | 2.50 | 3.27 | 2.79
+Real Madrid | Barcelona | 2.85 | 3.51 | 2.34
+Real Madrid | Barcelona | 2.84 | 3.52 | 2.34
+Real Madrid | Betis | 1.85 | 3.50 | 4.22
+Real Madrid | Betis | 1.85 | 3.49 | 4.22
+Real Madrid | Betis | 1.85 | 3.47 | 4.24
+Real Madrid | Celta Vigo | 1.69 | 3.70 | 4.98
+Real Madrid | Celta Vigo | 1.68 | 3.72 | 4.97
+Real Madrid | Espanyol | 1.91 | 3.43 | 4.02
+Real Madrid | Getafe | 2.06 | 3.28 | 3.66
+Real Madrid | Granada | 1.85 | 3.50 | 4.22
+Real Madrid | Granada | 1.56 | 3.97 | 5.81
+Real Madrid | Granada | 1.57 | 3.94 | 5.83
+Real Madrid | Leganes | 1.75 | 3.62 | 4.61
+Real Madrid | Leganes | 1.75 | 3.61 | 4.62
+Real Madrid | Levante | 1.73 | 3.64 | 4.70
+Real Madrid | Levante | 1.74 | 3.62 | 4.71
+Real Madrid | Mallorca | 1.69 | 3.70 | 4.98
+Real Madrid | Mallorca | 1.68 | 3.72 | 4.97
+Real Madrid | Osasuna | 1.62 | 3.81 | 5.38
+Real Madrid | Osasuna | 1.63 | 3.81 | 5.39
+Real Madrid | Real Sociedad | 1.85 | 3.48 | 4.23
+Real Madrid | Real Sociedad | 1.85 | 3.50 | 4.22
+Real Madrid | Sevilla | 2.06 | 3.29 | 3.65
+Real Madrid | Sevilla | 2.05 | 3.30 | 3.65
+Real Madrid | Sevilla | 2.06 | 3.28 | 3.66
+Real Madrid | Valencia | 2.11 | 3.25 | 3.55
+Real Madrid | Valencia | 2.11 | 3.26 | 3.54
+Real Madrid | Valladolid | 1.55 | 3.96 | 5.96
+Real Madrid | Valladolid | 1.55 | 4.00 | 5.94
+Real Madrid | Valladolid | 1.55 | 3.97 | 5.95
+Real Madrid | Villarreal | 1.74 | 3.63 | 4.71
+Real Madrid | Villarreal | 1.73 | 3.64 | 4.70
+Real Madrid | Villarreal | 1.74 | 3.64 | 4.70
+Real Sociedad | Alaves | 2.32 | 3.10 | 3.22
+Real Sociedad | Alaves | 2.32 | 3.12 | 3.21
+Real Sociedad | Almeria | 2.23 | 3.16 | 3.35
+Real Sociedad | Almeria | 2.22 | 3.17 | 3.35
+Real Sociedad | Athletic Bilbao | 2.38 | 3.17 | 3.04
+Real Sociedad | Atletico Madrid | 3.11 | 3.73 | 2.11
+Real Sociedad | Atletico Madrid | 3.12 | 3.70 | 2.11
+Real Sociedad | Atletico Madrid | 3.12 | 3.69 | 2.12
+Real Sociedad | Barcelona | 3.69 | 3.99 | 1.84
+Real Sociedad | Barcelona | 3.68 | 4.04 | 1.84
+Real Sociedad | Betis | 2.32 | 3.11 | 3.21
+Real Sociedad | Betis | 2.31 | 3.14 | 3.20
+Real Sociedad | Celta Vigo | 2.06 | 3.27 | 3.66
+Real Sociedad | Celta Vigo | 2.06 | 3.29 | 3.65
+Real Sociedad | Espanyol | 2.38 | 3.18 | 3.04
+Real Sociedad | Espanyol | 2.38 | 3.17 | 3.04
+Real Sociedad | Getafe | 2.53 | 3.29 | 2.74
+Real Sociedad | Getafe | 2.53 | 3.30 | 2.74
+Real Sociedad | Getafe | 2.53 | 3.28 | 2.74
+Real Sociedad | Granada | 1.87 | 3.46 | 4.16
+Real Sociedad | Granada | 1.87 | 3.47 | 4.16
+Real Sociedad | Leganes | 2.17 | 3.21 | 3.45
+Real Sociedad | Leganes | 2.17 | 3.20 | 3.45
+Real Sociedad | Leganes | 2.16 | 3.22 | 3.44
+Real Sociedad | Levante | 2.13 | 3.24 | 3.49
+Real Sociedad | Levante | 2.14 | 3.23 | 3.49
+Real Sociedad | Mallorca | 2.06 | 3.30 | 3.65
+Real Sociedad | Osasuna | 1.96 | 3.37 | 3.89
+Real Sociedad | Osasuna | 1.96 | 3.36 | 3.90
+Real Sociedad | Real Madrid | 2.81 | 3.49 | 2.37
+Real Sociedad | Sevilla | 2.53 | 3.29 | 2.74
+Real Sociedad | Sevilla | 2.53 | 3.30 | 2.74
+Real Sociedad | Valencia | 2.59 | 3.32 | 2.65
+Real Sociedad | Valencia | 2.59 | 3.33 | 2.65
+Real Sociedad | Valladolid | 1.85 | 3.49 | 4.23
+Real Sociedad | Villarreal | 2.14 | 3.22 | 3.50
+Real Sociedad | Villarreal | 2.14 | 3.23 | 3.50
+Real Sociedad | Villarreal | 2.13 | 3.25 | 3.48
+Sevilla | Alaves | 2.06 | 3.29 | 3.65
+Sevilla | Alaves | 2.06 | 3.28 | 3.66
+Sevilla | Almeria | 1.98 | 3.35 | 3.83
+Sevilla | Almeria | 1.98 | 3.36 | 3.83
+Sevilla | Almeria | 1.97 | 3.39 | 3.81
+Sevilla | Athletic Bilbao | 2.14 | 3.23 | 3.49
+Sevilla | Athletic Bilbao | 2.13 | 3.24 | 3.49
+Sevilla | Atletico Madrid | 2.77 | 3.48 | 2.41
+Sevilla | Barcelona | 3.21 | 3.76 | 2.06
+Sevilla | Barcelona | 3.21 | 3.75 | 2.06
+Sevilla | Betis | 2.06 | 3.29 | 3.65
+Sevilla | Betis | 2.05 | 3.30 | 3.65
+Sevilla | Celta Vigo | 1.85 | 3.48 | 4.23
+Sevilla | Celta Vigo | 1.85 | 3.47 | 4.23
+Sevilla | Celta Vigo | 1.85 | 3.49 | 4.23
+Sevilla | Espanyol | 2.14 | 3.22 | 3.50
+Sevilla | Getafe | 2.36 | 3.14 | 3.10
+Sevilla | Getafe | 2.32 | 3.12 | 3.21
+Sevilla | Getafe | 2.32 | 3.10 | 3.22
+Sevilla | Granada | 1.70 | 3.69 | 4.88
+Sevilla | Granada | 1.70 | 3.71 | 4.87
+Sevilla | Leganes | 1.93 | 3.42 | 3.95
+Sevilla | Leganes | 1.94 | 3.39 | 3.96
+Sevilla | Levante | 1.91 | 3.42 | 4.02
+Sevilla | Levante | 1.91 | 3.43 | 4.01
+Sevilla | Mallorca | 1.85 | 3.49 | 4.23
+Sevilla | Mallorca | 1.85 | 3.49 | 4.22
+Sevilla | Osasuna | 1.77 | 3.60 | 4.53
+Sevilla | Osasuna | 1.77 | 3.58 | 4.54
+Sevilla | Real Madrid | 2.53 | 3.29 | 2.74
+Sevilla | Real Sociedad | 2.05 | 3.30 | 3.65
+Sevilla | Real Sociedad | 2.06 | 3.28 | 3.66
+Sevilla | Valencia | 2.36 | 3.14 | 3.10
+Sevilla | Valencia | 2.36 | 3.15 | 3.10
+Sevilla | Valencia | 2.36 | 3.16 | 3.09
+Sevilla | Valladolid | 1.68 | 3.72 | 4.97
+Sevilla | Valladolid | 1.69 | 3.69 | 4.98
+Sevilla | Villarreal | 1.91 | 3.41 | 4.02
+Sevilla | Villarreal | 1.91 | 3.43 | 4.02
+Sevilla | Villarreal | 1.91 | 3.44 | 4.01
+Valencia | Alaves | 2.01 | 3.32 | 3.77
+Valencia | Alaves | 2.01 | 3.33 | 3.77
+Valencia | Almeria | 1.94 | 3.40 | 3.95
+Valencia | Almeria | 1.94 | 3.39 | 3.96
+Valencia | Almeria | 1.93 | 3.41 | 3.95
+Valencia | Athletic Bilbao | 2.08 | 3.26 | 3.60
+Valencia | Athletic Bilbao | 2.08 | 3.30 | 3.59
+Valencia | Atletico Madrid | 2.70 | 3.44 | 2.48
+Valencia | Barcelona | 2.12 | 3.69 | 3.12
+Valencia | Barcelona | 3.12 | 3.68 | 2.12
+Valencia | Barcelona | 3.12 | 3.69 | 2.12
+Valencia | Betis | 2.01 | 3.32 | 3.77
+Valencia | Betis | 2.01 | 3.33 | 3.77
+Valencia | Celta Vigo | 1.81 | 3.54 | 4.38
+Valencia | Espanyol | 2.08 | 3.27 | 3.60
+Valencia | Espanyol | 2.08 | 3.29 | 3.59
+Valencia | Espanyol | 2.08 | 3.28 | 3.59
+Valencia | Getafe | 2.26 | 3.15 | 3.30
+Valencia | Getafe | 2.25 | 3.15 | 3.30
+Valencia | Granada | 1.67 | 3.74 | 5.07
+Valencia | Granada | 1.67 | 3.76 | 5.06
+Valencia | Granada | 1.67 | 3.75 | 5.07
+Valencia | Leganes | 1.89 | 3.43 | 4.09
+Valencia | Levante | 1.87 | 3.47 | 4.15
+Valencia | Mallorca | 1.81 | 3.53 | 4.38
+Valencia | Mallorca | 1.81 | 3.52 | 4.39
+Valencia | Osasuna | 1.74 | 3.63 | 4.70
+Valencia | Osasuna | 1.73 | 3.65 | 4.70
+Valencia | Real Madrid | 2.49 | 3.22 | 2.85
+Valencia | Real Madrid | 2.47 | 3.27 | 2.83
+Valencia | Real Sociedad | 2.00 | 3.36 | 3.76
+Valencia | Real Sociedad | 2.00 | 3.35 | 3.76
+Valencia | Real Sociedad | 2.01 | 3.33 | 3.77
+Valencia | Sevilla | 2.25 | 3.16 | 3.30
+Valencia | Sevilla | 2.25 | 3.15 | 3.30
+Valencia | Valladolid | 1.65 | 3.79 | 5.16
+Valencia | Valladolid | 1.65 | 3.80 | 5.15
+Valencia | Valladolid | 1.65 | 3.77 | 5.17
+Valencia | Villarreal | 1.87 | 3.47 | 4.15
+Valencia | Villarreal | 1.87 | 3.48 | 4.15
+Valladolid | Alaves | 2.81 | 3.49 | 2.37
+Valladolid | Alaves | 2.81 | 3.50 | 2.37
+Valladolid | Almeria | 2.71 | 3.42 | 2.49
+Valladolid | Almeria | 2.71 | 3.41 | 2.49
+Valladolid | Athletic Bilbao | 2.93 | 3.53 | 2.28
+Valladolid | Atletico Madrid | 4.15 | 4.22 | 1.71
+Valladolid | Atletico Madrid | 4.15 | 4.24 | 1.70
+Valladolid | Barcelona | 5.09 | 4.67 | 1.53
+Valladolid | Betis | 2.81 | 3.49 | 2.37
+Valladolid | Betis | 2.80 | 3.51 | 2.37
+Valladolid | Celta Vigo | 2.53 | 3.28 | 2.74
+Valladolid | Celta Vigo | 2.53 | 3.29 | 2.74
+Valladolid | Espanyol | 2.92 | 3.56 | 2.27
+Valladolid | Espanyol | 2.92 | 3.55 | 2.27
+Valladolid | Getafe | 3.16 | 3.72 | 2.09
+Valladolid | Granada | 2.34 | 3.13 | 3.15
+Valladolid | Leganes | 2.65 | 3.38 | 2.57
+Valladolid | Leganes | 2.64 | 3.41 | 2.56
+Valladolid | Leganes | 2.65 | 3.35 | 2.57
+Valladolid | Levante | 2.62 | 3.35 | 2.61
+Valladolid | Mallorca | 2.53 | 3.29 | 2.74
+Valladolid | Mallorca | 2.54 | 3.26 | 2.75
+Valladolid | Osasuna | 2.43 | 3.20 | 2.94
+Valladolid | Osasuna | 2.43 | 3.21 | 2.93
+Valladolid | Real Madrid | 3.62 | 3.98 | 1.86
+Valladolid | Real Sociedad | 3.49 | 3.00 | 2.38
+Valladolid | Real Sociedad | 2.80 | 3.51 | 2.37
+Valladolid | Real Sociedad | 2.80 | 3.53 | 2.37
+Valladolid | Sevilla | 3.16 | 3.73 | 2.09
+Valladolid | Sevilla | 3.16 | 3.72 | 2.09
+Valladolid | Valencia | 3.26 | 3.75 | 2.04
+Valladolid | Villarreal | 2.62 | 3.34 | 2.61
+Valladolid | Villarreal | 2.62 | 3.35 | 2.61
+Villareal | Almeria | 2.38 | 3.17 | 3.04
+Villareal | Granada | 2.00 | 3.36 | 3.76
+Villarreal | Alaves | 2.45 | 3.23 | 2.88
+Villarreal | Alaves | 2.45 | 3.24 | 2.88
+Villarreal | Almeria | 2.38 | 3.17 | 3.04
+Villarreal | Athletic Bilbao | 2.53 | 3.30 | 2.74
+Villarreal | Athletic Bilbao | 2.54 | 3.27 | 2.75
+Villarreal | Athletic Bilbao | 2.53 | 3.28 | 2.74
+Villarreal | Atletico Madrid | 3.41 | 3.85 | 1.96
+Villarreal | Atletico Madrid | 3.40 | 3.86 | 1.96
+Villarreal | Atletico Madrid | 3.41 | 3.83 | 1.96
+Villarreal | Barcelona | 4.07 | 4.22 | 1.72
+Villarreal | Barcelona | 4.08 | 4.19 | 1.72
+Villarreal | Betis | 2.45 | 3.23 | 2.88
+Villarreal | Celta Vigo | 2.23 | 3.17 | 3.35
+Villarreal | Espanyol | 2.53 | 3.31 | 2.73
+Villarreal | Espanyol | 2.53 | 3.29 | 2.74
+Villarreal | Espanyol | 2.54 | 3.27 | 2.74
+Villarreal | Getafe | 2.71 | 3.43 | 2.48
+Villarreal | Getafe | 2.71 | 3.42 | 2.49
+Villarreal | Granada | 2.01 | 3.32 | 3.78
+Villarreal | Leganes | 2.34 | 3.13 | 3.16
+Villarreal | Leganes | 2.34 | 3.13 | 3.15
+Villarreal | Leganes | 2.34 | 3.14 | 3.15
+Villarreal | Levante | 2.32 | 3.11 | 3.22
+Villarreal | Levante | 2.31 | 3.14 | 3.20
+Villarreal | Levante | 2.32 | 3.11 | 3.21
+Villarreal | Mallorca | 2.22 | 3.18 | 3.34
+Villarreal | Mallorca | 2.22 | 3.17 | 3.35
+Villarreal | Osasuna | 2.11 | 3.25 | 3.55
+Villarreal | Osasuna | 2.11 | 3.25 | 3.54
+Villarreal | Real Madrid | 3.03 | 3.66 | 2.17
+Villarreal | Real Sociedad | 2.46 | 3.23 | 2.88
+Villarreal | Real Sociedad | 2.45 | 3.26 | 2.87
+Villarreal | Sevilla | 2.71 | 3.42 | 2.49
+Villarreal | Sevilla | 2.71 | 3.43 | 2.48
+Villarreal | Valencia | 2.77 | 3.47 | 2.41
+Villarreal | Valladolid | 1.98 | 3.36 | 3.83
+Villarreal | Valladolid | 1.98 | 3.35 | 3.83

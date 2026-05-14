@@ -1,0 +1,20 @@
+/* src/components/MatchCard.css */
+.slide-enter {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+}
+.slide-enter-active {
+  max-height: 500px;
+  opacity: 1;
+  transition: max-height 0.2s ease, opacity 0.2s ease;
+}
+.slide-exit {
+  max-height: 500px;
+  opacity: 1;
+}
+.slide-exit-active {
+  max-height: 0;
+  opacity: 0;
+  transition: max-height 0.2s ease, opacity 0.2s ease;
+}

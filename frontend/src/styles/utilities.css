@@ -1,0 +1,17 @@
+/* src/styles/utilities.css */
+@reference "tailwindcss";
+
+/* Max width container */
+.max-w-custom {
+  max-width: 1200px;
+}
+
+/* Text shadow helper */
+.text-shadow {
+  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+/* Grid helpers */
+.grid-cols-4 {
+  @apply grid grid-cols-4 gap-4;
+}

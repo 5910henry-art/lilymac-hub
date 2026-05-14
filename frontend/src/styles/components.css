@@ -1,0 +1,59 @@
+/* src/styles/components.css */
+@reference "tailwindcss";
+
+/* Header */
+.header {
+  @apply bg-white dark:bg-gray-900
+         shadow-md p-4
+         flex items-center justify-between;
+}
+
+/* Sidebar */
+.sidebar {
+  @apply bg-gray-100 dark:bg-gray-950
+         min-h-screen p-4;
+}
+
+/* Cards */
+.card {
+  @apply bg-white dark:bg-gray-900
+         rounded-xl shadow-md p-4
+         transition-all duration-300;
+}
+
+/* Buttons */
+.btn {
+  @apply px-4 py-2 rounded
+         font-medium transition;
+}
+
+.btn-success {
+  @apply bg-emerald-600 hover:bg-emerald-700 text-white;
+}
+
+.btn-danger {
+  @apply bg-red-600 hover:bg-red-700 text-white;
+}
+
+.btn-small {
+  @apply px-3 py-1 text-sm;
+}
+
+.btn-disabled {
+  @apply opacity-60 cursor-not-allowed;
+}
+
+/* Tables */
+.table th,
+.table td {
+  @apply p-2 text-left;
+}
+
+.table th {
+  @apply bg-gray-100 dark:bg-gray-900
+         sticky top-0;
+}
+
+.table tr:hover {
+  @apply bg-gray-200 dark:bg-gray-800;
+}
