@@ -22,10 +22,12 @@ from .bets import bet_bp
 # -------------------------
 app = Flask(__name__)
 
-app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get(
-    "DATABASE_URL",
-    "postgresql://henry:kyu@localhost:5432/virtualfootball"
-)
+db_url = os.environ.get("DATABASE_URL")
+
+if db_url and db_url.startswith("postgres://"):
+    db_url = db_url.replace("postgres://", "postgresql://", 1)
+
+app.config["SQLALCHEMY_DATABASE_URI"] = db_url or "sqlite:///fallback.db"
 app.config["JWT_SECRET_KEY"] = os.environ.get(
     "JWT_SECRET",
     "1223f671617d47d847101ee330653227e3c6241351a3e28baa12dafef84d5c2743802b7a7cd0c36d32260272c79d6c2fc321ed4b4178b3fbe40f577a4c132536"
