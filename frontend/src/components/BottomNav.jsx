@@ -1,66 +1,110 @@
 // src/components/BottomNav.jsx
-import React, { useContext, useEffect } from "react";
+import React, { useContext } from "react";
 import { NavLink, useLocation } from "react-router-dom";
-import { Home, Flame, Crown, User } from "lucide-react";
+import {
+  Home,
+  Flame,
+  Crown,
+  User,
+  WalletCards,
+} from "lucide-react";
 import { TipsContext } from "../contexts/TipsContext";
-import { motion, AnimatePresence, useAnimation } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 
 export default function BottomNav() {
-  const location = useLocation();
   const { topCount } = useContext(TipsContext);
-  const controls = useAnimation();
-
-  // Slide nav on scroll
-  useEffect(() => {
-    let lastScrollY = window.scrollY;
-    const handleScroll = () => {
-      const currentScrollY = window.scrollY;
-      if (currentScrollY > lastScrollY) {
-        controls.start({ y: 100, transition: { type: "spring", stiffness: 300, damping: 30 } });
-      } else {
-        controls.start({ y: 0, transition: { type: "spring", stiffness: 300, damping: 30 } });
-      }
-      lastScrollY = currentScrollY;
-    };
-    window.addEventListener("scroll", handleScroll, { passive: true });
-    return () => window.removeEventListener("scroll", handleScroll);
-  }, [controls]);
+  const location = useLocation();
 
   return (
     <motion.nav
-      animate={controls}
-      className="fixed bottom-0 left-0 right-0 bg-white dark:bg-gray-900
-                 border-t border-gray-200 dark:border-gray-800
-                 h-16 flex justify-around items-center shadow-md z-50"
+      initial={{ y: 80 }}
+      animate={{ y: 0 }}
+      transition={{
+        type: "spring",
+        stiffness: 320,
+        damping: 28,
+      }}
+      className="
+        fixed
+        bottom-0
+        left-0
+        right-0
+        z-[60]
+        md:hidden
+        h-[68px]
+        flex
+        items-center
+        justify-around
+        px-2
+        pb-[env(safe-area-inset-bottom)]
+        bg-white/95
+        backdrop-blur-xl
+        border-t border-gray-200
+        shadow-[0_-6px_25px_rgba(0,0,0,0.10)]
+      "
       aria-label="Bottom navigation"
     >
-      {/* Home → Dashboard */}
-      <NavItem to="/" icon={<Home size={22} />} label="Home" />
 
-      {/* Bookmarks → Money emoji 💵💰 */}
+      {/* HOME */}
       <NavItem
-        to="/bookmarks"
-        icon={<span className="text-2xl">💵💰</span>}
-        pulse
-        bounce
-        glow
-        shimmer
-        activeScale={1.5}
+        to="/"
+        icon={<Home size={22} strokeWidth={2} />}
+        label="Home"
       />
 
-      {/* Tips */}
-      <NavItem to="/tips/daily" icon={<Flame size={22} />} label="🔥">
+      {/* MONEY / BOOKMARKS */}
+      <NavItem
+        to="/bookmarks"
+        icon={<WalletCards size={22} strokeWidth={2} />}
+        label="Saved"
+      />
+
+      {/* DAILY TIPS */}
+      <NavItem
+        to="/tips/daily"
+        icon={<Flame size={22} strokeWidth={2} />}
+        label="Tips"
+      >
         <AnimatePresence>
           {topCount > 0 && (
             <motion.span
-              key={`top-${topCount}`}
-              initial={{ scale: 0 }}
-              animate={{ scale: 1 }}
-              exit={{ scale: 0 }}
-              transition={{ type: "spring", stiffness: 500, damping: 30 }}
-              className="absolute -top-2 right-0 flex items-center justify-center
-                         w-6 h-6 rounded-full bg-red-600 text-white text-[12px] font-bold
-                         shadow-lg border-2 border-white dark:border-gray-900"
+              key={`tips-${topCount}`}
+              initial={{
+                scale: 0,
+                opacity: 0,
+              }}
+              animate={{
+                scale: 1,
+                opacity: 1,
+              }}
+              exit={{
+                scale: 0,
+                opacity: 0,
+              }}
+              transition={{
+                type: "spring",
+                stiffness: 500,
+                damping: 25,
+              }}
+              className="
+                absolute
+                -top-1
+                -right-1
+                flex
+                items-center
+                justify-center
+                min-w-[19px]
+                h-[19px]
+                px-1
+                rounded-full
+                bg-red-600
+                text-white
+                text-[9px]
+                font-bold
+                border-2
+                border-white
+                shadow-md
+              "
               aria-label={`${topCount} hot tips available`}
               role="status"
             >
@@ -71,76 +115,180 @@ export default function BottomNav() {
       </NavItem>
 
       {/* VIP */}
-      <NavItem to="/vip" icon={<Crown size={22} />} label="VIP">
+      <NavItem
+        to="/vip"
+        icon={<Crown size={22} strokeWidth={2} />}
+        label="VIP"
+      >
         <motion.span
-          className="absolute -top-2 right-0 flex items-center justify-center
-                     w-6 h-6 rounded-full bg-amber-400 text-black text-[10px] font-extrabold
-                     shadow-md border-2 border-white dark:border-gray-900"
-          aria-label="VIP section"
-          title="VIP"
-          role="img"
-          animate={{ scale: [1, 1.2, 1] }}
-          transition={{ duration: 1.5, repeat: Infinity }}
+          className="
+            absolute
+            -top-1
+            -right-2
+            flex
+            items-center
+            justify-center
+            px-1.5
+            h-[18px]
+            rounded-full
+            bg-gradient-to-r
+            from-red-500
+            to-blue-600
+            text-white
+            text-[8px]
+            font-extrabold
+            border-2
+            border-white
+            shadow-md
+          "
+          animate={{
+            scale: [1, 1.08, 1],
+          }}
+          transition={{
+            duration: 2,
+            repeat: Infinity,
+            ease: "easeInOut",
+          }}
         >
           VIP
         </motion.span>
       </NavItem>
 
-      {/* Profile */}
-      <NavItem to="/admin" icon={<User size={22} />} label="🔐">
-        {location.pathname === "/profile" && (
-          <button
-            onClick={() => (window.location.href = "/admin")}
-            className="absolute -top-6 right-0 w-7 h-7 rounded-full bg-red-500 text-white text-xs flex items-center justify-center shadow-md"
-            title="Go to Admin"
-            aria-label="Go to Admin"
-          >
-            A
-          </button>
-        )}
-      </NavItem>
+      {/* PROFILE / ADMIN */}
+      <NavItem
+        to="/admin"
+        icon={<User size={22} strokeWidth={2} />}
+        label="Account"
+      />
+
     </motion.nav>
   );
 }
 
-// NavItem with pulse + bounce + glow + shimmer
-function NavItem({ to, icon, label, pulse, bounce, glow, shimmer, activeScale = 1.2, children }) {
+
+/* ============================================================
+   BOTTOM NAV ITEM
+============================================================ */
+
+function NavItem({
+  to,
+  icon,
+  label,
+  children,
+}) {
   const location = useLocation();
-  const isActive = location.pathname === to;
+
+  const isActive =
+    location.pathname === to ||
+    (to !== "/" &&
+      location.pathname.startsWith(to));
 
   return (
     <NavLink
       to={to}
-      className={`flex flex-col items-center text-xs relative min-w-[56px] ${
-        isActive ? "text-green-600" : "text-gray-500 dark:text-gray-400"
-      }`}
+      className="
+        relative
+        flex
+        flex-col
+        items-center
+        justify-center
+        min-w-[58px]
+        h-full
+        select-none
+      "
     >
       <motion.div
-        animate={
-          isActive
-            ? {
-                scale: activeScale,
-                filter: glow ? "drop-shadow(0 0 10px gold)" : undefined,
-                textShadow: shimmer ? "0 0 10px gold, 0 0 20px gold" : undefined,
-              }
-            : pulse
-            ? {
-                scale: [1, 1.15, 1],
-                y: bounce ? [0, -3, 3, 0] : 0,
-                rotate: bounce ? [0, 5, -5, 0] : 0,
-                filter: glow ? "drop-shadow(0 0 10px gold)" : undefined,
-                textShadow: shimmer
-                  ? ["0 0 5px gold", "0 0 15px gold", "0 0 5px gold"]
-                  : undefined,
-              }
-            : {}
-        }
-        transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+        whileTap={{
+          scale: 0.9,
+        }}
+        className="
+          relative
+          flex
+          flex-col
+          items-center
+          justify-center
+        "
       >
-        {icon}
+
+        {/* Active background */}
+        <motion.div
+          animate={{
+            scale: isActive ? 1 : 0.8,
+            opacity: isActive ? 1 : 0,
+          }}
+          transition={{
+            duration: 0.2,
+          }}
+          className="
+            absolute
+            -top-1
+            w-11
+            h-9
+            rounded-xl
+            bg-gradient-to-r
+            from-blue-500/15
+            to-red-500/15
+          "
+        />
+
+        {/* Icon */}
+        <span
+          className={`
+            relative
+            z-10
+            transition-all
+            duration-200
+            ${
+              isActive
+                ? "text-blue-600"
+                : "text-gray-500"
+            }
+          `}
+        >
+          {icon}
+        </span>
+
+        {/* Label */}
+        {label && (
+          <span
+            className={`
+              relative
+              z-10
+              mt-1
+              text-[10px]
+              font-medium
+              transition-all
+              duration-200
+              ${
+                isActive
+                  ? "text-blue-600"
+                  : "text-gray-500"
+              }
+            `}
+          >
+            {label}
+          </span>
+        )}
+
+        {/* Active indicator */}
+        {isActive && (
+          <motion.span
+            layoutId="bottomNavIndicator"
+            className="
+              absolute
+              -bottom-0
+              w-7
+              h-[3px]
+              rounded-full
+              bg-gradient-to-r
+              from-blue-600
+              to-red-500
+            "
+          />
+        )}
+
+        {children}
       </motion.div>
-      {label && <span className="mt-1 select-none">{label}</span>}
-      {children}
     </NavLink>
   );
 }
