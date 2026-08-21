@@ -52,7 +52,6 @@ jwt = JWTManager()
 # ✅ Use threading instead of eventlet
 socketio = SocketIO(async_mode="threading")
 
-
 def init_app():
     """Initialize Flask app, extensions, and database."""
     db.init_app(app)
@@ -68,20 +67,61 @@ def init_app():
     import model  # noqa: F401
 
     with app.app_context():
-        if settings.DATABASE_URL.startswith("sqlite"):
+
+        # ---------------- CREATE POSTGRES SCHEMA ----------------
+        if not settings.DATABASE_URL.startswith("sqlite:"):
             from sqlalchemy import text
 
             try:
-                db.session.execute(text("PRAGMA journal_mode=WAL;"))
-                db.session.execute(text("PRAGMA foreign_keys=ON;"))
-                db.session.commit()
-                logger.info("SQLite WAL + FK enabled")
+                schema = settings.DB_SCHEMA
+
+                if schema:
+                    db.session.execute(
+                        text(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')
+                    )
+                    db.session.commit()
+
+                    logger.info(
+                        "PostgreSQL schema ready: %s",
+                        schema
+                    )
+
             except Exception:
                 db.session.rollback()
-                logger.exception("SQLite pragma setup failed")
+                logger.exception(
+                    "Failed to create PostgreSQL schema"
+                )
+                raise
 
+        # ---------------- SQLITE SETUP ----------------
+        if settings.DATABASE_URL.startswith("sqlite:"):
+            from sqlalchemy import text
+
+            try:
+                db.session.execute(
+                    text("PRAGMA journal_mode=WAL;")
+                )
+                db.session.execute(
+                    text("PRAGMA foreign_keys=ON;")
+                )
+                db.session.commit()
+
+                logger.info(
+                    "SQLite WAL + FK enabled"
+                )
+
+            except Exception:
+                db.session.rollback()
+                logger.exception(
+                    "SQLite pragma setup failed"
+                )
+
+        # ---------------- CREATE TABLES ----------------
         db.create_all()
-        logger.info("Database tables created successfully")
+
+        logger.info(
+            "Database tables created successfully"
+        )
 
     return app
 
