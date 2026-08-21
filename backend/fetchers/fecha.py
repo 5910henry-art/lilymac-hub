@@ -32,10 +32,9 @@ semaphore = asyncio.Semaphore(MAX_CONCURRENT)
 # Database connection
 # --------------------------------------------------
 DATABASE_URL = os.getenv(
-    "DATABASE_URL",
+    "ASYNC_DATABASE_URL",
     "postgresql+asyncpg://henry:kyu@localhost:5432/virtualfootball"
 )
-
 engine = create_async_engine(
     DATABASE_URL,
     echo=False,
@@ -52,7 +51,7 @@ def now_kenya():
     return datetime.now(KENYA)
 
 # --------------------------------------------------
-# ✅ FIXED: Proper UTC parser (no prints)
+#  Proper UTC parser (no prints)
 # --------------------------------------------------
 def parse_utc_date(raw_date):
     if not raw_date:
@@ -298,7 +297,7 @@ async def main():
 
         now = datetime.now(UTC)
         recent_season = now.year if now.month >= 7 else now.year - 1
-        seasons = range(now.year - 1, 2022, -1)
+        seasons = range(now.year , 2022, -1)
 
         for league, code in LEAGUES.items():
             print(f"\n[LEAGUE] {league} ({code})")

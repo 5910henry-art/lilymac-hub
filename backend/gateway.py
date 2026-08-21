@@ -18,19 +18,13 @@ from vipadmin import app as vipadmin_app
 from betting.bet import app as bet_app
 from virtuals.virtual import app as virtual_app
 
-# Optional engine import (DO NOT auto-start)
-try:
-    from virtuals.engine import start_virtual_engine
-except Exception:
-    start_virtual_engine = None
-
 # ----------------------------
 # Config
 # ----------------------------
 FLASK_HOST = os.environ.get("FLASK_HOST", "0.0.0.0")
 FLASK_PORT = int(os.environ.get("FLASK_PORT", 5000))
 
-REDIS_URL = os.environ.get("REDIS_URL")  # use cloud redis in production
+REDIS_URL = os.environ.get("REDIS_URL")
 
 FRONTEND_BUILD = os.path.join(
     os.path.dirname(__file__),
@@ -41,12 +35,15 @@ FRONTEND_BUILD = os.path.join(
 # Logging
 # ----------------------------
 logging.basicConfig(
-    level=os.environ.get("LOG_LEVEL", "INFO"),
-    format="%(asctime)s | %(levelname)s | %(message)s",
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+    force=True,
 )
 
 logger = logging.getLogger("gateway")
 
+# Force virtual engine logs to be visible
+logging.getLogger("virtual-engine").setLevel(logging.INFO)
 # ----------------------------
 # Flask Gateway
 # ----------------------------
@@ -139,26 +136,54 @@ application = DispatcherMiddleware(
 app = application
 
 # ----------------------------
+# Optional engine import
+# ----------------------------
+try:
+    from virtuals.engine import start_virtual_engine
+except Exception as e:
+    print(f"❌ Failed to import virtual engine: {e}")
+    start_virtual_engine = None
+
+# ----------------------------
 # Local development only
 # ----------------------------
 if __name__ == "__main__":
     logger.info("Running in local mode")
 
-    # Optional local engine start
-    if start_virtual_engine:
+    if start_virtual_engine is not None:
         try:
+            logger.info("Starting virtual engine...")
+
             start_virtual_engine()
-            logger.info("Virtual engine started (local only)")
-        except Exception as e:
-            logger.warning(f"Engine not started: {e}")
+
+            import virtuals.engine as eng
+
+            logger.info(
+                "Engine thread alive: %s",
+                eng.engine_thread.is_alive()
+                if eng.engine_thread
+                else False
+            )
+
+        except Exception:
+            logger.exception("Engine startup failed")
+    else:
+        logger.warning("Virtual engine unavailable")
 
     from werkzeug.serving import run_simple
+
+    logger.info(
+        "Starting gateway on %s:%s",
+        FLASK_HOST,
+        FLASK_PORT
+    )
 
     run_simple(
         FLASK_HOST,
         FLASK_PORT,
         application,
         threaded=True,
-        use_reloader=True,
-        use_debugger=True
+        use_reloader=False,
+        use_debugger=True,
     )
+

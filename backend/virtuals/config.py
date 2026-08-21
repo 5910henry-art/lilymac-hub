@@ -19,9 +19,14 @@ logger = logging.getLogger("virtual-engine")
 logger.info(f"Starting in {settings.ENV} mode, log level {settings.LOG_LEVEL}")
 
 # ---------------- REDIS ----------------
-REDIS_URL = settings.REDIS_URL
-redis_client = redis.from_url(REDIS_URL)
 
+REDIS_URL = settings.REDIS_URL
+
+if REDIS_URL:
+    redis_client = redis.from_url(REDIS_URL)
+else:
+    redis_client = None
+    logger.warning("Redis disabled: REDIS_URL not set")
 # ---------------- FLASK APP ----------------
 app = Flask(__name__)
 app.config["SQLALCHEMY_DATABASE_URI"] = settings.DATABASE_URL

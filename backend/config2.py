@@ -18,11 +18,7 @@ import asyncpg
 # --------------------------------------
 # Database
 # --------------------------------------
-DATABASE_URL = os.environ.get(
-    "DATABASE_URL",
-    "postgresql://henry:kyu@localhost:5432/virtualfootball"
-)
-
+DATABASE_URL = os.environ.get("DATABASE_URL")
 DB_SCHEMA = "henry_schema"
 
 # Connection pool (initialized lazily)
