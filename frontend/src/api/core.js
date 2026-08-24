@@ -5,27 +5,23 @@ export const DEFAULT_TIMEOUT = 15000;
 // ============================================================
 // BACKEND URLS
 // ============================================================
-// Vercel frontend -> Render backend
-//
-// You can still override these with VITE_* environment variables.
-// ============================================================
-
+// Vercel frontend -> Render
+// =========================================================
 const BACKEND_BASE =
-  import.meta.env.VITE_BACKEND_URL ||
+  process.env.REACT_APP_BACKEND_URL ||
   "https://lilymac-hub.onrender.com";
 
 export const BACKEND_FOOTBALL =
-  import.meta.env.VITE_FOOTBALL_API_URL ||
+  process.env.REACT_APP_FOOTBALL_API_URL ||
   `${BACKEND_BASE}/app`;
 
 export const BACKEND_ADMIN =
-  import.meta.env.VITE_ADMIN_API_URL ||
+  process.env.REACT_APP_ADMIN_API_URL ||
   `${BACKEND_BASE}/vipadmin`;
 
 export const BACKEND_BET =
-  import.meta.env.VITE_BET_API_URL ||
+  process.env.REACT_APP_BET_API_URL ||
   `${BACKEND_BASE}/bet`;
-
 // ============================================================
 // AUTH TOKEN
 // ============================================================
