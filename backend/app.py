@@ -179,17 +179,22 @@ def _parse_match_datetime(raw):
 _db_lock = threading.RLock()
 _named_param_pattern = re.compile(r"(?<!:):([A-Za-z_][A-Za-z0-9_]*)")
 
-
 def _connect_db():
     """
-    Open a fresh Postgres connection for each operation.
-    This avoids shared-connection concurrency errors in Flask.
+    Open a fresh PostgreSQL connection using henry_schema.
     """
     if _PSYCOPG3:
-        return psycopg.connect(DATABASE_URL, row_factory=dict_row)
-    conn = psycopg2.connect(DATABASE_URL)
-    return conn
+        return psycopg.connect(
+            DATABASE_URL,
+            row_factory=dict_row,
+            options="-c search_path=henry_schema,public"
+        )
 
+    conn = psycopg2.connect(
+        DATABASE_URL,
+        options="-c search_path=henry_schema,public"
+    )
+    return conn
 
 def _run_sync_or_async(callable_or_coro):
     """Run a sync result directly or execute an awaitable safely."""
