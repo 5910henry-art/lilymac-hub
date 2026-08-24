@@ -539,6 +539,40 @@ def root():
 def health():
     return jsonify({"status": "ok", "service": "prediction_api", "time": now_kenya_iso()})
 
+@app.route("/debug/db", methods=["GET"])
+def debug_db():
+    try:
+        conn = _connect_db()
+
+        with conn.cursor() as cur:
+            cur.execute("SELECT current_database(), current_schema()")
+            db, schema = cur.fetchone()
+
+            cur.execute("SHOW search_path")
+            search_path = cur.fetchone()[0]
+
+            cur.execute("SELECT COUNT(*) FROM matches")
+            matches = cur.fetchone()[0]
+
+            cur.execute("""
+                SELECT COUNT(*)
+                FROM matches
+                WHERE status IN ('SCHEDULED', 'TIMED')
+            """)
+            upcoming = cur.fetchone()[0]
+
+        conn.close()
+
+        return jsonify({
+            "database": db,
+            "schema": schema,
+            "search_path": search_path,
+            "matches": matches,
+            "upcoming": upcoming
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/dashboard", methods=["GET"])
 def dashboard():
