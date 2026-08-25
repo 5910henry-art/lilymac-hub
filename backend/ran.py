@@ -51,11 +51,14 @@ async def get_pool() -> asyncpg.Pool:
     global _pool
     if _pool is None:
         _pool = await asyncpg.create_pool(
-            DATABASE_URL,
-            min_size=1,
-            max_size=max(1, MAX_CONCURRENT),
-            command_timeout=120,
-        )
+    DATABASE_URL,
+    min_size=1,
+    max_size=max(1, MAX_CONCURRENT),
+    command_timeout=120,
+    server_settings={
+        "search_path": "henry_schema,public"
+    },
+)
     return _pool
 
 async def close_pool() -> None:

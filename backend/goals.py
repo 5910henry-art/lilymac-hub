@@ -1,13 +1,4 @@
 #!/usr/bin/env python3
-"""
-Goals.py (v23.3 – PostgreSQL stable)
-Fixes:
-✅ timezone safe
-✅ no injuries table crash
-✅ odds use team names (not IDs)
-✅ fixed indentation
-"""
-
 from collections import Counter
 from datetime import datetime
 import time

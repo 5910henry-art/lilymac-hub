@@ -16,7 +16,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import argparse
 import os
 from sqlalchemy import create_engine, text
-
+from config2 import DATABASE_URL, DB_SCHEMA
 # ---------------- CONFIG ----------------
 API_KEY = "4e55c0aac6d2e2ef1871c3bac439a4e1"
 REGION = "eu"
@@ -30,11 +30,6 @@ LEAGUES = {
     "soccer_germany_bundesliga": "Bundesliga",
     "soccer_france_ligue_one": "Ligue 1"
 }
-
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql://henry:kyu@localhost:5432/virtualfootball"
-)
 
 # ---------------- HELPERS ----------------
 def is_valid_odd(x):
@@ -104,7 +99,13 @@ def fetch_btts_odds(league_key, matches):
 
 # ---------------- UPSERT ----------------
 def upsert_matches(matches, league, include_btts=False, btts_map=None):
-    engine = create_engine(DATABASE_URL, future=True)
+    engine = create_engine(
+    DATABASE_URL,
+    future=True,
+    connect_args={
+        "options": f"-c search_path={DB_SCHEMA},public"
+    }
+)
     inserted = 0
     fetched_at = datetime.now(timezone.utc)
 

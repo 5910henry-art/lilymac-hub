@@ -29,8 +29,7 @@ BASE_DIR = Path(__file__).resolve().parent
 SCRIPTS = [
     BASE_DIR / "fetchers" / "fecha.py",
     BASE_DIR / "goals.py",
-    BASE_DIR / "build_features.py",
-    BASE_DIR / "odds.py",
+    BASE_DIR / "Odds.py",
 ]
 
 # -------------------------

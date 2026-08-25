@@ -13,13 +13,16 @@ logging.basicConfig(level=logging.INFO)
 # -------------------------
 # Database setup
 # -------------------------
-DATABASE_URL = os.environ.get(
-    "DATABASE_URL",
-    "postgresql://henry:kyu@localhost:5432/virtualfootball"
+from config2 import DATABASE_URL, DB_SCHEMA
+
+engine = create_engine(
+    DATABASE_URL,
+    echo=False,
+    future=True,
+    connect_args={
+        "options": f"-c search_path={DB_SCHEMA},public"
+    }
 )
-
-engine = create_engine(DATABASE_URL, echo=False, future=True)
-
 # Use a dedicated session for the scheduler
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
