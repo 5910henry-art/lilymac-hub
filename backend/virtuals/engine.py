@@ -6,6 +6,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
+from sqlalchemy import text
 
 from .odds_refresh import refresh_open_fixture_odds
 from .utils import now_utc, try_set_fixture_status_atomic
@@ -45,7 +46,72 @@ active_simulations: set[int] = set()
 # Prevent repeated season regeneration attempts for the same terminal state.
 season_generation_lock = threading.Lock()
 last_season_generation_key: str | None = None
+# PostgreSQL advisory lock to prevent multiple virtual engines
+# running against the same database.
+ENGINE_ADVISORY_LOCK_KEY = 742913
+engine_lock_connection = None
 
+def _acquire_engine_advisory_lock(db):
+    global engine_lock_connection
+
+    try:
+        engine_lock_connection = db.engine.connect()
+
+        acquired = engine_lock_connection.execute(
+            text("SELECT pg_try_advisory_lock(:key)"),
+            {"key": ENGINE_ADVISORY_LOCK_KEY},
+        ).scalar()
+
+        if acquired:
+            logger.info(
+                "🔐 Virtual engine advisory lock acquired"
+            )
+            return True
+
+        engine_lock_connection.close()
+        engine_lock_connection = None
+
+        logger.warning(
+            "🚫 Another virtual engine is already running"
+        )
+        return False
+
+    except Exception:
+        logger.exception(
+            "Failed acquiring engine advisory lock"
+        )
+
+        if engine_lock_connection:
+            engine_lock_connection.close()
+
+        engine_lock_connection = None
+        return False
+
+
+def _release_engine_advisory_lock():
+    global engine_lock_connection
+
+    if engine_lock_connection is None:
+        return
+
+    try:
+        engine_lock_connection.execute(
+            text("SELECT pg_advisory_unlock(:key)"),
+            {"key": ENGINE_ADVISORY_LOCK_KEY},
+        )
+
+        logger.info(
+            "🔓 Virtual engine advisory lock released"
+        )
+
+    except Exception:
+        logger.exception(
+            "Failed releasing advisory lock"
+        )
+
+    finally:
+        engine_lock_connection.close()
+        engine_lock_connection = None
 
 def _fmt_dt(value):
     """Format datetime for logs without crashing on None."""
@@ -370,6 +436,13 @@ def start_virtual_engine(emit_update_callback=None):
     global settlement_executor
 
     if engine_thread is None or not engine_thread.is_alive():
+
+        from .config import app, db
+
+        with app.app_context():
+            if not _acquire_engine_advisory_lock(db):
+                return None
+
         from .config import app, db, socketio
         from .model import Fixture
         from .config_settings import (
@@ -439,7 +512,7 @@ def start_virtual_engine(emit_update_callback=None):
                 logger.exception("Error submitting settlement for match %s", match_id)
 
         def run_engine():
-            with app.app_context():
+              with app.app_context():
                 try:
                     _recover_incomplete_fixtures(
                         app=app,
@@ -753,6 +826,7 @@ def start_virtual_engine(emit_update_callback=None):
 
 def stop_engine(timeout: int = 10):
     logger.info("Stopping engine...")
+    _release_engine_advisory_lock()
     shutdown_flag.set()
 
     global engine_thread
