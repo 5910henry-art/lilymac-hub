@@ -136,46 +136,71 @@ application = DispatcherMiddleware(
 app = application
 
 # ----------------------------
-# Optional engine import
+# Virtual engine
 # ----------------------------
 try:
     from virtuals.engine import start_virtual_engine
-except Exception as e:
-    print(f"❌ Failed to import virtual engine: {e}")
+except Exception:
+    logger.exception("❌ Failed to import virtual engine")
     start_virtual_engine = None
 
+
+def start_production_virtual_engine():
+    """
+    Start the virtual engine when running under Gunicorn/Render.
+
+    The PostgreSQL advisory lock inside engine.py guarantees that
+    only one production engine can run against the database.
+    """
+    if start_virtual_engine is None:
+        logger.warning("Virtual engine unavailable")
+        return False
+
+    try:
+        logger.info("Starting virtual engine...")
+
+        engine_thread = start_virtual_engine()
+
+        logger.info(
+            "Engine thread alive: %s",
+            engine_thread.is_alive() if engine_thread else False,
+        )
+
+        return engine_thread is not None
+
+    except Exception:
+        logger.exception("Engine startup failed")
+        return False
+
+
 # ----------------------------
-# Local development only
+# Start production virtual engine
+# ----------------------------
+# Gunicorn imports this module instead of executing it as __main__.
+# Therefore the engine must be started here for Render production.
+RUN_VIRTUAL_ENGINE = os.getenv("RUN_VIRTUAL_ENGINE", "1").lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
+
+if RUN_VIRTUAL_ENGINE:
+    start_production_virtual_engine()
+
+
+# ----------------------------
+# Local development
 # ----------------------------
 if __name__ == "__main__":
     logger.info("Running in local mode")
-
-    if start_virtual_engine is not None:
-        try:
-            logger.info("Starting virtual engine...")
-
-            start_virtual_engine()
-
-            import virtuals.engine as eng
-
-            logger.info(
-                "Engine thread alive: %s",
-                eng.engine_thread.is_alive()
-                if eng.engine_thread
-                else False
-            )
-
-        except Exception:
-            logger.exception("Engine startup failed")
-    else:
-        logger.warning("Virtual engine unavailable")
 
     from werkzeug.serving import run_simple
 
     logger.info(
         "Starting gateway on %s:%s",
         FLASK_HOST,
-        FLASK_PORT
+        FLASK_PORT,
     )
 
     run_simple(
@@ -186,4 +211,3 @@ if __name__ == "__main__":
         use_reloader=False,
         use_debugger=True,
     )
-
