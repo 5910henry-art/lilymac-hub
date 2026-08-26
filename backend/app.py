@@ -20,6 +20,7 @@ from flask_compress import Compress
 
 from config2 import (
     DATABASE_URL,
+    DB_CONNECT_URL,
     DB_SCHEMA,
     UTC,
     KENYA,
@@ -185,13 +186,13 @@ def _connect_db():
     """
     if _PSYCOPG3:
         return psycopg.connect(
-            DATABASE_URL,
+            DB_CONNECT_URL,
             row_factory=dict_row,
             options="-c search_path=henry_schema,public"
         )
 
     conn = psycopg2.connect(
-        DATABASE_URL,
+        DB_CONNECT_URL,
         options="-c search_path=henry_schema,public"
     )
     return conn

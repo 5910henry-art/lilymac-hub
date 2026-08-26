@@ -155,12 +155,12 @@ def upsert_matches(matches, league, include_btts=False, btts_map=None):
                 league, home_team, away_team, home_team_norm, away_team_norm, match_time,
                 home_odds, draw_odds, away_odds,
                 over05, under05, over15, under15, over25, under25, over35, under35,
-                gg_odds, ng_odds, fetched_at
+                gg_odds, ng_odds, fetched_at,odds_event_id
             ) VALUES (
                 :league, :home, :away, :home_norm, :away_norm, :match_time,
                 :home_odds, :draw_odds, :away_odds,
                 :over05, :under05, :over15, :under15, :over25, :under25, :over35, :under35,
-                :gg_odds, :ng_odds, :fetched_at
+                :gg_odds, :ng_odds, :fetched_at, :odds_event_id
             )
             ON CONFLICT (league, home_team_norm, away_team_norm, match_time)
             DO UPDATE SET
@@ -177,7 +177,8 @@ def upsert_matches(matches, league, include_btts=False, btts_map=None):
                 under35=excluded.under35,
                 gg_odds=excluded.gg_odds,
                 ng_odds=excluded.ng_odds,
-                fetched_at=excluded.fetched_at
+                fetched_at=excluded.fetched_at,
+                odds_event_id = excluded.odds_event_id
             """), {
                 "league": league,
                 "home": home,
@@ -198,7 +199,8 @@ def upsert_matches(matches, league, include_btts=False, btts_map=None):
                 "under35": median(totals[3.5]["under"]) if totals[3.5]["under"] else None,
                 "gg_odds": median(gg) if gg else None,
                 "ng_odds": median(ng) if ng else None,
-                "fetched_at": fetched_at
+                "fetched_at": fetched_at,
+                "odds_event_id": event_id
             })
             inserted += 1
 

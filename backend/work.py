@@ -37,7 +37,6 @@ KENYA_OFFSET = 3
 SCRIPTS = [
     "update.py",
     "h2h.py",
-    "model.py",
     "accumulator.py",
     "book.py",
     "dash2.py",

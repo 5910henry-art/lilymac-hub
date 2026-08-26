@@ -27,14 +27,59 @@ if not DATABASE_URL:
         "Set DATABASE_URL to the local or deployment PostgreSQL database."
     )
 
-if DATABASE_URL.startswith("postgresql+asyncpg://"):
-    DATABASE_URL = DATABASE_URL.replace(
-        "postgresql+asyncpg://",
-        "postgresql://",
-        1,
-    )
 
-DB_SCHEMA = "henry_schema"
+# ============================================================
+# NORMALIZE DATABASE URL
+# ============================================================
+
+# ------------------------------------------------------------
+# Direct PostgreSQL URL
+# ------------------------------------------------------------
+# asyncpg, psycopg and psycopg2 expect:
+#
+#     postgresql://...
+#
+# Convert any SQLAlchemy driver suffix back to plain PostgreSQL.
+
+DB_CONNECT_URL = DATABASE_URL
+
+for driver_prefix in (
+    "postgresql+asyncpg://",
+    "postgresql+psycopg://",
+    "postgresql+psycopg2://",
+):
+    if DB_CONNECT_URL.startswith(driver_prefix):
+        DB_CONNECT_URL = DB_CONNECT_URL.replace(
+            driver_prefix,
+            "postgresql://",
+            1,
+        )
+        break
+
+
+# ------------------------------------------------------------
+# DATABASE_URL is the direct asyncpg-safe URL
+# ------------------------------------------------------------
+
+DATABASE_URL = DB_CONNECT_URL
+
+
+# ------------------------------------------------------------
+# SQLAlchemy URL
+# ------------------------------------------------------------
+
+SQLALCHEMY_DATABASE_URL = DATABASE_URL.replace(
+    "postgresql://",
+    "postgresql+psycopg://",
+    1,
+)
+
+
+# ============================================================
+# DATABASE SETTINGS
+# ============================================================
+
+DB_SCHEMA = os.getenv("DB_SCHEMA", "henry_schema")
 
 MAX_CONCURRENT = 10
 
