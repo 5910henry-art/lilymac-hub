@@ -10,7 +10,9 @@ export const DEFAULT_TIMEOUT = 15000;
 const BACKEND_BASE =
   process.env.REACT_APP_BACKEND_URL ||
   "https://lilymac-hub.onrender.com";
-
+export const BACKEND_BASE =
+  process.env.REACT_APP_BACKEND_URL ||
+  "https://lilymac-hub.onrender.com";
 export const BACKEND_FOOTBALL =
   process.env.REACT_APP_FOOTBALL_API_URL ||
   `${BACKEND_BASE}/app`;
