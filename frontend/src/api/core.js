@@ -7,9 +7,6 @@ export const DEFAULT_TIMEOUT = 15000;
 // ============================================================
 // Vercel frontend -> Render
 // =========================================================
-const BACKEND_BASE =
-  process.env.REACT_APP_BACKEND_URL ||
-  "https://lilymac-hub.onrender.com";
 export const BACKEND_BASE =
   process.env.REACT_APP_BACKEND_URL ||
   "https://lilymac-hub.onrender.com";
