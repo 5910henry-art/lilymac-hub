@@ -14,15 +14,16 @@ init_app()
 CORS(app, resources={r"/*": {"origins": "*"}})
 app.register_blueprint(routes_bp)
 
+
 # ---------------- SIGNAL HANDLER ----------------
 def _signal_handler(signum, frame):
-    logger.info("Received shutdown signal (%s). Stopping engine...", signum)
+    logger.info(
+        "Received shutdown signal (%s). Stopping engine...",
+        signum,
+    )
     stop_engine()
     logger.info("Shutdown complete")
-    os._exit(0)
 
-signal.signal(signal.SIGINT, _signal_handler)
-signal.signal(signal.SIGTERM, _signal_handler)
 
 # ---------------- ENGINE CALLBACK ----------------
 def emit_fixture_update(fixture):
@@ -32,8 +33,14 @@ def emit_fixture_update(fixture):
     """
     pass  # no-op
 
+
 # ---------------- MAIN ----------------
 if __name__ == "__main__":
+    # Only register signal handlers when running standalone.
+    # Gunicorn manages SIGINT/SIGTERM itself.
+    signal.signal(signal.SIGINT, _signal_handler)
+    signal.signal(signal.SIGTERM, _signal_handler)
+
     logger.info("⚽ Virtual PRO+ Engine starting...")
 
     # Start engine WITHOUT socket events
