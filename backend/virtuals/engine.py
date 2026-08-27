@@ -823,32 +823,47 @@ def start_virtual_engine(emit_update_callback=None):
 
     return engine_thread
 
-
 def stop_engine(timeout: int = 10):
-    logger.info("Stopping engine...")
-    _release_engine_advisory_lock()
-    shutdown_flag.set()
-
     global engine_thread
     global simulation_executor
     global settlement_executor
 
+    logger.info("Stopping engine...")
+
+    # 1. Tell the engine loop to stop first
+    shutdown_flag.set()
+
+    # 2. Wait for the engine loop to exit
+    if engine_thread and engine_thread.is_alive():
+        engine_thread.join(timeout=timeout)
+
+    # 3. Shut down simulation executor
     if simulation_executor is not None:
         try:
-            simulation_executor.shutdown(wait=False, cancel_futures=True)
+            simulation_executor.shutdown(
+                wait=False,
+                cancel_futures=True,
+            )
         except Exception:
             logger.exception("Error shutting down simulation executor")
         finally:
             simulation_executor = None
 
+    # 4. Shut down settlement executor
     if settlement_executor is not None:
         try:
-            settlement_executor.shutdown(wait=False, cancel_futures=True)
+            settlement_executor.shutdown(
+                wait=False,
+                cancel_futures=True,
+            )
         except Exception:
             logger.exception("Error shutting down settlement executor")
         finally:
             settlement_executor = None
 
-    if engine_thread and engine_thread.is_alive():
-        engine_thread.join(timeout=timeout)
-        logger.info("✅ Engine stopped")
+    # 5. Release PostgreSQL advisory lock last
+    _release_engine_advisory_lock()
+
+    engine_thread = None
+
+    logger.info("✅ Engine stopped")

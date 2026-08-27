@@ -1365,7 +1365,7 @@ def predictions_latest():
     now_iso = datetime.now(UTC).isoformat()
     sql = """
         SELECT p.match_id, p.model_version, p.prediction_json, p.generated_at,
-               m.utcDate, m.status, m.home_team_name, m.away_team_name
+               m.utcDate, m.status, m.home_team_name, m.away_team_name, m.competition
         FROM predictions p
         LEFT JOIN matches m ON CAST(p.match_id AS TEXT) = CAST(m.id AS TEXT)
         WHERE m.status IN (:s1, :s2, :s3)

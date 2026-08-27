@@ -188,7 +188,10 @@ RUN_VIRTUAL_ENGINE = os.getenv("RUN_VIRTUAL_ENGINE", "1").lower() in (
 if RUN_VIRTUAL_ENGINE:
     start_production_virtual_engine()
 
+import atexit
+from virtuals.engine import stop_engine
 
+atexit.register(stop_engine)
 # ----------------------------
 # Local development
 # ----------------------------
