@@ -659,68 +659,145 @@ def dashboard():
         "matches": result,
     })
 
-
 @app.route("/predictions/match/grouped", methods=["GET"])
 def grouped_predictions():
     home = request.args.get("home") or None
     away = request.args.get("away") or None
     match_id = request.args.get("match_id") or None
 
+    # Prevent an unfiltered request from trying to process the entire database.
+    limit = cap_limit(
+        request.args.get("limit", 50),
+        default=50,
+        max_limit=500
+    )
+
     now = datetime.now(UTC).isoformat()
+
     query_sql = """
-        SELECT DISTINCT ON (m.id)
-            m.id, m.home_team_name, m.away_team_name, m.utcdate AS "utcDate"
+        SELECT
+            m.id,
+            m.home_team_name,
+            m.away_team_name,
+            m.utcdate AS "utcDate"
         FROM matches m
-        INNER JOIN models mo ON m.id = mo.match_id
-        WHERE m.utcDate > :now
+        WHERE m.utcdate > :now
+          AND EXISTS (
+              SELECT 1
+              FROM models mo
+              WHERE mo.match_id = m.id
+          )
     """
+
     params = {"now": now}
+
     if home:
         query_sql += " AND m.home_team_name ILIKE :home"
         params["home"] = f"%{home}%"
+
     if away:
         query_sql += " AND m.away_team_name ILIKE :away"
         params["away"] = f"%{away}%"
+
     if match_id:
         query_sql += " AND m.id = :match_id"
         params["match_id"] = match_id
-    query_sql += " ORDER BY m.id, m.utcDate ASC"
+
+    query_sql += """
+        ORDER BY m.utcdate ASC
+        LIMIT :limit
+    """
+
+    params["limit"] = limit
 
     matches = db_query_list(query_sql, params)
+
     if not matches:
-        return jsonify({"error": "No upcoming matches with predictions found"}), 404
+        return jsonify({
+            "count": 0,
+            "matches": []
+        })
+
+    # Fetch ALL models for the selected matches in ONE query.
+    id_placeholders = []
+    model_params = {}
+
+    for i, match in enumerate(matches):
+        key = f"mid{i}"
+        id_placeholders.append(f":{key}")
+        model_params[key] = match["id"]
+
+    models_sql = f"""
+        SELECT
+            match_id,
+            model_version,
+            prediction_json,
+            confidence
+        FROM models
+        WHERE match_id IN ({", ".join(id_placeholders)})
+        ORDER BY match_id, model_version
+    """
+
+    model_rows = db_query_list(models_sql, model_params)
+
+    # Group models by match_id in memory.
+    models_by_match = defaultdict(list)
+
+    for r in model_rows:
+        mid = r.get("match_id")
+
+        try:
+            pred = json.loads(r.get("prediction_json") or "{}")
+        except Exception:
+            pred = {}
+
+        label = pred.get("prediction", "Unknown")
+
+        models_by_match[mid].append({
+            "model_version": r.get("model_version"),
+            "probabilities": pred.get("probabilities", {}),
+            "confidence": r.get("confidence"),
+            "_prediction": label,
+        })
 
     result = []
+
     for match in matches:
         mid = match["id"]
-        rows = db_query_list(
-            "SELECT model_version, prediction_json, confidence FROM models WHERE match_id = :match_id ORDER BY model_version",
-            {"match_id": mid},
-        )
+
         grouped = defaultdict(list)
-        for r in rows:
-            try:
-                pred = json.loads(r.get("prediction_json") or "{}")
-            except Exception:
-                pred = {}
-            label = pred.get("prediction", "Unknown")
-            grouped[label].append({
-                "model_version": r.get("model_version"),
-                "probabilities": pred.get("probabilities", {}),
-                "confidence": r.get("confidence"),
-            })
+
+        for model in models_by_match.get(mid, []):
+            label = model.pop("_prediction", "Unknown")
+            grouped[label].append(model)
 
         grouped_list = []
-        for k, v in grouped.items():
-            avg_conf = sum((m.get("confidence") or 0) for m in v) / len(v) if v else 0
+
+        for label, model_list in grouped.items():
+            avg_conf = (
+                sum(
+                    (m.get("confidence") or 0)
+                    for m in model_list
+                ) / len(model_list)
+                if model_list
+                else 0
+            )
+
             grouped_list.append({
-                "prediction": k,
-                "num_models": len(v),
+                "prediction": label,
+                "num_models": len(model_list),
                 "avg_confidence": round(avg_conf, 3),
-                "models": v,
+                "models": model_list,
             })
 
-        grouped_list.sort(key=lambda x: (x["num_models"], x["avg_confidence"]), reverse=True)
+        grouped_list.sort(
+            key=lambda x: (
+                x["num_models"],
+                x["avg_confidence"]
+            ),
+            reverse=True
+        )
+
         result.append({
             "match_id": match["id"],
             "home": match["home_team_name"],
@@ -729,7 +806,10 @@ def grouped_predictions():
             "grouped_predictions": grouped_list,
         })
 
-    return jsonify(result)
+    return jsonify({
+        "count": len(result),
+        "matches": result
+    })
 
 @app.route("/bookmark/all", methods=["GET"])
 def all_bookmarks():
