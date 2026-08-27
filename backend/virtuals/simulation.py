@@ -587,7 +587,10 @@ def simulate_match(match_id, emit_update_callback=None):
                 safe_commit(session)
 
                 if emit_update_callback:
-                    emit_update_callback(match_live)
+                    emit_update_callback(
+                         match_live,
+                         event,
+                   )
 
             # FINALIZE
             match_live.home_score = final_home
@@ -596,6 +599,12 @@ def simulate_match(match_id, emit_update_callback=None):
             match_live.is_simulating = False
 
             safe_commit(session)
+
+             if emit_update_callback:
+               emit_update_callback(
+                 match_live,
+                 None,
+               )
 
             settlement_executor.submit(_settle_virtual_bets_with_context, match_id)
             _record_simulation_metrics(match_live)

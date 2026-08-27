@@ -37,6 +37,7 @@ KENYA_OFFSET = 3
 SCRIPTS = [
     "update.py",
     "h2h.py",
+    "Odds.py",
     "accumulator.py",
     "book.py",
     "dash2.py",
@@ -59,12 +60,16 @@ def now_kenya():
 # --------------------------------------------------
 # Database / match helpers
 # --------------------------------------------------
-
 async def get_upcoming_matches():
+    """
+    Get today's upcoming matches based on Kenya calendar date.
+
+    utcdate is stored as a timezone-aware UTC timestamp in PostgreSQL.
+    """
 
     kenya_now = now_kenya()
 
-    # Start/end of today in Kenya
+    # Kenya start/end of today
     kenya_start = kenya_now.replace(
         hour=0,
         minute=0,
@@ -74,9 +79,10 @@ async def get_upcoming_matches():
 
     kenya_end = kenya_start + timedelta(days=1)
 
-    # Convert Kenya boundaries to UTC
-    utc_start = kenya_start - timedelta(hours=KENYA_OFFSET)
-    utc_end = kenya_end - timedelta(hours=KENYA_OFFSET)
+    # Convert Kenya boundaries to UTC.
+    # Keep them timezone-aware because PostgreSQL utcdate is timestamptz.
+    utc_start = kenya_start.astimezone(timezone.utc)
+    utc_end = kenya_end.astimezone(timezone.utc)
 
     rows = await query_db(
         """
@@ -97,29 +103,31 @@ async def get_upcoming_matches():
     )
 
     now_utc = datetime.now(timezone.utc)
+
     upcoming = []
 
     for row in rows:
+
         match_utc = row["utcdate"]
 
         if match_utc is None:
             continue
 
-        # asyncpg normally returns an aware datetime
+        # PostgreSQL normally returns timestamptz as aware datetime.
         if match_utc.tzinfo is None:
             match_utc = match_utc.replace(
                 tzinfo=timezone.utc
             )
         else:
-            match_utc = match_utc.astimezone(timezone.utc)
+            match_utc = match_utc.astimezone(
+                timezone.utc
+            )
 
         # Only future matches
         if match_utc > now_utc:
 
-            match_local = (
-                match_utc +
-                timedelta(hours=KENYA_OFFSET)
-            )
+            # Convert UTC -> Kenya using the actual timezone
+            match_local = match_utc.astimezone(KENYA)
 
             upcoming.append(
                 (
@@ -387,7 +395,6 @@ def create_progress():
 # --------------------------------------------------
 # Worker loop
 # --------------------------------------------------
-
 async def main():
 
     global STOP_WORKER
@@ -411,22 +418,15 @@ async def main():
             )
             return
 
-        first_match_utc = matches[0][2]
-        last_match_utc = matches[-1][2]
-
-        # First cycle = 45 minutes after first match
-        first_cycle_time = (
-            first_match_utc + timedelta(minutes=45)
-        )
-
-        # Final cycle = 2h15 after last match
-        final_cycle_time = (
-            last_match_utc + timedelta(hours=2, minutes=15)
-        )
-
         # ------------------------------------------
         # Start / wait choice
         # ------------------------------------------
+
+        first_match_utc = matches[0][2]
+
+        first_cycle_time = (
+            first_match_utc + timedelta(minutes=45)
+        )
 
         choice = input(
             "Press [Enter] to start now, "
@@ -446,7 +446,10 @@ async def main():
 
         while not STOP_WORKER:
 
+            # --------------------------------------
             # Refresh today's upcoming matches
+            # --------------------------------------
+
             matches = await get_upcoming_matches()
 
             if not matches:
@@ -459,6 +462,19 @@ async def main():
                 break
 
             print_match_summary(matches)
+
+            # --------------------------------------
+            # IMPORTANT:
+            # Recalculate latest last match every
+            # cycle from the database.
+            # --------------------------------------
+
+            last_match_utc = matches[-1][2]
+
+            final_cycle_time = (
+                last_match_utc
+                + timedelta(hours=2, minutes=15)
+            )
 
             # --------------------------------------
             # Run pipeline
@@ -479,17 +495,95 @@ async def main():
             )
 
             # --------------------------------------
-            # Check final match
+            # Refresh matches again after update
+            #
+            # This catches:
+            # - new matches
+            # - postponed matches
+            # - cancelled matches
+            # - matches that have started
             # --------------------------------------
 
+            matches_after_update = (
+                await get_upcoming_matches()
+            )
+
+            # --------------------------------------
+            # No future matches remain
+            # --------------------------------------
+
+            if not matches_after_update:
+
+                print(
+                    "\nNo more upcoming matches today.\n"
+                )
+
+                # If we had a known last match, wait
+                # for the final update time.
+                now = datetime.now(timezone.utc)
+
+                if now < final_cycle_time:
+
+                    print(
+                        "All today's matches have started.\n"
+                        f"Final update scheduled for "
+                        f"{final_cycle_time.astimezone(KENYA):%H:%M} "
+                        "Kenya time.\n"
+                    )
+
+                    await sleep_until(
+                        final_cycle_time
+                    )
+
+                    if STOP_WORKER:
+                        break
+
+                    # ----------------------------------
+                    # Final update
+                    # ----------------------------------
+
+                    with create_progress() as progress:
+
+                        await run_all_scripts_sequential(
+                            progress
+                        )
+
+                    asyncio.create_task(
+                        clear_screen_after_delay(60)
+                    )
+
+                    print(
+                        "\nFinal update done. "
+                        "Worker exiting.\n"
+                    )
+
+                break
+
+            # --------------------------------------
+            # Recalculate last match after refresh
+            # --------------------------------------
+
+            last_match_utc = (
+                matches_after_update[-1][2]
+            )
+
+            final_cycle_time = (
+                last_match_utc
+                + timedelta(hours=2, minutes=15)
+            )
+
             now = datetime.now(timezone.utc)
+
+            # --------------------------------------
+            # Last match has started
+            # --------------------------------------
 
             if now >= last_match_utc:
 
                 print(
-                    "Last match has started. "
+                    "\nLast known match has started.\n"
                     f"Sleeping until "
-                    f"{final_cycle_time + timedelta(hours=KENYA_OFFSET):%H:%M} "
+                    f"{final_cycle_time.astimezone(KENYA):%H:%M} "
                     "Kenya time for final update...\n"
                 )
 
@@ -515,7 +609,7 @@ async def main():
                 )
 
                 print(
-                    "Final update done. "
+                    "\nFinal update done. "
                     "Worker exiting.\n"
                 )
 
@@ -533,9 +627,13 @@ async def main():
                 )
 
                 try:
-                    await asyncio.sleep(15 * 60)
+
+                    await asyncio.sleep(
+                        15 * 60
+                    )
 
                 except asyncio.CancelledError:
+
                     break
 
     except asyncio.CancelledError:
@@ -550,7 +648,8 @@ async def main():
 
         print(
             f"\n{Fore.RED}"
-            f"[Worker error] {type(exc).__name__}: {exc}"
+            f"[Worker error] "
+            f"{type(exc).__name__}: {exc}"
             f"{Style.RESET_ALL}"
         )
 

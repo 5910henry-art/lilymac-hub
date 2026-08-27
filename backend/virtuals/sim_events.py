@@ -234,7 +234,10 @@ def generate_event_for_match(match, session, emit_update_callback=None, now_dt=N
         safe_commit(session)
 
         if emit_update_callback:
-            emit_update_callback(match)
+            emit_update_callback(
+               match,
+               event,
+            )
 
     except Exception:
         session.rollback()
