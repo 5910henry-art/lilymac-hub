@@ -6,14 +6,20 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from sqlalchemy import text, func
 from sqlalchemy.orm import Session
 
-from virtuals.config_settings import SCHEMA,STATUS_FINISHED
+from virtuals.config_settings import SCHEMA, STATUS_FINISHED
 from virtuals.config import db, logger, redis_client
 from virtuals.model import Fixture, Event
-from virtuals.utils import now_utc, to_utc, compute_match_status, _match_to_dict
+from virtuals.utils import (
+    now_utc,
+    to_utc,
+    compute_match_status,
+    _match_to_dict,
+)
 
 bp = Blueprint("routes", __name__)
 
 # ---------------- Constants ----------------
+
 ROUND_INTERVAL = 120
 MATCHES_PER_ROUND = 10
 TOTAL_ROUNDS = 38
@@ -49,14 +55,54 @@ T_TRANSACTIONS = table_name("transactions")
 T_BAL_HISTORY = table_name("balance_history")
 
 
+# ============================================================
+# ROUND / MATCH HELPERS
+# ============================================================
+
+def _matches_for_round(round_id: int):
+    """
+    Return ALL matches belonging to a round.
+
+    IMPORTANT:
+    Finished matches are intentionally included here so that
+    /virtual/round/<round_id> can display historical results.
+    """
+    return (
+        Fixture.query
+        .filter(Fixture.round == round_id)
+        .order_by(Fixture.id)
+        .all()
+    )
+
+
 def _active_matches_for_round(round_id: int):
-    """Return only non-finished matches for a round."""
-    matches = Fixture.query.filter_by(round=round_id).order_by(Fixture.id).all()
-    return [m for m in matches if compute_match_status(m) != "FINISHED"]
+    """
+    Return only matches that have not finished.
+
+    Used by /virtual/rounds so the active round scheduler does not
+    keep returning rounds that are completely finished.
+    """
+    matches = _matches_for_round(round_id)
+
+    return [
+        m
+        for m in matches
+        if compute_match_status(m) != STATUS_FINISHED
+    ]
 
 
 def _round_status_from_matches(matches):
-    """Derive round status from non-finished matches only."""
+    """
+    Derive the overall status of a round.
+
+    Priority:
+        RUNNING
+        OPEN
+        SCHEDULED
+        FINISHED
+
+    This function accepts both active and finished matches.
+    """
     if not matches:
         return None
 
@@ -64,12 +110,101 @@ def _round_status_from_matches(matches):
 
     if any(s == "RUNNING" for s in statuses):
         return "RUNNING"
+
     if any(s == "OPEN" for s in statuses):
         return "OPEN"
+
+    if any(s == "SCHEDULED" for s in statuses):
+        return "SCHEDULED"
+
+    if all(s == STATUS_FINISHED for s in statuses):
+        return STATUS_FINISHED
+
     return "SCHEDULED"
 
 
-# ---------------- API endpoints ----------------
+def _round_metadata(round_id: int, matches, now=None):
+    """
+    Build consistent metadata for a round.
+
+    Works for scheduled, open, running and finished rounds.
+    """
+    if now is None:
+        now = now_utc()
+
+    if not matches:
+        return {
+            "round": round_id,
+            "status": None,
+            "open_time": None,
+            "time_to_start": None,
+            "time_to_end": None,
+        }
+
+    start_times = [
+        to_utc(m.start_time)
+        for m in matches
+        if m.start_time
+    ]
+
+    end_times = [
+        to_utc(m.end_time)
+        for m in matches
+        if m.end_time
+    ]
+
+    open_times = [
+        to_utc(m.open_time)
+        for m in matches
+        if m.open_time
+    ]
+
+    round_start = (
+        min(start_times)
+        if start_times
+        else (
+            min(open_times)
+            if open_times
+            else None
+        )
+    )
+
+    round_end = (
+        max(end_times)
+        if end_times
+        else None
+    )
+
+    round_status = (
+        _round_status_from_matches(matches)
+        or "SCHEDULED"
+    )
+
+    return {
+        "round": round_id,
+        "status": round_status,
+        "open_time": (
+            min(open_times).isoformat()
+            if open_times
+            else None
+        ),
+        "time_to_start": (
+            int((round_start - now).total_seconds())
+            if round_start
+            else None
+        ),
+        "time_to_end": (
+            int((round_end - now).total_seconds())
+            if round_end
+            else None
+        ),
+    }
+
+
+# ============================================================
+# HOME
+# ============================================================
+
 @bp.route("/")
 def home():
     return {
@@ -82,6 +217,10 @@ def home():
     }
 
 
+# ============================================================
+# BETTING
+# ============================================================
+
 @bp.route("/bet", methods=["POST"])
 @jwt_required()
 def place_virtual_bet():
@@ -89,15 +228,20 @@ def place_virtual_bet():
     user_id = int(get_jwt_identity())
 
     selections = data.get("selections")
+
     if selections is None:
         match_id = data.get("match_id")
         selection = data.get("selection")
         stake_val = data.get("stake")
 
-        if match_id is None or selection is None or stake_val is None:
+        if (
+            match_id is None
+            or selection is None
+            or stake_val is None
+        ):
             return jsonify({
                 "success": False,
-                "error": "match_id, selection and stake required"
+                "error": "match_id, selection and stake required",
             }), 400
 
         selections = [{
@@ -106,39 +250,60 @@ def place_virtual_bet():
         }]
 
     if not isinstance(selections, list) or not selections:
-        return jsonify({"success": False, "error": "Selections must be a non-empty list"}), 400
+        return jsonify({
+            "success": False,
+            "error": "Selections must be a non-empty list",
+        }), 400
 
     if len(selections) > MAX_SELECTIONS_PER_TICKET:
         return jsonify({
             "success": False,
-            "error": f"Max {MAX_SELECTIONS_PER_TICKET} selections allowed"
+            "error": f"Max {MAX_SELECTIONS_PER_TICKET} selections allowed",
         }), 400
 
     try:
         stake = float(data.get("stake"))
     except Exception:
-        return jsonify({"success": False, "error": "Invalid stake"}), 400
+        return jsonify({
+            "success": False,
+            "error": "Invalid stake",
+        }), 400
 
     if stake <= 0 or stake > MAX_STAKE:
         return jsonify({
             "success": False,
-            "error": f"Stake must be >0 and <= {MAX_STAKE}"
+            "error": f"Stake must be >0 and <= {MAX_STAKE}",
         }), 400
 
     try:
         with Session(bind=db.engine) as session:
             with session.begin():
+
                 user_row = session.execute(
-                    text(f"SELECT id, balance FROM {T_USER} WHERE id = :uid FOR UPDATE"),
+                    text(
+                        f"""
+                        SELECT id, balance
+                        FROM {T_USER}
+                        WHERE id = :uid
+                        FOR UPDATE
+                        """
+                    ),
                     {"uid": user_id},
                 ).fetchone()
 
                 if not user_row:
-                    return jsonify({"success": False, "error": "User not found"}), 404
+                    return jsonify({
+                        "success": False,
+                        "error": "User not found",
+                    }), 404
 
                 balance = float(user_row.balance or 0.0)
+
                 if balance < stake:
-                    return jsonify({"success": False, "error": "Insufficient balance"}), 400
+                    return jsonify({
+                        "success": False,
+                        "error": "Insufficient balance",
+                    }), 400
 
                 total_odds = 1.0
                 seen_matches = set()
@@ -146,27 +311,38 @@ def place_virtual_bet():
 
                 for sel in selections:
                     mid = int(sel.get("match_id"))
-                    choice = str(sel.get("selection")).lower()
+                    choice = str(
+                        sel.get("selection")
+                    ).lower()
 
                     if mid in seen_matches:
-                        raise ValueError(f"Duplicate match {mid}")
+                        raise ValueError(
+                            f"Duplicate match {mid}"
+                        )
+
                     seen_matches.add(mid)
 
                     if choice not in ALLOWED_SELECTIONS:
-                        raise ValueError(f"Invalid selection {choice}")
+                        raise ValueError(
+                            f"Invalid selection {choice}"
+                        )
 
                     mrow = session.execute(
-                        text(f"""
-                            SELECT id, start_time, open_time
+                        text(
+                            f"""
+                            SELECT id, start_time, open_time, end_time
                             FROM {T_FIXTURES}
                             WHERE id = :mid
                             FOR UPDATE
-                        """),
+                            """
+                        ),
                         {"mid": mid},
                     ).fetchone()
 
                     if not mrow:
-                        raise ValueError(f"Match {mid} not found")
+                        raise ValueError(
+                            f"Match {mid} not found"
+                        )
 
                     class Tmp:
                         pass
@@ -174,17 +350,22 @@ def place_virtual_bet():
                     tmp = Tmp()
                     tmp.open_time = mrow.open_time
                     tmp.start_time = mrow.start_time
-                    tmp.end_time = None
+                    tmp.end_time = mrow.end_time
 
-                    # Allow betting on OPEN and SCHEDULED matches
                     status = compute_match_status(tmp)
-                    if status not in ("OPEN", "SCHEDULED"):
+
+                    if status not in (
+                        "OPEN",
+                        "SCHEDULED",
+                    ):
                         raise ValueError(
-                            f"Match {mid} not available for betting (must be OPEN or SCHEDULED)"
+                            f"Match {mid} not available for betting "
+                            f"(must be OPEN or SCHEDULED)"
                         )
 
                     existing = session.execute(
-                        text(f"""
+                        text(
+                            f"""
                             SELECT 1
                             FROM {T_VBETS}
                             WHERE user_id = :uid
@@ -192,26 +373,45 @@ def place_virtual_bet():
                               AND status = 'OPEN'
                             LIMIT 1
                             FOR UPDATE
-                        """),
-                        {"uid": user_id, "mid": mid},
+                            """
+                        ),
+                        {
+                            "uid": user_id,
+                            "mid": mid,
+                        },
                     ).fetchone()
 
                     if existing:
-                        raise ValueError(f"Already have open bet on match {mid}")
+                        raise ValueError(
+                            f"Already have open bet on match {mid}"
+                        )
 
                     odds_row = session.execute(
-                        text(f"""
-                            SELECT home, draw, away, over15, under15, over25, under25, btts_yes, btts_no
+                        text(
+                            f"""
+                            SELECT
+                                home,
+                                draw,
+                                away,
+                                over15,
+                                under15,
+                                over25,
+                                under25,
+                                btts_yes,
+                                btts_no
                             FROM {T_ODDS}
                             WHERE match_id = :mid
                             ORDER BY created_at DESC
                             LIMIT 1
-                        """),
+                            """
+                        ),
                         {"mid": mid},
                     ).fetchone()
 
                     if not odds_row:
-                        raise ValueError(f"No odds for match {mid}")
+                        raise ValueError(
+                            f"No odds for match {mid}"
+                        )
 
                     sel_map = {
                         "home": odds_row.home,
@@ -226,22 +426,40 @@ def place_virtual_bet():
                     }
 
                     sel_odds = sel_map.get(choice)
+
                     if sel_odds is None:
-                        raise ValueError(f"No odds for {choice} on match {mid}")
+                        raise ValueError(
+                            f"No odds for {choice} on match {mid}"
+                        )
 
                     odds_map[mid] = float(sel_odds)
                     total_odds *= float(sel_odds)
 
-                new_balance = round(balance - stake, 2)
+                new_balance = round(
+                    balance - stake,
+                    2,
+                )
+
                 ts_dt = now_utc()
                 ts = ts_dt.isoformat()
 
-                # One ticket ID shared by all selections in this accumulator ticket
-                ticket_id = f"vb-{user_id}-{int(ts_dt.timestamp())}"
+                ticket_id = (
+                    f"vb-{user_id}-"
+                    f"{int(ts_dt.timestamp())}"
+                )
 
                 session.execute(
-                    text(f"UPDATE {T_USER} SET balance = :bal WHERE id = :uid"),
-                    {"bal": new_balance, "uid": user_id},
+                    text(
+                        f"""
+                        UPDATE {T_USER}
+                        SET balance = :bal
+                        WHERE id = :uid
+                        """
+                    ),
+                    {
+                        "bal": new_balance,
+                        "uid": user_id,
+                    },
                 )
 
                 for sel in selections:
@@ -250,11 +468,32 @@ def place_virtual_bet():
                     odd = odds_map[mid]
 
                     session.execute(
-                        text(f"""
+                        text(
+                            f"""
                             INSERT INTO {T_VBETS}
-                            (ticket_id, user_id, match_id, selection, stake, odds, status, created_at)
-                            VALUES (:tid, :uid, :mid, :sel, :stk, :od, 'OPEN', :ts)
-                        """),
+                            (
+                                ticket_id,
+                                user_id,
+                                match_id,
+                                selection,
+                                stake,
+                                odds,
+                                status,
+                                created_at
+                            )
+                            VALUES
+                            (
+                                :tid,
+                                :uid,
+                                :mid,
+                                :sel,
+                                :stk,
+                                :od,
+                                'OPEN',
+                                :ts
+                            )
+                            """
+                        ),
                         {
                             "tid": ticket_id,
                             "uid": user_id,
@@ -267,29 +506,72 @@ def place_virtual_bet():
                     )
 
                     try:
-                        redis_client.incrbyfloat(f"virtual:exposure:{mid}:{choice}", stake)
+                        redis_client.incrbyfloat(
+                            f"virtual:exposure:{mid}:{choice}",
+                            stake,
+                        )
                     except Exception:
-                        logger.exception("Redis exposure failed")
+                        logger.exception(
+                            "Redis exposure failed"
+                        )
 
                 session.execute(
-                    text(f"""
+                    text(
+                        f"""
                         INSERT INTO {T_TRANSACTIONS}
-                        (user_id, type, amount, created_at)
-                        VALUES (:uid, 'Withdraw', :amt, :ts)
-                    """),
-                    {"uid": user_id, "amt": stake, "ts": ts},
+                        (
+                            user_id,
+                            type,
+                            amount,
+                            created_at
+                        )
+                        VALUES
+                        (
+                            :uid,
+                            'Withdraw',
+                            :amt,
+                            :ts
+                        )
+                        """
+                    ),
+                    {
+                        "uid": user_id,
+                        "amt": stake,
+                        "ts": ts,
+                    },
                 )
 
                 session.execute(
-                    text(f"""
+                    text(
+                        f"""
                         INSERT INTO {T_BAL_HISTORY}
-                        (user_id, balance, created_at)
-                        VALUES (:uid, :bal, :ts)
-                    """),
-                    {"uid": user_id, "bal": new_balance, "ts": ts},
+                        (
+                            user_id,
+                            balance,
+                            created_at
+                        )
+                        VALUES
+                        (
+                            :uid,
+                            :bal,
+                            :ts
+                        )
+                        """
+                    ),
+                    {
+                        "uid": user_id,
+                        "bal": new_balance,
+                        "ts": ts,
+                    },
                 )
 
-                potential_win = min(MAX_WIN, round(stake * total_odds, 2))
+                potential_win = min(
+                    MAX_WIN,
+                    round(
+                        stake * total_odds,
+                        2,
+                    ),
+                )
 
                 return jsonify({
                     "success": True,
@@ -300,16 +582,31 @@ def place_virtual_bet():
                 })
 
     except ValueError as e:
-        logger.warning("Validation error: %s", e)
-        return jsonify({"success": False, "error": str(e)}), 400
+        logger.warning(
+            "Validation error: %s",
+            e,
+        )
+
+        return jsonify({
+            "success": False,
+            "error": str(e),
+        }), 400
+
     except Exception as e:
-        logger.exception("Bet placement failed")
+        logger.exception(
+            "Bet placement failed"
+        )
+
         return jsonify({
             "success": False,
             "error": "Internal error",
             "detail": str(e),
         }), 500
 
+
+# ============================================================
+# USER BETS
+# ============================================================
 
 @bp.route("/bets", methods=["GET"])
 @jwt_required()
@@ -318,15 +615,26 @@ def my_virtual_bets():
 
     try:
         rows = db.session.execute(
-            text(f"""
-                SELECT id, ticket_id, match_id, selection, stake, odds, status, created_at
+            text(
+                f"""
+                SELECT
+                    id,
+                    ticket_id,
+                    match_id,
+                    selection,
+                    stake,
+                    odds,
+                    status,
+                    created_at
                 FROM {T_VBETS}
                 WHERE user_id = :uid
                 ORDER BY created_at DESC, id DESC
                 LIMIT 500
-            """),
+                """
+            ),
             {"uid": user_id},
         ).fetchall()
+
     except Exception:
         return jsonify([])
 
@@ -343,7 +651,9 @@ def my_virtual_bets():
         created_at = row[7]
 
         if not ticket_id:
-            ticket_id = f"vb-{user_id}-{bet_id}"
+            ticket_id = (
+                f"vb-{user_id}-{bet_id}"
+            )
 
         if ticket_id not in tickets_map:
             tickets_map[ticket_id] = {
@@ -354,117 +664,175 @@ def my_virtual_bets():
             }
 
         match_row = db.session.execute(
-            text(f"""
-                SELECT home, away, home_score, away_score, status
+            text(
+                f"""
+                SELECT
+                    home,
+                    away,
+                    home_score,
+                    away_score,
+                    status
                 FROM {T_FIXTURES}
                 WHERE id = :mid
-            """),
+                """
+            ),
             {"mid": match_id},
         ).fetchone()
 
-        tickets_map[ticket_id]["selections"].append({
+        tickets_map[ticket_id][
+            "selections"
+        ].append({
             "bet_id": bet_id,
             "match_id": match_id,
-            "home_team": match_row[0] if match_row else None,
-            "away_team": match_row[1] if match_row else None,
-            "home_score": match_row[2] if match_row else None,
-            "away_score": match_row[3] if match_row else None,
-            "match_status": match_row[4] if match_row else None,
+            "home_team": (
+                match_row[0]
+                if match_row
+                else None
+            ),
+            "away_team": (
+                match_row[1]
+                if match_row
+                else None
+            ),
+            "home_score": (
+                match_row[2]
+                if match_row
+                else None
+            ),
+            "away_score": (
+                match_row[3]
+                if match_row
+                else None
+            ),
+            "match_status": (
+                match_row[4]
+                if match_row
+                else None
+            ),
             "selection": selection,
             "odds": odds,
             "status": status,
         })
 
     out = []
-    for ticket in tickets_map.values():
-        statuses = [s["status"] for s in ticket["selections"]]
 
-        if all(s == "WON" for s in statuses):
+    for ticket in tickets_map.values():
+        statuses = [
+            s["status"]
+            for s in ticket["selections"]
+        ]
+
+        if statuses and all(
+            s == "WON"
+            for s in statuses
+        ):
             ticket["status"] = "WON"
-        elif any(s == "LOST" for s in statuses):
+
+        elif any(
+            s == "LOST"
+            for s in statuses
+        ):
             ticket["status"] = "LOST"
+
         else:
             ticket["status"] = "OPEN"
 
-        ticket["selection_count"] = len(ticket["selections"])
+        ticket["selection_count"] = len(
+            ticket["selections"]
+        )
+
         out.append(ticket)
 
-    out.sort(key=lambda x: x["created_at"], reverse=True)
+    out.sort(
+        key=lambda x: x["created_at"],
+        reverse=True,
+    )
+
     return jsonify(out)
 
 
+# ============================================================
+# ROUNDS
+# ============================================================
+
 @bp.route("/rounds")
 def rounds():
-    rows = db.session.query(Fixture.round)\
-        .filter(Fixture.round.isnot(None))\
-        .group_by(Fixture.round)\
-        .order_by(func.min(Fixture.open_time)).all()
+    rows = (
+        db.session.query(Fixture.round)
+        .filter(Fixture.round.isnot(None))
+        .group_by(Fixture.round)
+        .order_by(func.min(Fixture.open_time))
+        .all()
+    )
 
     now = now_utc()
     out = []
 
     for r in rows:
         round_id = int(r[0])
-        matches = _active_matches_for_round(round_id)
 
-        # Do not include rounds that are fully finished
+        # Keep /rounds focused on rounds that are still active
+        # or scheduled.
+        matches = _active_matches_for_round(
+            round_id
+        )
+
         if not matches:
             continue
 
-        start_times = [to_utc(m.start_time) for m in matches if m.start_time]
-        end_times = [to_utc(m.end_time) for m in matches if m.end_time]
-        open_times = [to_utc(m.open_time) for m in matches if m.open_time]
+        meta = _round_metadata(
+            round_id,
+            matches,
+            now,
+        )
 
-        round_start = min(start_times) if start_times else (min(open_times) if open_times else None)
-        round_end = max(end_times) if end_times else None
+        out.append(meta)
 
-        round_status = _round_status_from_matches(matches) or "SCHEDULED"
+    out.sort(
+        key=lambda x: x.get("round", 0)
+    )
 
-        time_to_start = int((round_start - now).total_seconds()) if round_start else None
-        time_to_end = int((round_end - now).total_seconds()) if round_end else None
-
-        out.append({
-            "round": round_id,
-            "open_time": (min(open_times).isoformat() if open_times else None),
-            "status": round_status,
-            "time_to_start": time_to_start,
-            "time_to_end": time_to_end,
-        })
-
-    out.sort(key=lambda x: x.get("round", 0))
     return jsonify(out)
 
 
+# ============================================================
+# SINGLE ROUND
+# ============================================================
+
 @bp.route("/round/<int:round_id>")
 def round_matches(round_id):
-    matches = _active_matches_for_round(round_id)
+    """
+    Return ALL matches for the requested round.
+
+    Unlike /rounds, this endpoint deliberately includes
+    finished matches so users can view previous rounds/results.
+    """
+
+    matches = _matches_for_round(round_id)
 
     if not matches:
         return jsonify([])
 
     now = now_utc()
 
-    start_times = [to_utc(m.start_time) for m in matches if m.start_time]
-    end_times = [to_utc(m.end_time) for m in matches if m.end_time]
-    open_times = [to_utc(m.open_time) for m in matches if m.open_time]
-
-    round_start = min(start_times) if start_times else (min(open_times) if open_times else None)
-    round_end = max(end_times) if end_times else None
-
-    round_status = _round_status_from_matches(matches) or "SCHEDULED"
-
-    round_meta = {
-        "round": round_id,
-        "status": round_status,
-        "open_time": (min(open_times).isoformat() if open_times else None),
-        "time_to_start": int((round_start - now).total_seconds()) if round_start else None,
-        "time_to_end": int((round_end - now).total_seconds()) if round_end else None,
-    }
+    round_meta = _round_metadata(
+        round_id,
+        matches,
+        now,
+    )
 
     return jsonify({
         "round": round_meta,
-        "matches": [_match_to_dict(x) for x in matches],
+        "matches": [
+            _match_to_dict(match)
+            for match in matches
+        ],
     })
+
+
+# ============================================================
+# FINISHED MATCHES
+# ============================================================
 
 @bp.route("/finished")
 def finished_matches():
@@ -483,38 +851,81 @@ def finished_matches():
             "away": m.away,
             "home_score": m.home_score,
             "away_score": m.away_score,
-            "start_time": m.start_time.isoformat(),
-            "end_time": m.updated_at.isoformat()
+            "start_time": (
+                m.start_time.isoformat()
+                if m.start_time
+                else None
+            ),
+            "end_time": (
+                m.updated_at.isoformat()
+                if m.updated_at
+                else (
+                    m.end_time.isoformat()
+                    if m.end_time
+                    else None
+                )
+            ),
         }
         for m in fixtures
     ])
+
+
+# ============================================================
+# EVENTS
+# ============================================================
+
 @bp.route("/events/<int:match_id>", methods=["GET"])
 def get_virtual_event(match_id):
     try:
-        redis_key = f"virtual:events:match:{match_id}"
+        redis_key = (
+            f"virtual:events:match:{match_id}"
+        )
+
         recent = []
 
         try:
-            raw = redis_client.lrange(redis_key, 0, -1)
+            raw = redis_client.lrange(
+                redis_key,
+                0,
+                -1,
+            )
+
             if raw:
-                recent = [json.loads(x) for x in raw]
+                recent = [
+                    json.loads(x)
+                    for x in raw
+                ]
+
                 recent.reverse()
+
         except Exception:
-            logger.exception("Redis read failed for %s", redis_key)
+            logger.exception(
+                "Redis read failed for %s",
+                redis_key,
+            )
 
-        db_events = Event.query\
-            .filter_by(match_id=match_id)\
-            .order_by(Event.minute)\
+        db_events = (
+            Event.query
+            .filter_by(match_id=match_id)
+            .order_by(Event.minute)
             .all()
+        )
 
-        db_list = [{
-            "id": e.id,
-            "minute": e.minute,
-            "team": e.team,
-            "type": e.type,
-            "description": e.description,
-            "created_at": e.created_at.isoformat() if e.created_at else None,
-        } for e in db_events]
+        db_list = [
+            {
+                "id": e.id,
+                "minute": e.minute,
+                "team": e.team,
+                "type": e.type,
+                "description": e.description,
+                "created_at": (
+                    e.created_at.isoformat()
+                    if e.created_at
+                    else None
+                ),
+            }
+            for e in db_events
+        ]
 
         if recent:
             seen = set()
@@ -527,45 +938,70 @@ def get_virtual_event(match_id):
             for e in recent:
                 if e.get("id") in seen:
                     continue
+
                 merged.append(e)
 
-            return jsonify(merged), 200
+            return jsonify(
+                merged
+            ), 200
 
-        return jsonify(db_list), 200
+        return jsonify(
+            db_list
+        ), 200
 
     except Exception as ex:
-        logger.exception("Error fetching events for match %s", match_id)
+        logger.exception(
+            "Error fetching events for match %s",
+            match_id,
+        )
+
         return jsonify({
             "error": "Internal server error",
             "detail": str(ex),
         }), 500
 
+
+# ============================================================
+# LEAGUE TABLE
+# ============================================================
+
 @bp.route("/table")
 def league_table():
-    season_id = request.args.get("season_id", type=int)
+    season_id = request.args.get(
+        "season_id",
+        type=int,
+    )
 
-    # If not provided, use latest completed season
+    # If not provided, use latest completed season.
     if not season_id:
         latest = (
             db.session.query(Fixture.season)
-            .filter(Fixture.status == "FINISHED")
-            .order_by(Fixture.season.desc())
+            .filter(
+                Fixture.status == "FINISHED"
+            )
+            .order_by(
+                Fixture.season.desc()
+            )
             .first()
         )
 
         if not latest:
-            return jsonify({"season_id": None, "table": []})
+            return jsonify({
+                "season_id": None,
+                "table": [],
+            })
 
         season_id = latest[0]
 
-    #  Fetch fixtures for THAT season
     fixtures = (
         Fixture.query
         .filter(
             Fixture.status == "FINISHED",
-            Fixture.season == season_id
+            Fixture.season == season_id,
         )
-        .order_by(Fixture.end_time.asc())
+        .order_by(
+            Fixture.end_time.asc()
+        )
         .all()
     )
 
@@ -575,10 +1011,14 @@ def league_table():
         home = f.home
         away = f.away
 
-        h = int(f.home_score or 0)
-        a = int(f.away_score or 0)
+        h = int(
+            f.home_score or 0
+        )
 
-        # Init teams
+        a = int(
+            f.away_score or 0
+        )
+
         for team in [home, away]:
             if team not in table:
                 table[team] = {
@@ -590,21 +1030,18 @@ def league_table():
                     "gf": 0,
                     "ga": 0,
                     "points": 0,
-                    "form": []
+                    "form": [],
                 }
 
-        # Played
         table[home]["played"] += 1
         table[away]["played"] += 1
 
-        # Goals
         table[home]["gf"] += h
         table[home]["ga"] += a
 
         table[away]["gf"] += a
         table[away]["ga"] += h
 
-        # Result
         if h > a:
             table[home]["wins"] += 1
             table[home]["points"] += 3
@@ -624,28 +1061,39 @@ def league_table():
         else:
             table[home]["draws"] += 1
             table[away]["draws"] += 1
+
             table[home]["points"] += 1
             table[away]["points"] += 1
 
             table[home]["form"].append("D")
             table[away]["form"].append("D")
 
-    # Keep last 5 form
     for team in table.values():
         team["form"] = team["form"][-5:]
 
-    standings = list(table.values())
+    standings = list(
+        table.values()
+    )
 
     standings.sort(
-        key=lambda x: (x["points"], x["gf"] - x["ga"], x["gf"]),
+        key=lambda x: (
+            x["points"],
+            x["gf"] - x["ga"],
+            x["gf"],
+        ),
         reverse=True,
     )
 
-    for i, team in enumerate(standings, start=1):
+    for i, team in enumerate(
+        standings,
+        start=1,
+    ):
         team["rank"] = i
-        team["goal_difference"] = team["gf"] - team["ga"]
+        team["goal_difference"] = (
+            team["gf"] - team["ga"]
+        )
 
     return jsonify({
         "season_id": season_id,
-        "table": standings
+        "table": standings,
     })
