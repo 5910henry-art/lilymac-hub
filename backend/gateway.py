@@ -20,8 +20,10 @@ from werkzeug.middleware.dispatcher import DispatcherMiddleware
 from app import app as main_app
 from vipadmin import app as vipadmin_app
 from betting.bet import app as bet_app
-from virtuals.virtual import app as virtual_app
-
+from virtuals.virtual import (
+    app as virtual_app,
+    emit_fixture_update,
+)
 
 # ============================================================
 # Configuration
@@ -286,6 +288,7 @@ def start_production_virtual_engine():
             )
 
             _engine_thread = start_virtual_engine()
+                emit_update_callback=emit_fixture_update
 
             logger.info(
                 "Engine thread alive: %s",
