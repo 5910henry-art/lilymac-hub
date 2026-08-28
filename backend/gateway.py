@@ -287,8 +287,9 @@ def start_production_virtual_engine():
                 "Starting virtual engine..."
             )
 
-            _engine_thread = start_virtual_engine()
+            _engine_thread = start_virtual_engine(
                 emit_update_callback=emit_fixture_update
+            )
 
             logger.info(
                 "Engine thread alive: %s",
