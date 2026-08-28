@@ -210,51 +210,111 @@ def _resolve_stats_team(team: str, stats_map: dict) -> Optional[str]:
 
     return None
 
-
 @lru_cache(maxsize=1)
-def _load_football_stats_map():
+def _load_football_model():
     """
-    Loads and caches the football model from test.py.
-    This uses result.txt (or SIM_RESULT_PATH) to build team stats once.
+    Load the football intelligence model once.
+
+    Returns:
+        (stats_map, params)
+
+    stats_map is built from SIM_RESULT_PATH and params are fitted
+    from the same historical dataset.
     """
-    if load_data is None or build_team_stats is None:
-        logger.warning("Football model helpers are unavailable; market-only fallback will be used.")
-        return {}
+    if (
+        load_data is None
+        or build_team_stats is None
+        or predict_match is None
+    ):
+        logger.warning(
+            "Football model helpers are unavailable; "
+            "market-only fallback will be used."
+        )
+        return {}, None
 
     path = Path(SIM_RESULT_PATH)
     if not path.exists():
         logger.warning("SIM_RESULT_PATH not found: %s", path)
-        return {}
+        return {}, None
 
     try:
         df = load_data(str(path))
+
+        if df.empty:
+            logger.warning(
+                "Football model dataset is empty: %s",
+                path,
+            )
+            return {}, None
+
         team_df = build_team_stats(df)
-        return team_df.set_index("team").to_dict("index")
+        stats_map = team_df.set_index("team").to_dict("index")
+
+        # Fit the model parameters once from the same historical data.
+        from virtuals.engineering.test import fit_params
+
+        params = fit_params(df)
+
+        logger.info(
+            "[football-model] loaded | teams=%s | matches=%s | "
+            "attack_share=%.2f | home_adv=%.2f | "
+            "draw_gap_boost=%.2f | temp=%.2f | "
+            "home_form=%.2f | away_form=%.2f",
+            len(stats_map),
+            len(df),
+            params.attack_share,
+            params.home_adv,
+            params.draw_gap_boost,
+            params.temp,
+            params.home_form_weight,
+            params.away_form_weight,
+        )
+
+        return stats_map, params
+
     except Exception:
-        logger.exception("Failed loading football stats from %s", path)
-        return {}
-
-
+        logger.exception(
+            "Failed loading football model from %s",
+            path,
+        )
+        return {}, None
 def _football_model_prediction(home: str, away: str):
     """
-    Returns the full prediction dict from test.py, or None if unavailable.
+    Returns the football model prediction dict, or None if unavailable.
     """
     if predict_match is None:
         return None
 
-    stats_map = _load_football_stats_map()
-    if not stats_map:
+    stats_map, params = _load_football_model()
+
+    if not stats_map or params is None:
         return None
 
     try:
         home_key = _resolve_stats_team(home, stats_map)
         away_key = _resolve_stats_team(away, stats_map)
+
         if home_key is None or away_key is None:
+            logger.warning(
+                "Football model team not found: %s vs %s",
+                home,
+                away,
+            )
             return None
 
-        return predict_match(home_key, away_key, stats_map=stats_map)
+        return predict_match(
+            home_key,
+            away_key,
+            stats_map=stats_map,
+            params=params,
+        )
+
     except Exception:
-        logger.exception("Football model prediction failed for %s vs %s", home, away)
+        logger.exception(
+            "Football model prediction failed for %s vs %s",
+            home,
+            away,
+        )
         return None
 
 
@@ -590,9 +650,9 @@ def simulate_match(match_id, emit_update_callback=None):
 
                 if emit_update_callback:
                     emit_update_callback(
-                         match_live,
-                         event,
-                   )
+                        match_live,
+                        item,
+                    )
 
             # FINALIZE
             match_live.home_score = final_home
