@@ -59,8 +59,10 @@ settlement_executor = ThreadPoolExecutor(max_workers=3)
 SECRET_SALT = os.getenv("SIM_SECRET", "change_this_in_prod")
 
 # ---------------- Model path ----------------
-SIM_RESULT_PATH = os.getenv("SIM_RESULT_PATH", "result.txt")
-
+SIM_RESULT_PATH = os.getenv(
+    "SIM_RESULT_PATH",
+    str(Path(__file__).resolve().parent / "engineering" / "result.txt")
+)
 # ---------------- State ----------------
 REALISM_STATE = {
     "home_streak": {},
