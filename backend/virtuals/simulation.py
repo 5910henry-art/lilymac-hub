@@ -635,15 +635,15 @@ def simulate_match(match_id, emit_update_callback=None):
                 if item["type"] == "GOAL":
                     _apply_goal_event(match_live, item["team"])
 
-                session.add(
-                    Event(
-                        match_id=match_live.id,
-                        minute=item["minute"],
-                        team=item["team"],
-                        type=item["type"],
-                        description=item["description"],
-                    )
+                event = Event(
+                    match_id=match_live.id,
+                    minute=item["minute"],
+                    team=item["team"],
+                    type=item["type"],
+                    description=item["description"],
                 )
+
+                session.add(event)
 
                 match_live.event_count = (match_live.event_count or 0) + 1
                 safe_commit(session)
@@ -651,7 +651,7 @@ def simulate_match(match_id, emit_update_callback=None):
                 if emit_update_callback:
                     emit_update_callback(
                         match_live,
-                        item,
+                        event,
                     )
 
             # FINALIZE
