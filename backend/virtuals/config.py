@@ -60,11 +60,9 @@ def init_app():
     jwt.init_app(app)
 
     socketio.init_app(
-        app,
-        message_queue=REDIS_URL,
-        cors_allowed_origins="*",
-    )
-
+    app,
+    cors_allowed_origins="*",
+)
     # Import models so SQLAlchemy registers them
     import model  # noqa: F401
 
