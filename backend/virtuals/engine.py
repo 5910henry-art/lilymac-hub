@@ -49,17 +49,10 @@ RECOVERY_STALE_SECONDS = int(
     )
 )
 
-ENGINE_START_STAGGER_SECONDS = float(
-    os.getenv(
-        "VIRTUAL_ENGINE_START_STAGGER_SECONDS",
-        "0.2",
-    )
-)
-
 ENGINE_HEALTH_LOG_SECONDS = int(
     os.getenv(
         "VIRTUAL_ENGINE_HEALTH_LOG_SECONDS",
-        "30",
+        "60",
     )
 )
 
@@ -1143,11 +1136,6 @@ def _ensure_simulation_executor():
                 )
             )
 
-            logger.info(
-                "ðŸ”§ Simulation executor ready | workers=%d",
-                ENGINE_WORKERS,
-            )
-
         return simulation_executor
 
 
@@ -1175,10 +1163,6 @@ def _ensure_settlement_executor():
                 )
             )
 
-            logger.info(
-                "ðŸ”§ Settlement executor ready"
-            )
-
         return settlement_executor
 
 
@@ -1189,16 +1173,6 @@ def _ensure_settlement_executor():
 def start_virtual_engine(
     emit_update_callback=None,
 ):
-    logger.warning(
-        "ðŸ”¥ ENGINE CALLBACK | callback=%r | module=%s",
-        emit_update_callback,
-        getattr(
-            emit_update_callback,
-            "__module__",
-            None,
-        ),
-    )
-
     global engine_thread
 
     # --------------------------------------------------------
@@ -1259,12 +1233,6 @@ def start_virtual_engine(
     _ensure_simulation_executor()
     _ensure_settlement_executor()
 
-    logger.info(
-        "âš™ï¸ Settlement protection enabled | "
-        "retry_seconds=%d",
-        SETTLEMENT_RETRY_SECONDS,
-    )
-
     # ========================================================
     # SUBMIT SIMULATION
     # ========================================================
@@ -1305,11 +1273,6 @@ def start_virtual_engine(
 
             if match_id in active_simulations:
 
-                logger.warning(
-                    "Match %d already simulating â€” skipping",
-                    match_id,
-                )
-
                 return False
 
             active_simulations.add(
@@ -1319,11 +1282,6 @@ def start_virtual_engine(
         def _runner():
 
             try:
-
-                logger.info(
-                    "ðŸš€ Simulation worker started | match=%s",
-                    match_id,
-                )
 
                 simulate_match(
                     match_id,
@@ -1344,10 +1302,6 @@ def start_virtual_engine(
                         match_id
                     )
 
-                logger.info(
-                    "ðŸ Simulation worker released | match=%s",
-                    match_id,
-                )
 
         # ----------------------------------------------------
         # Submit while protected by the executor lock.
@@ -1363,12 +1317,6 @@ def start_virtual_engine(
                         active_simulations.discard(
                             match_id
                         )
-
-                    logger.info(
-                        "â¹ï¸ Shutdown started before submit | "
-                        "match=%s",
-                        match_id,
-                    )
 
                     return False
 
@@ -1419,13 +1367,6 @@ def start_virtual_engine(
                             _runner
                         )
                     )
-
-                logger.info(
-                    "âœ… Simulation submitted | "
-                    "match=%s | future=%r",
-                    match_id,
-                    future,
-                )
 
                 return True
 
@@ -1516,21 +1457,12 @@ def start_virtual_engine(
 
             try:
 
-                logger.info(
-                    "ðŸ’° Settlement worker started | match=%s",
-                    match_id,
-                )
-
                 settle_virtual_bets(
                     match_id
                 )
 
                 succeeded = True
 
-                logger.info(
-                    "ðŸ’° Settlement worker completed | match=%s",
-                    match_id,
-                )
 
             except Exception:
 
@@ -1650,13 +1582,6 @@ def start_virtual_engine(
                             )
 
                         raise
-
-                logger.info(
-                    "âœ… Settlement submitted | "
-                    "match=%s | future=%r",
-                    match_id,
-                    future,
-                )
 
                 return True
 
@@ -2107,6 +2032,22 @@ def start_virtual_engine(
                     # =========================================
                     # START MATCHES
                     # =========================================
+                    #
+                    # Backpressure is important here.
+                    # active_simulations contains both running workers
+                    # and jobs already submitted to the executor.
+                    # Never transition more matches to RUNNING than
+                    # there are actual worker slots. This prevents a
+                    # queue of Future(state=pending) from accumulating
+                    # and keeps RUNNING close to real execution.
+
+                    with simulation_guard_lock:
+
+                        simulation_slots = max(
+                            0,
+                            ENGINE_WORKERS
+                            - len(active_simulations),
+                        )
 
                     running_count = (
                         _running_fixture_count(
@@ -2119,8 +2060,12 @@ def start_virtual_engine(
 
                     slots_available = max(
                         0,
-                        MAX_ACTIVE_MATCHES
-                        - running_count,
+                        min(
+                            MAX_ACTIVE_MATCHES
+                            - running_count,
+                            simulation_slots,
+                            MATCHES_PER_ROUND,
+                        ),
                     )
 
                     if slots_available > 0:
@@ -2144,17 +2089,12 @@ def start_virtual_engine(
                                 Fixture.id.asc()
                             )
                             .limit(
-                                min(
-                                    slots_available,
-                                    ENGINE_WORKERS,
-                                )
+                                slots_available
                             )
                             .all()
                         )
 
-                        for idx, m in enumerate(
-                            to_start
-                        ):
+                        for m in to_start:
 
                             if shutdown_flag.is_set():
                                 break
@@ -2175,38 +2115,6 @@ def start_virtual_engine(
 
                                 db.session.commit()
 
-                                logger.info(
-                                    "â–¶ï¸ START Match %d "
-                                    "(S%d R%d): %s vs %s "
-                                    "| open_time=%s "
-                                    "| start_time=%s",
-                                    m.id,
-                                    m.season,
-                                    m.round,
-                                    m.home,
-                                    m.away,
-                                    _fmt_dt(
-                                        m.open_time
-                                    ),
-                                    _fmt_dt(
-                                        m.start_time
-                                    ),
-                                )
-
-                                if (
-                                    idx > 0
-                                    and ENGINE_START_STAGGER_SECONDS
-                                    > 0
-                                ):
-
-                                    _sleep_or_shutdown(
-                                        ENGINE_START_STAGGER_SECONDS
-                                        * idx
-                                    )
-
-                                if shutdown_flag.is_set():
-                                    break
-
                                 submitted = (
                                     _submit_simulation(
                                         m.id
@@ -2215,12 +2123,38 @@ def start_virtual_engine(
 
                                 if not submitted:
 
-                                    logger.warning(
-                                        "âš ï¸ Simulation was not "
-                                        "submitted for match %s; "
-                                        "engine will recover it later",
-                                        m.id,
-                                    )
+                                    # Do not leave a match falsely
+                                    # marked RUNNING when no simulation
+                                    # worker accepted it. Return it to
+                                    # OPEN so the next loop can retry.
+                                    try:
+
+                                        reverted = (
+                                            try_set_fixture_status_atomic(
+                                                db.session,
+                                                m.id,
+                                                STATUS_RUNNING,
+                                                STATUS_OPEN,
+                                            )
+                                        )
+
+                                        db.session.commit()
+
+                                        if reverted:
+                                            logger.debug(
+                                                "Simulation submit deferred; "
+                                                "match %s returned to OPEN",
+                                                m.id,
+                                            )
+
+                                    except Exception:
+
+                                        db.session.rollback()
+                                        logger.exception(
+                                            "Failed reverting match %s "
+                                            "after simulation submission failure",
+                                            m.id,
+                                        )
 
                             except Exception:
 
