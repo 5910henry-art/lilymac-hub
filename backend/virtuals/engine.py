@@ -82,6 +82,26 @@ active_simulations: set[int] = set()
 # Protect executor creation / submit / shutdown.
 executor_lock = threading.RLock()
 
+# Settlement protection.
+#
+# is_settled is updated by the settlement worker, so checking only
+# the database flag is not enough: the engine can see the same
+# finished fixture for several 1-second loops while settlement is
+# still running. These in-memory claims prevent duplicate jobs.
+settlement_guard_lock = threading.Lock()
+active_settlements: set[int] = set()
+
+# If settlement fails immediately, do not hammer the same fixture
+# once per engine loop. A failed job becomes eligible again after
+# this delay.
+settlement_retry_after: dict[int, float] = {}
+SETTLEMENT_RETRY_SECONDS = int(
+    os.getenv(
+        "VIRTUAL_SETTLEMENT_RETRY_SECONDS",
+        "5",
+    )
+)
+
 
 # ============================================================
 # SEASON GENERATION PROTECTION
@@ -122,7 +142,7 @@ def _acquire_engine_advisory_lock(db):
 
         if acquired:
             logger.info(
-                "🔐 Virtual engine advisory lock acquired"
+                "ðŸ” Virtual engine advisory lock acquired"
             )
             return True
 
@@ -130,7 +150,7 @@ def _acquire_engine_advisory_lock(db):
         engine_lock_connection = None
 
         logger.warning(
-            "🚫 Another virtual engine is already running"
+            "ðŸš« Another virtual engine is already running"
         )
 
         return False
@@ -168,7 +188,7 @@ def _release_engine_advisory_lock():
         )
 
         logger.info(
-            "🔓 Virtual engine advisory lock released"
+            "ðŸ”“ Virtual engine advisory lock released"
         )
 
     except Exception:
@@ -515,7 +535,7 @@ def _maybe_generate_fresh_season(
             if total_count > 0:
 
                 logger.info(
-                    "🧹 No active fixtures found; "
+                    "ðŸ§¹ No active fixtures found; "
                     "old fixtures remain intact and "
                     "a fresh season will be generated"
                 )
@@ -523,18 +543,21 @@ def _maybe_generate_fresh_season(
             else:
 
                 logger.info(
-                    "🆕 No fixtures found; "
+                    "ðŸ†• No fixtures found; "
                     "generating first season"
                 )
+
+            generation_succeeded = False
 
             try:
 
                 generate_full_season()
 
                 db.session.expire_all()
+                generation_succeeded = True
 
                 logger.info(
-                    "🆕 Fresh season generation completed"
+                    "ðŸ†• Fresh season generation completed"
                 )
 
             except Exception:
@@ -545,13 +568,13 @@ def _maybe_generate_fresh_season(
 
                 db.session.rollback()
 
-            finally:
+            # Only remember a generation key after a successful
+            # generation. If generation failed, the next engine loop
+            # must be allowed to retry it.
+            if generation_succeeded:
+                last_season_generation_key = terminal_key
 
-                last_season_generation_key = (
-                    terminal_key
-                )
-
-        return True
+        return generation_succeeded
 
 
 # ============================================================
@@ -872,7 +895,7 @@ def _recover_incomplete_fixtures(
         db.session.commit()
 
         logger.info(
-            "🔄 Recovered %d incomplete fixture(s) "
+            "ðŸ”„ Recovered %d incomplete fixture(s) "
             "from previous run (%d resumed, %d re-queued)",
             recovered,
             resumed,
@@ -989,7 +1012,7 @@ def _force_finish_stuck_running_matches(
             db.session.commit()
 
             logger.warning(
-                "⚠️ FORCE FINISH Match %d | "
+                "âš ï¸ FORCE FINISH Match %d | "
                 "season=%s | round=%s | "
                 "open_time=%s | start_time=%s | end_time=%s",
                 m.id,
@@ -1121,7 +1144,7 @@ def _ensure_simulation_executor():
             )
 
             logger.info(
-                "🔧 Simulation executor ready | workers=%d",
+                "ðŸ”§ Simulation executor ready | workers=%d",
                 ENGINE_WORKERS,
             )
 
@@ -1153,7 +1176,7 @@ def _ensure_settlement_executor():
             )
 
             logger.info(
-                "🔧 Settlement executor ready"
+                "ðŸ”§ Settlement executor ready"
             )
 
         return settlement_executor
@@ -1167,7 +1190,7 @@ def start_virtual_engine(
     emit_update_callback=None,
 ):
     logger.warning(
-        "🔥 ENGINE CALLBACK | callback=%r | module=%s",
+        "ðŸ”¥ ENGINE CALLBACK | callback=%r | module=%s",
         emit_update_callback,
         getattr(
             emit_update_callback,
@@ -1188,7 +1211,7 @@ def start_virtual_engine(
     ):
 
         logger.warning(
-            "⚠️ Virtual engine already running"
+            "âš ï¸ Virtual engine already running"
         )
 
         return engine_thread
@@ -1236,6 +1259,12 @@ def start_virtual_engine(
     _ensure_simulation_executor()
     _ensure_settlement_executor()
 
+    logger.info(
+        "âš™ï¸ Settlement protection enabled | "
+        "retry_seconds=%d",
+        SETTLEMENT_RETRY_SECONDS,
+    )
+
     # ========================================================
     # SUBMIT SIMULATION
     # ========================================================
@@ -1261,7 +1290,7 @@ def start_virtual_engine(
         if shutdown_flag.is_set():
 
             logger.info(
-                "⏹️ Shutdown active; "
+                "â¹ï¸ Shutdown active; "
                 "not submitting match %s",
                 match_id,
             )
@@ -1277,7 +1306,7 @@ def start_virtual_engine(
             if match_id in active_simulations:
 
                 logger.warning(
-                    "Match %d already simulating — skipping",
+                    "Match %d already simulating â€” skipping",
                     match_id,
                 )
 
@@ -1292,7 +1321,7 @@ def start_virtual_engine(
             try:
 
                 logger.info(
-                    "🚀 Simulation worker started | match=%s",
+                    "ðŸš€ Simulation worker started | match=%s",
                     match_id,
                 )
 
@@ -1316,7 +1345,7 @@ def start_virtual_engine(
                     )
 
                 logger.info(
-                    "🏁 Simulation worker released | match=%s",
+                    "ðŸ Simulation worker released | match=%s",
                     match_id,
                 )
 
@@ -1336,7 +1365,7 @@ def start_virtual_engine(
                         )
 
                     logger.info(
-                        "⏹️ Shutdown started before submit | "
+                        "â¹ï¸ Shutdown started before submit | "
                         "match=%s",
                         match_id,
                     )
@@ -1361,7 +1390,7 @@ def start_virtual_engine(
                     # ------------------------------------------------
 
                     logger.warning(
-                        "⚠️ Executor rejected match %s: %s",
+                        "âš ï¸ Executor rejected match %s: %s",
                         match_id,
                         exc,
                     )
@@ -1392,7 +1421,7 @@ def start_virtual_engine(
                     )
 
                 logger.info(
-                    "✅ Simulation submitted | "
+                    "âœ… Simulation submitted | "
                     "match=%s | future=%r",
                     match_id,
                     future,
@@ -1408,7 +1437,7 @@ def start_virtual_engine(
                 )
 
             logger.warning(
-                "⚠️ Simulation submission rejected "
+                "âš ï¸ Simulation submission rejected "
                 "for match %s: %s",
                 match_id,
                 exc,
@@ -1437,23 +1466,70 @@ def start_virtual_engine(
     def _submit_settlement(
         match_id: int,
     ):
+        """
+        Queue settlement exactly once at a time per match.
+
+        The database is_settled flag is deliberately NOT used as the
+        in-flight lock because the settlement worker may take longer
+        than one engine loop. active_settlements closes that race.
+
+        If settlement fails, the claim is released and the fixture is
+        retried after SETTLEMENT_RETRY_SECONDS.
+        """
 
         if shutdown_flag.is_set():
 
             logger.info(
-                "⏹️ Shutdown active; "
+                "â¹ï¸ Shutdown active; "
                 "not submitting settlement for match %s",
                 match_id,
             )
 
             return False
 
+        now_mono = time.monotonic()
+
+        # --------------------------------------------------------
+        # Claim the match before submitting the job.
+        # --------------------------------------------------------
+
+        with settlement_guard_lock:
+
+            if match_id in active_settlements:
+
+                return False
+
+            retry_at = settlement_retry_after.get(
+                match_id,
+                0.0,
+            )
+
+            if now_mono < retry_at:
+
+                return False
+
+            active_settlements.add(match_id)
+
         def _settlement_runner():
+
+            succeeded = False
 
             try:
 
+                logger.info(
+                    "ðŸ’° Settlement worker started | match=%s",
+                    match_id,
+                )
+
                 settle_virtual_bets(
                     match_id
+                )
+
+                succeeded = True
+
+                logger.info(
+                    "ðŸ’° Settlement worker completed | match=%s",
+                    match_id,
                 )
 
             except Exception:
@@ -1463,11 +1539,46 @@ def start_virtual_engine(
                     match_id,
                 )
 
+            finally:
+
+                with settlement_guard_lock:
+
+                    active_settlements.discard(
+                        match_id
+                    )
+
+                    if succeeded:
+
+                        settlement_retry_after.pop(
+                            match_id,
+                            None,
+                        )
+
+                    else:
+
+                        settlement_retry_after[
+                            match_id
+                        ] = (
+                            time.monotonic()
+                            + SETTLEMENT_RETRY_SECONDS
+                        )
+
+        # --------------------------------------------------------
+        # Submit while protected by the executor lock.
+        # --------------------------------------------------------
+
         try:
 
             with executor_lock:
 
                 if shutdown_flag.is_set():
+
+                    with settlement_guard_lock:
+
+                        active_settlements.discard(
+                            match_id
+                        )
+
                     return False
 
                 executor = (
@@ -1476,7 +1587,7 @@ def start_virtual_engine(
 
                 try:
 
-                    executor.submit(
+                    future = executor.submit(
                         _settlement_runner
                     )
 
@@ -1490,8 +1601,16 @@ def start_virtual_engine(
                     )
 
                     if shutdown_flag.is_set():
+
+                        with settlement_guard_lock:
+
+                            active_settlements.discard(
+                                match_id
+                            )
+
                         return False
 
+                    # Recreate the executor once and retry.
                     new_executor = (
                         ThreadPoolExecutor(
                             max_workers=3
@@ -1502,13 +1621,59 @@ def start_virtual_engine(
                         "settlement_executor"
                     ] = new_executor
 
-                    new_executor.submit(
-                        _settlement_runner
-                    )
+                    try:
+
+                        future = (
+                            new_executor.submit(
+                                _settlement_runner
+                            )
+                        )
+
+                    except Exception:
+
+                        new_executor.shutdown(
+                            wait=False,
+                            cancel_futures=True,
+                        )
+
+                        with settlement_guard_lock:
+
+                            active_settlements.discard(
+                                match_id
+                            )
+
+                            settlement_retry_after[
+                                match_id
+                            ] = (
+                                time.monotonic()
+                                + SETTLEMENT_RETRY_SECONDS
+                            )
+
+                        raise
+
+                logger.info(
+                    "âœ… Settlement submitted | "
+                    "match=%s | future=%r",
+                    match_id,
+                    future,
+                )
 
                 return True
 
         except Exception:
+
+            with settlement_guard_lock:
+
+                active_settlements.discard(
+                    match_id
+                )
+
+                settlement_retry_after[
+                    match_id
+                ] = (
+                    time.monotonic()
+                    + SETTLEMENT_RETRY_SECONDS
+                )
 
             logger.exception(
                 "Error submitting settlement "
@@ -1518,6 +1683,7 @@ def start_virtual_engine(
 
             return False
 
+
     # ========================================================
     # ENGINE LOOP
     # ========================================================
@@ -1525,7 +1691,7 @@ def start_virtual_engine(
     def run_engine():
 
         logger.info(
-            "🟢 Engine worker thread started"
+            "ðŸŸ¢ Engine worker thread started"
         )
 
         with app.app_context():
@@ -1646,7 +1812,7 @@ def start_virtual_engine(
                             if refreshed_count:
 
                                 logger.info(
-                                    "🎲 Refreshed odds for %d "
+                                    "ðŸŽ² Refreshed odds for %d "
                                     "open fixtures",
                                     refreshed_count,
                                 )
@@ -1785,7 +1951,7 @@ def start_virtual_engine(
                     if not current_round_row:
 
                         logger.warning(
-                            "⚠️ No active round found "
+                            "âš ï¸ No active round found "
                             "for season %s while fixtures exist. "
                             "Attempting recovery...",
                             active_season,
@@ -1895,7 +2061,7 @@ def start_virtual_engine(
                                 db.session.commit()
 
                                 logger.info(
-                                    "🟢 OPEN Match %d "
+                                    "ðŸŸ¢ OPEN Match %d "
                                     "(S%d R%d): %s vs %s "
                                     "| open_time=%s",
                                     m.id,
@@ -2010,7 +2176,7 @@ def start_virtual_engine(
                                 db.session.commit()
 
                                 logger.info(
-                                    "▶️ START Match %d "
+                                    "â–¶ï¸ START Match %d "
                                     "(S%d R%d): %s vs %s "
                                     "| open_time=%s "
                                     "| start_time=%s",
@@ -2050,7 +2216,7 @@ def start_virtual_engine(
                                 if not submitted:
 
                                     logger.warning(
-                                        "⚠️ Simulation was not "
+                                        "âš ï¸ Simulation was not "
                                         "submitted for match %s; "
                                         "engine will recover it later",
                                         m.id,
@@ -2127,7 +2293,7 @@ def start_virtual_engine(
                                     db.session.rollback()
 
                             logger.warning(
-                                "⚠️ TIMEOUT FINISH Match %d "
+                                "âš ï¸ TIMEOUT FINISH Match %d "
                                 "(S%d R%d) | "
                                 "open_time=%s | "
                                 "start_time=%s | "
@@ -2194,7 +2360,7 @@ def start_virtual_engine(
                         if queued:
 
                             logger.info(
-                                "✅ Season %s Round %s "
+                                "âœ… Season %s Round %s "
                                 "settlement queued: %d match(es)",
                                 active_season,
                                 current_round,
@@ -2234,7 +2400,7 @@ def start_virtual_engine(
     engine_thread.start()
 
     logger.info(
-        "✅ Virtual engine started"
+        "âœ… Virtual engine started"
     )
 
     return engine_thread
@@ -2268,6 +2434,8 @@ def stop_engine(
     # the engine must finish before executors are shut down.
     # --------------------------------------------------------
 
+    engine_stopped = True
+
     if (
         engine_thread is not None
         and engine_thread.is_alive()
@@ -2276,6 +2444,16 @@ def stop_engine(
         engine_thread.join(
             timeout=timeout
         )
+
+        engine_stopped = not engine_thread.is_alive()
+
+        if not engine_stopped:
+
+            logger.error(
+                "âš ï¸ Engine thread did not stop within %ss; "
+                "keeping PostgreSQL advisory lock held",
+                timeout,
+            )
 
     # --------------------------------------------------------
     # 3. Shut down executors under one lock.
@@ -2339,14 +2517,33 @@ def stop_engine(
 
         active_simulations.clear()
 
+    with settlement_guard_lock:
+
+        active_settlements.clear()
+        settlement_retry_after.clear()
+
     # --------------------------------------------------------
     # 5. Release PostgreSQL advisory lock LAST.
     # --------------------------------------------------------
+    #
+    # Never release the global lock while the engine thread is still
+    # alive. Doing so could allow a second Render/Gunicorn worker to
+    # start another engine against the same database.
+    # --------------------------------------------------------
 
-    _release_engine_advisory_lock()
+    if engine_stopped:
 
-    engine_thread = None
+        _release_engine_advisory_lock()
 
-    logger.info(
-        "✅ Engine stopped"
-    )
+        engine_thread = None
+
+        logger.info(
+            "âœ… Engine stopped"
+        )
+
+    else:
+
+        logger.error(
+            "ðŸš¨ Engine shutdown incomplete; "
+            "advisory lock remains held"
+        )
