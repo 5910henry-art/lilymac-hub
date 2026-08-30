@@ -1,11 +1,9 @@
 # virtuals/virtual.py
-
 import logging
 import os
 import signal
 
 from flask_cors import CORS
-
 from .config import app, init_app, db, socketio
 from .routes import bp as routes_bp
 from .engine import start_virtual_engine, stop_engine
@@ -33,12 +31,12 @@ app.register_blueprint(routes_bp)
 
 @socketio.on("connect")
 def handle_connect():
-    logger.info("🔌 Virtual client connected")
+    logger.debug("Virtual client connected")
 
 
 @socketio.on("disconnect")
 def handle_disconnect():
-    logger.info("🔌 Virtual client disconnected")
+    logger.debug("Virtual client disconnected")
 
 
 # --------------------------------------------------
@@ -47,32 +45,22 @@ def handle_disconnect():
 
 @socketio.on("join_virtual_match")
 def handle_join_virtual_match(data):
-    """
-    Join a room for one specific virtual match.
-    """
-
+    """Join a room for one specific virtual match."""
     from flask_socketio import join_room
 
     try:
         match_id = int(data.get("match_id"))
     except (TypeError, ValueError, AttributeError):
-        logger.warning(
-            "Invalid virtual match room request: %s",
-            data,
-        )
+        logger.warning("Invalid virtual match room request: %s", data)
         return {
             "success": False,
             "error": "Invalid match_id",
         }
 
     room = f"virtual:match:{match_id}"
-
     join_room(room)
 
-    logger.info(
-        "Client joined virtual match room %s",
-        room,
-    )
+    logger.debug("Client joined virtual match room %s", room)
 
     return {
         "success": True,
@@ -83,10 +71,7 @@ def handle_join_virtual_match(data):
 
 @socketio.on("leave_virtual_match")
 def handle_leave_virtual_match(data):
-    """
-    Leave a room for one specific virtual match.
-    """
-
+    """Leave a room for one specific virtual match."""
     from flask_socketio import leave_room
 
     try:
@@ -98,7 +83,6 @@ def handle_leave_virtual_match(data):
         }
 
     room = f"virtual:match:{match_id}"
-
     leave_room(room)
 
     return {
@@ -110,19 +94,13 @@ def handle_leave_virtual_match(data):
 
 @socketio.on("join_virtual_lobby")
 def handle_join_virtual_lobby():
-    """
-    Join the global virtual sportsbook lobby.
-    """
-
+    """Join the global virtual sportsbook lobby."""
     from flask_socketio import join_room
 
     room = "virtual:lobby"
-
     join_room(room)
 
-    logger.info(
-        "Client joined virtual lobby"
-    )
+    logger.debug("Client joined virtual lobby")
 
     return {
         "success": True,
@@ -132,14 +110,10 @@ def handle_join_virtual_lobby():
 
 @socketio.on("leave_virtual_lobby")
 def handle_leave_virtual_lobby():
-    """
-    Leave the global virtual sportsbook lobby.
-    """
-
+    """Leave the global virtual sportsbook lobby."""
     from flask_socketio import leave_room
 
     room = "virtual:lobby"
-
     leave_room(room)
 
     return {
@@ -153,19 +127,13 @@ def handle_leave_virtual_lobby():
 # --------------------------------------------------
 
 def emit_fixture_update(fixture, event=None):
-    logger.warning(
-        "🔥🔥 EMIT_FIXTURE_UPDATE ENTERED | match=%s | status=%s | event=%s",
-        getattr(fixture, "id", None),
-        getattr(fixture, "status", None),
-        getattr(event, "type", None) if event else None,
-    )
     """
     Broadcast a live virtual fixture update.
 
     This callback is called by the simulation engine after
     events/score changes.
 
-    Two destinations are used:
+    Destinations:
 
     1. virtual:lobby
        -> users viewing the virtual sportsbook
@@ -173,22 +141,15 @@ def emit_fixture_update(fixture, event=None):
     2. virtual:match:<id>
        -> users watching this specific match
     """
-    logger.info(
-        "📡 EMIT FIXTURE UPDATE | match=%s | status=%s | event=%s",
-        getattr(fixture, "id", None),
-        getattr(fixture, "status", None),
-        getattr(event, "type", None) if event else None,
-    )
+
     if fixture is None:
         return
 
     try:
-
         match_id = int(fixture.id)
 
         payload = {
             "match_id": match_id,
-
             "home": fixture.home,
             "away": fixture.away,
 
@@ -229,11 +190,10 @@ def emit_fixture_update(fixture, event=None):
         }
 
         # ------------------------------------------
-        # Attach event information if available
+        # EVENT INFORMATION
         # ------------------------------------------
 
         if event is not None:
-
             payload["event"] = {
                 "id": getattr(event, "id", None),
                 "match_id": match_id,
@@ -253,7 +213,7 @@ def emit_fixture_update(fixture, event=None):
             }
 
         # ------------------------------------------
-        # Broadcast general match update
+        # GENERAL MATCH UPDATE
         # ------------------------------------------
 
         socketio.emit(
@@ -263,7 +223,7 @@ def emit_fixture_update(fixture, event=None):
         )
 
         # ------------------------------------------
-        # Broadcast to match viewers
+        # SPECIFIC MATCH VIEWERS
         # ------------------------------------------
 
         socketio.emit(
@@ -273,7 +233,7 @@ def emit_fixture_update(fixture, event=None):
         )
 
         # ------------------------------------------
-        # Specialized event
+        # SPECIALIZED EVENT
         # ------------------------------------------
 
         if event is not None:
@@ -291,7 +251,7 @@ def emit_fixture_update(fixture, event=None):
             )
 
         # ------------------------------------------
-        # Specialized finish event
+        # SPECIALIZED FINISH EVENT
         # ------------------------------------------
 
         if fixture.status == "FINISHED":
@@ -309,6 +269,7 @@ def emit_fixture_update(fixture, event=None):
             )
 
     except Exception:
+        # Only actual broadcast failures are logged.
         logger.exception(
             "Failed broadcasting fixture update"
         )
@@ -321,8 +282,7 @@ def emit_fixture_update(fixture, event=None):
 def _signal_handler(signum, frame):
 
     logger.info(
-        "Received shutdown signal (%s). "
-        "Stopping engine...",
+        "Received shutdown signal (%s). Stopping engine...",
         signum,
     )
 
@@ -350,11 +310,10 @@ if __name__ == "__main__":
     )
 
     logger.info(
-        "⚽ Virtual PRO+ Engine starting..."
+        "Virtual PRO+ Engine starting..."
     )
 
-    # IMPORTANT:
-    # Pass the Socket.IO callback to the engine.
+    # Pass Socket.IO callback to engine.
     start_virtual_engine(
         emit_update_callback=emit_fixture_update
     )
@@ -372,15 +331,13 @@ if __name__ == "__main__":
     )
 
     logger.info(
-        "🚀 Starting Socket.IO server on %s:%s",
+        "Starting Socket.IO server on %s:%s",
         host,
         port,
     )
 
     try:
 
-        # IMPORTANT:
-        # Use socketio.run(), NOT app.run().
         socketio.run(
             app,
             host=host,
@@ -398,12 +355,11 @@ if __name__ == "__main__":
     finally:
 
         logger.info(
-            "🛑 Server shutting down, "
-            "stopping virtual engine..."
+            "Server shutting down, stopping virtual engine..."
         )
 
         stop_engine()
 
         logger.info(
-            "✅ Server shut down cleanly."
+            "Server shut down cleanly."
         )
