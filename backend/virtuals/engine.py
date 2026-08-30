@@ -20,7 +20,6 @@ logger = logging.getLogger("virtual-engine")
 # ============================================================
 
 engine_thread: threading.Thread | None = None
-
 simulation_executor: ThreadPoolExecutor | None = None
 settlement_executor: ThreadPoolExecutor | None = None
 
@@ -30,23 +29,38 @@ settlement_executor: ThreadPoolExecutor | None = None
 # ============================================================
 
 FORCE_FINISH_GRACE_SECONDS = int(
-    os.getenv("VIRTUAL_FORCE_FINISH_GRACE_SECONDS", "120")
+    os.getenv(
+        "VIRTUAL_FORCE_FINISH_GRACE_SECONDS",
+        "120",
+    )
 )
 
 ENGINE_WORKERS = int(
-    os.getenv("VIRTUAL_ENGINE_WORKERS", "10")
+    os.getenv(
+        "VIRTUAL_ENGINE_WORKERS",
+        "10",
+    )
 )
 
 RECOVERY_STALE_SECONDS = int(
-    os.getenv("VIRTUAL_RECOVERY_STALE_SECONDS", "900")
+    os.getenv(
+        "VIRTUAL_RECOVERY_STALE_SECONDS",
+        "900",
+    )
 )
 
 ENGINE_START_STAGGER_SECONDS = float(
-    os.getenv("VIRTUAL_ENGINE_START_STAGGER_SECONDS", "0.2")
+    os.getenv(
+        "VIRTUAL_ENGINE_START_STAGGER_SECONDS",
+        "0.2",
+    )
 )
 
 ENGINE_HEALTH_LOG_SECONDS = int(
-    os.getenv("VIRTUAL_ENGINE_HEALTH_LOG_SECONDS", "30")
+    os.getenv(
+        "VIRTUAL_ENGINE_HEALTH_LOG_SECONDS",
+        "30",
+    )
 )
 
 
@@ -64,6 +78,9 @@ shutdown_flag = threading.Event()
 simulation_guard_lock = threading.Lock()
 
 active_simulations: set[int] = set()
+
+# Protect executor creation / submit / shutdown.
+executor_lock = threading.RLock()
 
 
 # ============================================================
@@ -98,7 +115,9 @@ def _acquire_engine_advisory_lock(db):
 
         acquired = engine_lock_connection.execute(
             text("SELECT pg_try_advisory_lock(:key)"),
-            {"key": ENGINE_ADVISORY_LOCK_KEY},
+            {
+                "key": ENGINE_ADVISORY_LOCK_KEY,
+            },
         ).scalar()
 
         if acquired:
@@ -140,8 +159,12 @@ def _release_engine_advisory_lock():
 
     try:
         engine_lock_connection.execute(
-            text("SELECT pg_advisory_unlock(:key)"),
-            {"key": ENGINE_ADVISORY_LOCK_KEY},
+            text(
+                "SELECT pg_advisory_unlock(:key)"
+            ),
+            {
+                "key": ENGINE_ADVISORY_LOCK_KEY,
+            },
         )
 
         logger.info(
@@ -168,24 +191,42 @@ def _release_engine_advisory_lock():
 
 def _fmt_dt(value):
     """Format datetime for logs without crashing on None."""
+
     if value is None:
         return "None"
 
     try:
-        return value.strftime("%Y-%m-%d %H:%M:%S")
+        return value.strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
+
     except Exception:
         return str(value)
 
 
-def _sleep_or_shutdown(seconds: float, step: float = 0.25):
+def _sleep_or_shutdown(
+    seconds: float,
+    step: float = 0.25,
+):
     """
     Sleep in small chunks so shutdown stays responsive.
     """
+
     remaining = seconds
 
-    while remaining > 0 and not shutdown_flag.is_set():
-        chunk = min(step, remaining)
-        shutdown_flag.wait(chunk)
+    while (
+        remaining > 0
+        and not shutdown_flag.is_set()
+    ):
+        chunk = min(
+            step,
+            remaining,
+        )
+
+        shutdown_flag.wait(
+            chunk
+        )
+
         remaining -= chunk
 
 
@@ -193,16 +234,24 @@ def _sleep_or_shutdown(seconds: float, step: float = 0.25):
 # FIXTURE / SEASON HELPERS
 # ============================================================
 
-def _active_fixture_count(db, Fixture, STATUS_FINISHED):
+def _active_fixture_count(
+    db,
+    Fixture,
+    STATUS_FINISHED,
+):
     """
     Count unfinished fixtures across the database.
 
     This intentionally includes all seasons because any unfinished
     fixture means the engine still has work to do.
     """
+
     return (
-        db.session.query(Fixture.id)
-        .filter(Fixture.status != STATUS_FINISHED)
+        db.session
+        .query(Fixture.id)
+        .filter(
+            Fixture.status != STATUS_FINISHED
+        )
         .count()
     )
 
@@ -218,9 +267,13 @@ def _running_fixture_count(
 
     If season_id is provided, only count fixtures from that season.
     """
+
     query = (
-        db.session.query(Fixture.id)
-        .filter(Fixture.status == STATUS_RUNNING)
+        db.session
+        .query(Fixture.id)
+        .filter(
+            Fixture.status == STATUS_RUNNING
+        )
     )
 
     if season_id is not None:
@@ -244,8 +297,10 @@ def _get_active_season_id(
     This prevents old FINISHED seasons from being mixed with the
     currently active season.
     """
+
     row = (
-        db.session.query(Fixture.season)
+        db.session
+        .query(Fixture.season)
         .filter(
             Fixture.status != STATUS_FINISHED,
             Fixture.season.isnot(None),
@@ -271,7 +326,10 @@ def _last_round_number(
 
     If season_id is omitted, get the highest round globally.
     """
-    query = db.session.query(Fixture.round)
+
+    query = db.session.query(
+        Fixture.round
+    )
 
     if season_id is not None:
         query = query.filter(
@@ -280,7 +338,9 @@ def _last_round_number(
 
     row = (
         query
-        .order_by(Fixture.round.desc())
+        .order_by(
+            Fixture.round.desc()
+        )
         .first()
     )
 
@@ -295,12 +355,16 @@ def _season_fixture_count(
     """
     Number of fixtures belonging to a season.
     """
+
     if season_id is None:
         return 0
 
     return (
-        db.session.query(Fixture.id)
-        .filter(Fixture.season == season_id)
+        db.session
+        .query(Fixture.id)
+        .filter(
+            Fixture.season == season_id
+        )
         .count()
     )
 
@@ -323,7 +387,8 @@ def _settle_unsettled_finished_matches(
     """
 
     query = (
-        db.session.query(Fixture)
+        db.session
+        .query(Fixture)
         .filter(
             Fixture.is_settled == False,  # noqa: E712
             Fixture.status == STATUS_FINISHED,
@@ -340,8 +405,12 @@ def _settle_unsettled_finished_matches(
     processed = 0
 
     for m in unsettled_matches:
+
         try:
-            settle_virtual_bets(m.id)
+            settle_virtual_bets(
+                m.id
+            )
+
             processed += 1
 
         except Exception:
@@ -374,9 +443,6 @@ def _maybe_generate_fresh_season(
         - total fixture count
         - latest season
         - latest round
-
-    This prevents repeated generation attempts against the same
-    terminal database state.
     """
 
     global last_season_generation_key
@@ -384,7 +450,9 @@ def _maybe_generate_fresh_season(
     with app.app_context():
 
         total_count = (
-            db.session.query(Fixture.id).count()
+            db.session
+            .query(Fixture.id)
+            .count()
         )
 
         active_count = _active_fixture_count(
@@ -393,19 +461,12 @@ def _maybe_generate_fresh_season(
             STATUS_FINISHED,
         )
 
-        # ----------------------------------------------------
-        # There is still an unfinished season.
-        # ----------------------------------------------------
-
         if active_count > 0:
             last_season_generation_key = None
             return False
 
-        # ----------------------------------------------------
-        # Settle any finished-but-unsettled matches.
-        # ----------------------------------------------------
-
         if settle_virtual_bets is not None:
+
             _settle_unsettled_finished_matches(
                 db=db,
                 Fixture=Fixture,
@@ -413,14 +474,15 @@ def _maybe_generate_fresh_season(
                 settle_virtual_bets=settle_virtual_bets,
             )
 
-        # ----------------------------------------------------
-        # Determine terminal state.
-        # ----------------------------------------------------
-
         latest_season_row = (
-            db.session.query(Fixture.season)
-            .filter(Fixture.season.isnot(None))
-            .order_by(Fixture.season.desc())
+            db.session
+            .query(Fixture.season)
+            .filter(
+                Fixture.season.isnot(None)
+            )
+            .order_by(
+                Fixture.season.desc()
+            )
             .first()
         )
 
@@ -442,23 +504,27 @@ def _maybe_generate_fresh_season(
             f"|last_round={last_round}"
         )
 
-        # ----------------------------------------------------
-        # Prevent duplicate generation.
-        # ----------------------------------------------------
-
         with season_generation_lock:
 
-            if last_season_generation_key == terminal_key:
+            if (
+                last_season_generation_key
+                == terminal_key
+            ):
                 return False
 
             if total_count > 0:
+
                 logger.info(
-                    "🧹 No active fixtures found; old fixtures remain "
-                    "intact and a fresh season will be generated"
+                    "🧹 No active fixtures found; "
+                    "old fixtures remain intact and "
+                    "a fresh season will be generated"
                 )
+
             else:
+
                 logger.info(
-                    "🆕 No fixtures found; generating first season"
+                    "🆕 No fixtures found; "
+                    "generating first season"
                 )
 
             try:
@@ -480,7 +546,10 @@ def _maybe_generate_fresh_season(
                 db.session.rollback()
 
             finally:
-                last_season_generation_key = terminal_key
+
+                last_season_generation_key = (
+                    terminal_key
+                )
 
         return True
 
@@ -508,14 +577,13 @@ def _recover_incomplete_fixtures(
     - Recent OPEN matches are nudged forward.
     - Stale/badly interrupted fixtures are fully re-queued.
     - Recovery operates independently for each active season.
-
-    Normally there should only be one unfinished season.
     """
 
     with app.app_context():
 
         incomplete = (
-            db.session.query(Fixture)
+            db.session
+            .query(Fixture)
             .filter(
                 Fixture.status != STATUS_FINISHED
             )
@@ -536,18 +604,16 @@ def _recover_incomplete_fixtures(
         )
 
         stale_cutoff = (
-            now - timedelta(
+            now
+            - timedelta(
                 seconds=RECOVERY_STALE_SECONDS
             )
         )
 
-        # ----------------------------------------------------
-        # Group rounds by season.
-        # ----------------------------------------------------
-
         season_rounds = {}
 
         for m in incomplete:
+
             if m.season is None:
                 continue
 
@@ -561,18 +627,28 @@ def _recover_incomplete_fixtures(
         for season_id, rounds in season_rounds.items():
 
             valid_rounds = sorted(
-                r for r in rounds
+                r
+                for r in rounds
                 if r is not None
             )
 
-            for idx, round_no in enumerate(valid_rounds):
+            for idx, round_no in enumerate(
+                valid_rounds
+            ):
 
                 round_start_map[
-                    (season_id, round_no)
+                    (
+                        season_id,
+                        round_no,
+                    )
                 ] = (
                     now
                     + timedelta(
-                        seconds=2 + idx * ROUND_INTERVAL
+                        seconds=2
+                        + (
+                            idx
+                            * ROUND_INTERVAL
+                        )
                     )
                 )
 
@@ -585,7 +661,10 @@ def _recover_incomplete_fixtures(
             try:
 
                 round_start = round_start_map.get(
-                    (m.season, m.round),
+                    (
+                        m.season,
+                        m.round,
+                    ),
                     now
                     + timedelta(
                         seconds=2
@@ -605,7 +684,8 @@ def _recover_incomplete_fixtures(
 
                 is_stale = (
                     anchor_time is None
-                    or anchor_time <= stale_cutoff
+                    or anchor_time
+                    <= stale_cutoff
                 )
 
                 # ------------------------------------------------
@@ -640,6 +720,12 @@ def _recover_incomplete_fixtures(
                         )
                     )
 
+                    if hasattr(
+                        m,
+                        "is_simulating",
+                    ):
+                        m.is_simulating = False
+
                     requeued += 1
                     recovered += 1
 
@@ -658,14 +744,24 @@ def _recover_incomplete_fixtures(
                     m.home_score = 0
                     m.away_score = 0
 
+                    if hasattr(
+                        m,
+                        "is_simulating",
+                    ):
+                        m.is_simulating = False
+
                     m.open_time = (
                         now
-                        + timedelta(seconds=2)
+                        + timedelta(
+                            seconds=2
+                        )
                     )
 
                     m.start_time = (
                         now
-                        + timedelta(seconds=5)
+                        + timedelta(
+                            seconds=5
+                        )
                     )
 
                     m.end_time = (
@@ -690,21 +786,32 @@ def _recover_incomplete_fixtures(
                         not m.start_time
                         or m.start_time < now
                     ):
+
                         m.start_time = (
                             now
-                            + timedelta(seconds=5)
+                            + timedelta(
+                                seconds=5
+                            )
                         )
 
                     if (
                         not m.end_time
-                        or m.end_time <= m.start_time
+                        or m.end_time
+                        <= m.start_time
                     ):
+
                         m.end_time = (
                             m.start_time
                             + timedelta(
                                 seconds=MATCH_SIM_SECONDS
                             )
                         )
+
+                    if hasattr(
+                        m,
+                        "is_simulating",
+                    ):
+                        m.is_simulating = False
 
                     resumed += 1
                     recovered += 1
@@ -743,13 +850,23 @@ def _recover_incomplete_fixtures(
                             )
                         )
 
+                    if hasattr(
+                        m,
+                        "is_simulating",
+                    ):
+                        m.is_simulating = False
+
                     recovered += 1
 
             except Exception:
 
                 logger.exception(
                     "Failed recovering fixture %s",
-                    getattr(m, "id", "?"),
+                    getattr(
+                        m,
+                        "id",
+                        "?",
+                    ),
                 )
 
         db.session.commit()
@@ -764,7 +881,7 @@ def _recover_incomplete_fixtures(
 
 
 # ============================================================
-# FORCE FINISH STUCK MATCHES
+# FORCE FINISH STUCK RUNNING MATCHES
 # ============================================================
 
 def _force_finish_stuck_running_matches(
@@ -789,7 +906,8 @@ def _force_finish_stuck_running_matches(
     )
 
     query = (
-        db.session.query(Fixture)
+        db.session
+        .query(Fixture)
         .filter(
             Fixture.status == STATUS_RUNNING
         )
@@ -820,21 +938,27 @@ def _force_finish_stuck_running_matches(
 
                 effective_end = (
                     m.start_time
-                    + timedelta(seconds=45)
+                    + timedelta(
+                        seconds=45
+                    )
                 )
 
             elif m.open_time is not None:
 
                 effective_end = (
                     m.open_time
-                    + timedelta(seconds=45)
+                    + timedelta(
+                        seconds=45
+                    )
                 )
 
             else:
 
                 effective_end = (
                     now
-                    - timedelta(seconds=1)
+                    - timedelta(
+                        seconds=1
+                    )
                 )
 
             if effective_end > cutoff:
@@ -856,6 +980,12 @@ def _force_finish_stuck_running_matches(
             ):
                 m.end_time = effective_end
 
+            if hasattr(
+                m,
+                "is_simulating",
+            ):
+                m.is_simulating = False
+
             db.session.commit()
 
             logger.warning(
@@ -876,7 +1006,11 @@ def _force_finish_stuck_running_matches(
 
             logger.exception(
                 "Failed force-finishing stuck match %s",
-                getattr(m, "id", "?"),
+                getattr(
+                    m,
+                    "id",
+                    "?",
+                ),
             )
 
             db.session.rollback()
@@ -908,7 +1042,8 @@ def _log_engine_health(
         else:
 
             active_count = (
-                db.session.query(Fixture.id)
+                db.session
+                .query(Fixture.id)
                 .filter(
                     Fixture.season == season_id,
                     Fixture.status != STATUS_FINISHED,
@@ -934,7 +1069,9 @@ def _log_engine_health(
         running_count = None
 
     with simulation_guard_lock:
-        sim_count = len(active_simulations)
+        sim_count = len(
+            active_simulations
+        )
 
     logger.info(
         "[engine] health | season=%s | active=%s | "
@@ -950,6 +1087,76 @@ def _log_engine_health(
         else "?",
         sim_count,
     )
+
+
+# ============================================================
+# EXECUTOR HELPERS
+# ============================================================
+
+def _ensure_simulation_executor():
+    """
+    Return a live simulation executor.
+
+    A Render/Gunicorn restart can shut down the old executor.
+    Never reuse an executor that has already been shut down.
+    """
+
+    global simulation_executor
+
+    with executor_lock:
+
+        if (
+            simulation_executor is None
+            or getattr(
+                simulation_executor,
+                "_shutdown",
+                False,
+            )
+        ):
+
+            simulation_executor = (
+                ThreadPoolExecutor(
+                    max_workers=ENGINE_WORKERS
+                )
+            )
+
+            logger.info(
+                "🔧 Simulation executor ready | workers=%d",
+                ENGINE_WORKERS,
+            )
+
+        return simulation_executor
+
+
+def _ensure_settlement_executor():
+    """
+    Return a live settlement executor.
+    """
+
+    global settlement_executor
+
+    with executor_lock:
+
+        if (
+            settlement_executor is None
+            or getattr(
+                settlement_executor,
+                "_shutdown",
+                False,
+            )
+        ):
+
+            settlement_executor = (
+                ThreadPoolExecutor(
+                    max_workers=3
+                )
+            )
+
+            logger.info(
+                "🔧 Settlement executor ready"
+            )
+
+        return settlement_executor
 
 
 # ============================================================
@@ -970,542 +1177,738 @@ def start_virtual_engine(
     )
 
     global engine_thread
-    global simulation_executor
-    global settlement_executor
 
     # --------------------------------------------------------
     # Don't start another local engine thread.
     # --------------------------------------------------------
 
     if (
-        engine_thread is None
-        or not engine_thread.is_alive()
+        engine_thread is not None
+        and engine_thread.is_alive()
     ):
 
-        from .config import app, db
-
-        # ----------------------------------------------------
-        # PostgreSQL global engine lock
-        # ----------------------------------------------------
-
-        with app.app_context():
-
-            if not _acquire_engine_advisory_lock(db):
-                return None
-
-        from .config import app, db, socketio
-
-        from .model import Fixture
-
-        from .config_settings import (
-            STATUS_SCHEDULED,
-            STATUS_OPEN,
-            STATUS_RUNNING,
-            STATUS_FINISHED,
-            MATCHES_PER_ROUND,
-            MAX_ACTIVE_MATCHES,
-            BETTING_TIME,
-            MATCH_SIM_SECONDS,
-            ROUND_INTERVAL,
+        logger.warning(
+            "⚠️ Virtual engine already running"
         )
 
-        from .simulation import simulate_match
+        return engine_thread
 
-        from .season import generate_full_season
+    from .config import app, db
 
-        from .settlement import settle_virtual_bets
+    # --------------------------------------------------------
+    # PostgreSQL global engine lock
+    # --------------------------------------------------------
 
-        shutdown_flag.clear()
+    with app.app_context():
+
+        if not _acquire_engine_advisory_lock(db):
+
+            return None
+
+    from .config import app, db, socketio
+
+    from .model import Fixture
+
+    from .config_settings import (
+        STATUS_SCHEDULED,
+        STATUS_OPEN,
+        STATUS_RUNNING,
+        STATUS_FINISHED,
+        MATCHES_PER_ROUND,
+        MAX_ACTIVE_MATCHES,
+        BETTING_TIME,
+        MATCH_SIM_SECONDS,
+        ROUND_INTERVAL,
+    )
+
+    from .simulation import simulate_match
+
+    from .season import generate_full_season
+
+    from .settlement import settle_virtual_bets
+
+    shutdown_flag.clear()
+
+    # --------------------------------------------------------
+    # Executors
+    # --------------------------------------------------------
+
+    _ensure_simulation_executor()
+    _ensure_settlement_executor()
+
+    # ========================================================
+    # SUBMIT SIMULATION
+    # ========================================================
+
+    def _submit_simulation(
+        match_id: int,
+    ):
+        """
+        Submit one simulation exactly once per match.
+
+        Shutdown-safe:
+            - refuses work after shutdown begins
+            - prevents duplicate submissions
+            - recreates a dead executor
+            - catches RuntimeError during Render restart
+            - always removes the match from active_simulations
+        """
 
         # ----------------------------------------------------
-        # Simulation executor
+        # Don't accept new work during shutdown.
         # ----------------------------------------------------
 
-        if simulation_executor is None:
+        if shutdown_flag.is_set():
 
-            simulation_executor = ThreadPoolExecutor(
-                max_workers=ENGINE_WORKERS
+            logger.info(
+                "⏹️ Shutdown active; "
+                "not submitting match %s",
+                match_id,
             )
 
+            return False
+
         # ----------------------------------------------------
-        # Settlement executor
+        # Claim the match once.
         # ----------------------------------------------------
 
-        if settlement_executor is None:
+        with simulation_guard_lock:
 
-            settlement_executor = ThreadPoolExecutor(
-                max_workers=3
+            if match_id in active_simulations:
+
+                logger.warning(
+                    "Match %d already simulating — skipping",
+                    match_id,
+                )
+
+                return False
+
+            active_simulations.add(
+                match_id
             )
 
-        # ====================================================
-        # SUBMIT SIMULATION
-        # ====================================================
-
-        def _submit_simulation(
-            match_id: int,
-        ):
-            """
-            Submit one simulation exactly once per match.
-            """
-
-            with simulation_guard_lock:
-
-                if match_id in active_simulations:
-
-                    logger.warning(
-                        "Match %d already simulating — skipping",
-                        match_id,
-                    )
-
-                    return False
-
-                active_simulations.add(match_id)
-
-            def _runner():
-
-                try:
-
-                    simulate_match(
-                        match_id,
-                        emit_update_callback,
-                    )
-
-                except Exception:
-
-                    logger.exception(
-                        "Simulation crashed for match %s",
-                        match_id,
-                    )
-
-                finally:
-
-                    with simulation_guard_lock:
-                        active_simulations.discard(
-                            match_id
-                        )
+        def _runner():
 
             try:
 
-                if simulation_executor is not None:
+                logger.info(
+                    "🚀 Simulation worker started | match=%s",
+                    match_id,
+                )
 
-                    simulation_executor.submit(
-                        _runner
-                    )
-
-                else:
-
-                    threading.Thread(
-                        target=_runner,
-                        daemon=True,
-                    ).start()
-
-                return True
+                simulate_match(
+                    match_id,
+                    emit_update_callback,
+                )
 
             except Exception:
+
+                logger.exception(
+                    "Simulation crashed for match %s",
+                    match_id,
+                )
+
+            finally:
 
                 with simulation_guard_lock:
                     active_simulations.discard(
                         match_id
                     )
 
-                raise
+                logger.info(
+                    "🏁 Simulation worker released | match=%s",
+                    match_id,
+                )
 
-        # ====================================================
-        # SUBMIT SETTLEMENT
-        # ====================================================
+        # ----------------------------------------------------
+        # Submit while protected by the executor lock.
+        # ----------------------------------------------------
 
-        def _submit_settlement(
-            match_id: int,
-        ):
+        try:
 
-            try:
+            with executor_lock:
 
-                if settlement_executor is not None:
+                if shutdown_flag.is_set():
 
-                    settlement_executor.submit(
-                        settle_virtual_bets,
+                    with simulation_guard_lock:
+                        active_simulations.discard(
+                            match_id
+                        )
+
+                    logger.info(
+                        "⏹️ Shutdown started before submit | "
+                        "match=%s",
                         match_id,
                     )
 
-                else:
+                    return False
 
-                    threading.Thread(
-                        target=settle_virtual_bets,
-                        args=(match_id,),
-                        daemon=True,
-                    ).start()
+                executor = (
+                    _ensure_simulation_executor()
+                )
+
+                try:
+
+                    future = executor.submit(
+                        _runner
+                    )
+
+                except RuntimeError as exc:
+
+                    # ------------------------------------------------
+                    # Executor may have been shut down concurrently.
+                    # Recreate it once and retry.
+                    # ------------------------------------------------
+
+                    logger.warning(
+                        "⚠️ Executor rejected match %s: %s",
+                        match_id,
+                        exc,
+                    )
+
+                    if shutdown_flag.is_set():
+
+                        with simulation_guard_lock:
+                            active_simulations.discard(
+                                match_id
+                            )
+
+                        return False
+
+                    simulation_executor_local = (
+                        ThreadPoolExecutor(
+                            max_workers=ENGINE_WORKERS
+                        )
+                    )
+
+                    globals()[
+                        "simulation_executor"
+                    ] = simulation_executor_local
+
+                    future = (
+                        simulation_executor_local.submit(
+                            _runner
+                        )
+                    )
+
+                logger.info(
+                    "✅ Simulation submitted | "
+                    "match=%s | future=%r",
+                    match_id,
+                    future,
+                )
+
+                return True
+
+        except RuntimeError as exc:
+
+            with simulation_guard_lock:
+                active_simulations.discard(
+                    match_id
+                )
+
+            logger.warning(
+                "⚠️ Simulation submission rejected "
+                "for match %s: %s",
+                match_id,
+                exc,
+            )
+
+            return False
+
+        except Exception:
+
+            with simulation_guard_lock:
+                active_simulations.discard(
+                    match_id
+                )
+
+            logger.exception(
+                "Failed submitting simulation for match %s",
+                match_id,
+            )
+
+            return False
+
+    # ========================================================
+    # SUBMIT SETTLEMENT
+    # ========================================================
+
+    def _submit_settlement(
+        match_id: int,
+    ):
+
+        if shutdown_flag.is_set():
+
+            logger.info(
+                "⏹️ Shutdown active; "
+                "not submitting settlement for match %s",
+                match_id,
+            )
+
+            return False
+
+        def _settlement_runner():
+
+            try:
+
+                settle_virtual_bets(
+                    match_id
+                )
 
             except Exception:
 
                 logger.exception(
-                    "Error submitting settlement "
-                    "for match %s",
+                    "Settlement failed for match %s",
                     match_id,
                 )
 
-        # ====================================================
-        # ENGINE LOOP
-        # ====================================================
+        try:
 
-        def run_engine():
+            with executor_lock:
 
-            with app.app_context():
+                if shutdown_flag.is_set():
+                    return False
+
+                executor = (
+                    _ensure_settlement_executor()
+                )
 
                 try:
 
-                    # ----------------------------------------
-                    # Startup recovery
-                    # ----------------------------------------
-
-                    _recover_incomplete_fixtures(
-                        app=app,
-                        db=db,
-                        Fixture=Fixture,
-                        STATUS_SCHEDULED=STATUS_SCHEDULED,
-                        STATUS_OPEN=STATUS_OPEN,
-                        STATUS_RUNNING=STATUS_RUNNING,
-                        STATUS_FINISHED=STATUS_FINISHED,
-                        BETTING_TIME=BETTING_TIME,
-                        MATCH_SIM_SECONDS=MATCH_SIM_SECONDS,
-                        ROUND_INTERVAL=ROUND_INTERVAL,
+                    executor.submit(
+                        _settlement_runner
                     )
 
-                    # ----------------------------------------
-                    # If no active season exists, generate one.
-                    # ----------------------------------------
+                except RuntimeError as exc:
 
-                    _maybe_generate_fresh_season(
-                        app=app,
-                        db=db,
-                        Fixture=Fixture,
-                        STATUS_FINISHED=STATUS_FINISHED,
-                        generate_full_season=generate_full_season,
-                        settle_virtual_bets=settle_virtual_bets,
+                    logger.warning(
+                        "Settlement executor rejected "
+                        "match %s: %s",
+                        match_id,
+                        exc,
                     )
 
-                except Exception:
+                    if shutdown_flag.is_set():
+                        return False
 
-                    logger.exception(
-                        "Error preparing season at startup"
+                    new_executor = (
+                        ThreadPoolExecutor(
+                            max_workers=3
+                        )
                     )
 
-                    db.session.rollback()
+                    globals()[
+                        "settlement_executor"
+                    ] = new_executor
+
+                    new_executor.submit(
+                        _settlement_runner
+                    )
+
+                return True
+
+        except Exception:
+
+            logger.exception(
+                "Error submitting settlement "
+                "for match %s",
+                match_id,
+            )
+
+            return False
+
+    # ========================================================
+    # ENGINE LOOP
+    # ========================================================
+
+    def run_engine():
+
+        logger.info(
+            "🟢 Engine worker thread started"
+        )
+
+        with app.app_context():
+
+            try:
 
                 # ------------------------------------------------
-                # Timers
+                # Startup recovery
                 # ------------------------------------------------
 
-                last_cleanup_check = time.time()
-                last_health_log = time.time()
-                last_odds_refresh = time.time()
+                _recover_incomplete_fixtures(
+                    app=app,
+                    db=db,
+                    Fixture=Fixture,
+                    STATUS_SCHEDULED=STATUS_SCHEDULED,
+                    STATUS_OPEN=STATUS_OPEN,
+                    STATUS_RUNNING=STATUS_RUNNING,
+                    STATUS_FINISHED=STATUS_FINISHED,
+                    BETTING_TIME=BETTING_TIME,
+                    MATCH_SIM_SECONDS=MATCH_SIM_SECONDS,
+                    ROUND_INTERVAL=ROUND_INTERVAL,
+                )
 
-                ODDS_REFRESH_INTERVAL = 60
+                # ------------------------------------------------
+                # If no active season exists, generate one.
+                # ------------------------------------------------
 
-                # =================================================
-                # MAIN LOOP
-                # =================================================
+                _maybe_generate_fresh_season(
+                    app=app,
+                    db=db,
+                    Fixture=Fixture,
+                    STATUS_FINISHED=STATUS_FINISHED,
+                    generate_full_season=generate_full_season,
+                    settle_virtual_bets=settle_virtual_bets,
+                )
 
-                while not shutdown_flag.is_set():
+            except Exception:
 
-                    try:
+                logger.exception(
+                    "Error preparing season at startup"
+                )
 
-                        now = now_utc()
+                db.session.rollback()
 
-                        # =========================================
-                        # DETERMINE ACTIVE SEASON
-                        # =========================================
+            # ------------------------------------------------
+            # Timers
+            # ------------------------------------------------
 
-                        active_season = _get_active_season_id(
+            last_cleanup_check = time.time()
+            last_health_log = time.time()
+            last_odds_refresh = time.time()
+
+            ODDS_REFRESH_INTERVAL = 60
+
+            # =================================================
+            # MAIN LOOP
+            # =================================================
+
+            while not shutdown_flag.is_set():
+
+                try:
+
+                    now = now_utc()
+
+                    # =========================================
+                    # ACTIVE SEASON
+                    # =========================================
+
+                    active_season = (
+                        _get_active_season_id(
                             db,
                             Fixture,
                             STATUS_FINISHED,
                         )
+                    )
 
-                        # =========================================
-                        # ENGINE HEALTH
-                        # =========================================
+                    # =========================================
+                    # ENGINE HEALTH
+                    # =========================================
 
-                        if (
+                    if (
+                        time.time()
+                        - last_health_log
+                        > ENGINE_HEALTH_LOG_SECONDS
+                    ):
+
+                        _log_engine_health(
+                            db,
+                            Fixture,
+                            STATUS_RUNNING,
+                            STATUS_FINISHED,
+                            season_id=active_season,
+                        )
+
+                        last_health_log = (
                             time.time()
-                            - last_health_log
-                            > ENGINE_HEALTH_LOG_SECONDS
-                        ):
+                        )
 
-                            _log_engine_health(
-                                db,
-                                Fixture,
-                                STATUS_RUNNING,
-                                STATUS_FINISHED,
+                    # =========================================
+                    # REFRESH OPEN ODDS
+                    # =========================================
+
+                    if (
+                        time.time()
+                        - last_odds_refresh
+                        > ODDS_REFRESH_INTERVAL
+                    ):
+
+                        try:
+
+                            refreshed_count = (
+                                refresh_open_fixture_odds(
+                                    db.session,
+                                    lookback=5,
+                                )
+                            )
+
+                            if refreshed_count:
+
+                                logger.info(
+                                    "🎲 Refreshed odds for %d "
+                                    "open fixtures",
+                                    refreshed_count,
+                                )
+
+                        except Exception:
+
+                            logger.exception(
+                                "Error refreshing "
+                                "open fixture odds"
+                            )
+
+                        finally:
+
+                            last_odds_refresh = (
+                                time.time()
+                            )
+
+                    # =========================================
+                    # PERIODIC SETTLEMENT CLEANUP
+                    # =========================================
+
+                    if (
+                        time.time()
+                        - last_cleanup_check
+                        > 10
+                    ):
+
+                        try:
+
+                            _settle_unsettled_finished_matches(
+                                db=db,
+                                Fixture=Fixture,
+                                STATUS_FINISHED=STATUS_FINISHED,
+                                settle_virtual_bets=settle_virtual_bets,
                                 season_id=active_season,
                             )
 
-                            last_health_log = time.time()
+                        except Exception:
 
-                        # =========================================
-                        # REFRESH OPEN ODDS
-                        # =========================================
-
-                        if (
-                            time.time()
-                            - last_odds_refresh
-                            > ODDS_REFRESH_INTERVAL
-                        ):
-
-                            try:
-
-                                refreshed_count = (
-                                    refresh_open_fixture_odds(
-                                        db.session,
-                                        lookback=5,
-                                    )
-                                )
-
-                                if refreshed_count:
-
-                                    logger.info(
-                                        "🎲 Refreshed odds for %d "
-                                        "open fixtures",
-                                        refreshed_count,
-                                    )
-
-                            except Exception:
-
-                                logger.exception(
-                                    "Error refreshing "
-                                    "open fixture odds"
-                                )
-
-                            finally:
-
-                                last_odds_refresh = time.time()
-
-                        # =========================================
-                        # PERIODIC SETTLEMENT CLEANUP
-                        # =========================================
-
-                        if (
-                            time.time()
-                            - last_cleanup_check
-                            > 10
-                        ):
-
-                            try:
-
-                                _settle_unsettled_finished_matches(
-                                    db=db,
-                                    Fixture=Fixture,
-                                    STATUS_FINISHED=STATUS_FINISHED,
-                                    settle_virtual_bets=settle_virtual_bets,
-                                    season_id=active_season,
-                                )
-
-                            except Exception:
-
-                                logger.exception(
-                                    "Error during "
-                                    "cleanup settlement"
-                                )
-
-                                db.session.rollback()
-
-                            last_cleanup_check = time.time()
-
-                        # =========================================
-                        # FORCE FINISH STUCK MATCHES
-                        # =========================================
-
-                        if active_season is not None:
-
-                            try:
-
-                                _force_finish_stuck_running_matches(
-                                    db=db,
-                                    Fixture=Fixture,
-                                    STATUS_RUNNING=STATUS_RUNNING,
-                                    STATUS_FINISHED=STATUS_FINISHED,
-                                    season_id=active_season,
-                                )
-
-                            except Exception:
-
-                                logger.exception(
-                                    "Error force-finishing "
-                                    "stuck matches"
-                                )
-
-                                db.session.rollback()
-
-                        # =========================================
-                        # NO ACTIVE SEASON
-                        # =========================================
-
-                        if active_season is None:
-
-                            try:
-
-                                _maybe_generate_fresh_season(
-                                    app=app,
-                                    db=db,
-                                    Fixture=Fixture,
-                                    STATUS_FINISHED=STATUS_FINISHED,
-                                    generate_full_season=generate_full_season,
-                                    settle_virtual_bets=settle_virtual_bets,
-                                )
-
-                            except Exception:
-
-                                logger.exception(
-                                    "Error ensuring active season"
-                                )
-
-                                db.session.rollback()
-
-                            _sleep_or_shutdown(1)
-
-                            continue
-
-                        # =========================================
-                        # CURRENT ROUND
-                        # =========================================
-
-                        current_round_row = (
-                            db.session.query(Fixture.round)
-                            .filter(
-                                Fixture.season == active_season,
-                                Fixture.status.in_(
-                                    [
-                                        STATUS_SCHEDULED,
-                                        STATUS_OPEN,
-                                        STATUS_RUNNING,
-                                    ]
-                                ),
+                            logger.exception(
+                                "Error during "
+                                "cleanup settlement"
                             )
-                            .order_by(
-                                Fixture.round.asc()
-                            )
-                            .first()
+
+                            db.session.rollback()
+
+                        last_cleanup_check = (
+                            time.time()
                         )
 
-                        # =========================================
-                        # BROKEN ROUND RECOVERY
-                        # =========================================
+                    # =========================================
+                    # FORCE FINISH STUCK MATCHES
+                    # =========================================
 
-                        if not current_round_row:
+                    if active_season is not None:
 
-                            logger.warning(
-                                "⚠️ No active round found "
-                                "for season %s while fixtures exist. "
-                                "Attempting recovery...",
-                                active_season,
+                        try:
+
+                            _force_finish_stuck_running_matches(
+                                db=db,
+                                Fixture=Fixture,
+                                STATUS_RUNNING=STATUS_RUNNING,
+                                STATUS_FINISHED=STATUS_FINISHED,
+                                season_id=active_season,
                             )
 
-                            try:
+                        except Exception:
 
-                                _recover_incomplete_fixtures(
-                                    app=app,
-                                    db=db,
-                                    Fixture=Fixture,
-                                    STATUS_SCHEDULED=STATUS_SCHEDULED,
-                                    STATUS_OPEN=STATUS_OPEN,
-                                    STATUS_RUNNING=STATUS_RUNNING,
-                                    STATUS_FINISHED=STATUS_FINISHED,
-                                    BETTING_TIME=BETTING_TIME,
-                                    MATCH_SIM_SECONDS=MATCH_SIM_SECONDS,
-                                    ROUND_INTERVAL=ROUND_INTERVAL,
-                                )
+                            logger.exception(
+                                "Error force-finishing "
+                                "stuck matches"
+                            )
 
-                            except Exception:
+                            db.session.rollback()
 
-                                logger.exception(
-                                    "Error recovering "
-                                    "broken round state"
-                                )
+                    # =========================================
+                    # NO ACTIVE SEASON
+                    # =========================================
 
-                                db.session.rollback()
+                    if active_season is None:
 
-                            _sleep_or_shutdown(1)
+                        try:
 
-                            continue
+                            _maybe_generate_fresh_season(
+                                app=app,
+                                db=db,
+                                Fixture=Fixture,
+                                STATUS_FINISHED=STATUS_FINISHED,
+                                generate_full_season=generate_full_season,
+                                settle_virtual_bets=settle_virtual_bets,
+                            )
 
-                        current_round = current_round_row[0]
+                        except Exception:
 
-                        # =========================================
-                        # OPEN MATCHES
-                        # =========================================
+                            logger.exception(
+                                "Error ensuring active season"
+                            )
 
-                        running_count = _running_fixture_count(
+                            db.session.rollback()
+
+                        _sleep_or_shutdown(
+                            1
+                        )
+
+                        continue
+
+                    # =========================================
+                    # CURRENT ROUND
+                    # =========================================
+
+                    current_round_row = (
+                        db.session
+                        .query(Fixture.round)
+                        .filter(
+                            Fixture.season
+                            == active_season,
+
+                            Fixture.status.in_(
+                                [
+                                    STATUS_SCHEDULED,
+                                    STATUS_OPEN,
+                                    STATUS_RUNNING,
+                                ]
+                            ),
+                        )
+                        .order_by(
+                            Fixture.round.asc()
+                        )
+                        .first()
+                    )
+
+                    # =========================================
+                    # BROKEN ROUND RECOVERY
+                    # =========================================
+
+                    if not current_round_row:
+
+                        logger.warning(
+                            "⚠️ No active round found "
+                            "for season %s while fixtures exist. "
+                            "Attempting recovery...",
+                            active_season,
+                        )
+
+                        try:
+
+                            _recover_incomplete_fixtures(
+                                app=app,
+                                db=db,
+                                Fixture=Fixture,
+                                STATUS_SCHEDULED=STATUS_SCHEDULED,
+                                STATUS_OPEN=STATUS_OPEN,
+                                STATUS_RUNNING=STATUS_RUNNING,
+                                STATUS_FINISHED=STATUS_FINISHED,
+                                BETTING_TIME=BETTING_TIME,
+                                MATCH_SIM_SECONDS=MATCH_SIM_SECONDS,
+                                ROUND_INTERVAL=ROUND_INTERVAL,
+                            )
+
+                        except Exception:
+
+                            logger.exception(
+                                "Error recovering "
+                                "broken round state"
+                            )
+
+                            db.session.rollback()
+
+                        _sleep_or_shutdown(
+                            1
+                        )
+
+                        continue
+
+                    current_round = (
+                        current_round_row[0]
+                    )
+
+                    # =========================================
+                    # OPEN MATCHES
+                    # =========================================
+
+                    running_count = (
+                        _running_fixture_count(
                             db,
                             Fixture,
                             STATUS_RUNNING,
                             season_id=active_season,
                         )
+                    )
 
-                        slots_available = max(
-                            0,
-                            MAX_ACTIVE_MATCHES
-                            - running_count,
+                    slots_available = max(
+                        0,
+                        MAX_ACTIVE_MATCHES
+                        - running_count,
+                    )
+
+                    if slots_available > 0:
+
+                        matches_to_open = (
+                            Fixture.query
+                            .filter(
+                                Fixture.season
+                                == active_season,
+
+                                Fixture.round
+                                == current_round,
+
+                                Fixture.status
+                                == STATUS_SCHEDULED,
+
+                                Fixture.open_time
+                                <= now,
+                            )
+                            .order_by(
+                                Fixture.id.asc()
+                            )
+                            .limit(
+                                min(
+                                    slots_available,
+                                    MATCHES_PER_ROUND,
+                                )
+                            )
+                            .all()
                         )
 
-                        if slots_available > 0:
+                        for m in matches_to_open:
 
-                            matches_to_open = (
-                                Fixture.query
-                                .filter(
-                                    Fixture.season
-                                    == active_season,
+                            if shutdown_flag.is_set():
+                                break
 
-                                    Fixture.round
-                                    == current_round,
+                            try:
 
-                                    Fixture.status
-                                    == STATUS_SCHEDULED,
-
-                                    Fixture.open_time
-                                    <= now,
-                                )
-                                .order_by(
-                                    Fixture.id.asc()
-                                )
-                                .limit(
-                                    min(
-                                        slots_available,
-                                        MATCHES_PER_ROUND,
+                                updated = (
+                                    try_set_fixture_status_atomic(
+                                        db.session,
+                                        m.id,
+                                        STATUS_SCHEDULED,
+                                        STATUS_OPEN,
                                     )
                                 )
-                                .all()
-                            )
 
-                            for m in matches_to_open:
+                                if not updated:
+                                    continue
+
+                                db.session.commit()
+
+                                logger.info(
+                                    "🟢 OPEN Match %d "
+                                    "(S%d R%d): %s vs %s "
+                                    "| open_time=%s",
+                                    m.id,
+                                    m.season,
+                                    m.round,
+                                    m.home,
+                                    m.away,
+                                    _fmt_dt(
+                                        m.open_time
+                                    ),
+                                )
 
                                 try:
-
-                                    updated = (
-                                        try_set_fixture_status_atomic(
-                                            db.session,
-                                            m.id,
-                                            STATUS_SCHEDULED,
-                                            STATUS_OPEN,
-                                        )
-                                    )
-
-                                    if not updated:
-                                        continue
-
-                                    db.session.commit()
-
-                                    logger.info(
-                                        "🟢 OPEN Match %d "
-                                        "(S%d R%d): %s vs %s "
-                                        "| open_time=%s",
-                                        m.id,
-                                        m.season,
-                                        m.round,
-                                        m.home,
-                                        m.away,
-                                        _fmt_dt(
-                                            m.open_time
-                                        ),
-                                    )
 
                                     socketio.emit(
                                         "match_open",
@@ -1521,160 +1924,74 @@ def start_virtual_engine(
                                 except Exception:
 
                                     logger.exception(
-                                        "Error opening match %s",
+                                        "Socket emit failed "
+                                        "for opening match %s",
                                         m.id,
                                     )
 
-                                    db.session.rollback()
+                            except Exception:
 
-                        # =========================================
-                        # START MATCHES
-                        # =========================================
+                                logger.exception(
+                                    "Error opening match %s",
+                                    m.id,
+                                )
 
-                        running_count = _running_fixture_count(
+                                db.session.rollback()
+
+                    # =========================================
+                    # START MATCHES
+                    # =========================================
+
+                    running_count = (
+                        _running_fixture_count(
                             db,
                             Fixture,
                             STATUS_RUNNING,
                             season_id=active_season,
                         )
+                    )
 
-                        slots_available = max(
-                            0,
-                            MAX_ACTIVE_MATCHES
-                            - running_count,
-                        )
+                    slots_available = max(
+                        0,
+                        MAX_ACTIVE_MATCHES
+                        - running_count,
+                    )
 
-                        if slots_available > 0:
+                    if slots_available > 0:
 
-                            to_start = (
-                                Fixture.query
-                                .filter(
-                                    Fixture.season
-                                    == active_season,
-
-                                    Fixture.round
-                                    == current_round,
-
-                                    Fixture.status
-                                    == STATUS_OPEN,
-
-                                    Fixture.start_time
-                                    <= now,
-                                )
-                                .order_by(
-                                    Fixture.id.asc()
-                                )
-                                .limit(
-                                    min(
-                                        slots_available,
-                                        ENGINE_WORKERS,
-                                    )
-                                )
-                                .all()
-                            )
-
-                            for idx, m in enumerate(to_start):
-
-                                try:
-
-                                    updated = (
-                                        try_set_fixture_status_atomic(
-                                            db.session,
-                                            m.id,
-                                            STATUS_OPEN,
-                                            STATUS_RUNNING,
-                                        )
-                                    )
-
-                                    if not updated:
-                                        continue
-
-                                    db.session.commit()
-
-                                    logger.info(
-                                        "▶️ START Match %d "
-                                        "(S%d R%d): %s vs %s "
-                                        "| open_time=%s "
-                                        "| start_time=%s",
-                                        m.id,
-                                        m.season,
-                                        m.round,
-                                        m.home,
-                                        m.away,
-                                        _fmt_dt(
-                                            m.open_time
-                                        ),
-                                        _fmt_dt(
-                                            m.start_time
-                                        ),
-                                    )
-
-                                    if (
-                                        idx > 0
-                                        and ENGINE_START_STAGGER_SECONDS
-                                        > 0
-                                    ):
-
-                                        _sleep_or_shutdown(
-                                            ENGINE_START_STAGGER_SECONDS
-                                            * idx
-                                        )
-
-                                    _submit_simulation(
-                                        m.id
-                                    )
-
-                                except Exception:
-
-                                    logger.exception(
-                                        "Error starting match %s",
-                                        m.id,
-                                    )
-
-                                    db.session.rollback()
-
-                        # =========================================
-                        # FORCE FINISH OVERDUE MATCHES
-                        # =========================================
-
-                        timeout_cutoff = (
-                            now
-                            - timedelta(
-                                seconds=FORCE_FINISH_GRACE_SECONDS
-                            )
-                        )
-
-                        finished = (
+                        to_start = (
                             Fixture.query
                             .filter(
                                 Fixture.season
                                 == active_season,
 
+                                Fixture.round
+                                == current_round,
+
                                 Fixture.status
-                                == STATUS_RUNNING,
+                                == STATUS_OPEN,
 
-                                Fixture.end_time
-                                .isnot(None),
-
-                                Fixture.end_time
-                                <= timeout_cutoff,
+                                Fixture.start_time
+                                <= now,
                             )
                             .order_by(
                                 Fixture.id.asc()
                             )
+                            .limit(
+                                min(
+                                    slots_available,
+                                    ENGINE_WORKERS,
+                                )
+                            )
                             .all()
                         )
 
-                        for m in finished:
+                        for idx, m in enumerate(
+                            to_start
+                        ):
 
-                            if (
-                                m.end_time
-                                and (
-                                    now - m.end_time
-                                ).total_seconds()
-                                > 10
-                            ):
-                                continue
+                            if shutdown_flag.is_set():
+                                break
 
                             try:
 
@@ -1682,8 +1999,8 @@ def start_virtual_engine(
                                     try_set_fixture_status_atomic(
                                         db.session,
                                         m.id,
+                                        STATUS_OPEN,
                                         STATUS_RUNNING,
-                                        STATUS_FINISHED,
                                     )
                                 )
 
@@ -1692,112 +2009,233 @@ def start_virtual_engine(
 
                                 db.session.commit()
 
-                                logger.warning(
-                                    "⚠️ TIMEOUT FINISH Match %d "
-                                    "(S%d R%d) | "
-                                    "open_time=%s | "
-                                    "start_time=%s | "
-                                    "end_time=%s",
+                                logger.info(
+                                    "▶️ START Match %d "
+                                    "(S%d R%d): %s vs %s "
+                                    "| open_time=%s "
+                                    "| start_time=%s",
                                     m.id,
                                     m.season,
                                     m.round,
+                                    m.home,
+                                    m.away,
                                     _fmt_dt(
                                         m.open_time
                                     ),
                                     _fmt_dt(
                                         m.start_time
                                     ),
-                                    _fmt_dt(
-                                        m.end_time
-                                    ),
                                 )
+
+                                if (
+                                    idx > 0
+                                    and ENGINE_START_STAGGER_SECONDS
+                                    > 0
+                                ):
+
+                                    _sleep_or_shutdown(
+                                        ENGINE_START_STAGGER_SECONDS
+                                        * idx
+                                    )
+
+                                if shutdown_flag.is_set():
+                                    break
+
+                                submitted = (
+                                    _submit_simulation(
+                                        m.id
+                                    )
+                                )
+
+                                if not submitted:
+
+                                    logger.warning(
+                                        "⚠️ Simulation was not "
+                                        "submitted for match %s; "
+                                        "engine will recover it later",
+                                        m.id,
+                                    )
 
                             except Exception:
 
                                 logger.exception(
-                                    "Error finishing match %s",
+                                    "Error starting match %s",
                                     m.id,
                                 )
 
                                 db.session.rollback()
 
-                        # =========================================
-                        # ROUND SETTLEMENT
-                        # =========================================
+                    # =========================================
+                    # FORCE FINISH OVERDUE MATCHES
+                    # =========================================
 
-                        matches_in_round = (
-                            Fixture.query
-                            .filter(
-                                Fixture.season
-                                == active_season,
-
-                                Fixture.round
-                                == current_round,
-                            )
-                            .all()
+                    timeout_cutoff = (
+                        now
+                        - timedelta(
+                            seconds=FORCE_FINISH_GRACE_SECONDS
                         )
+                    )
 
-                        if (
-                            matches_in_round
-                            and all(
-                                m.status
-                                == STATUS_FINISHED
-                                for m in matches_in_round
+                    finished = (
+                        Fixture.query
+                        .filter(
+                            Fixture.season
+                            == active_season,
+
+                            Fixture.status
+                            == STATUS_RUNNING,
+
+                            Fixture.end_time
+                            .isnot(None),
+
+                            Fixture.end_time
+                            <= timeout_cutoff,
+                        )
+                        .order_by(
+                            Fixture.id.asc()
+                        )
+                        .all()
+                    )
+
+                    for m in finished:
+
+                        try:
+
+                            updated = (
+                                try_set_fixture_status_atomic(
+                                    db.session,
+                                    m.id,
+                                    STATUS_RUNNING,
+                                    STATUS_FINISHED,
+                                )
                             )
-                        ):
 
-                            queued = 0
+                            if not updated:
+                                continue
 
-                            for m in matches_in_round:
+                            db.session.commit()
 
-                                if not m.is_settled:
+                            if hasattr(
+                                m,
+                                "is_simulating",
+                            ):
+                                m.is_simulating = False
 
-                                    _submit_settlement(
-                                        m.id
-                                    )
+                                try:
+                                    db.session.commit()
+                                except Exception:
+                                    db.session.rollback()
 
+                            logger.warning(
+                                "⚠️ TIMEOUT FINISH Match %d "
+                                "(S%d R%d) | "
+                                "open_time=%s | "
+                                "start_time=%s | "
+                                "end_time=%s",
+                                m.id,
+                                m.season,
+                                m.round,
+                                _fmt_dt(
+                                    m.open_time
+                                ),
+                                _fmt_dt(
+                                    m.start_time
+                                ),
+                                _fmt_dt(
+                                    m.end_time
+                                ),
+                            )
+
+                        except Exception:
+
+                            logger.exception(
+                                "Error finishing match %s",
+                                m.id,
+                            )
+
+                            db.session.rollback()
+
+                    # =========================================
+                    # ROUND SETTLEMENT
+                    # =========================================
+
+                    matches_in_round = (
+                        Fixture.query
+                        .filter(
+                            Fixture.season
+                            == active_season,
+
+                            Fixture.round
+                            == current_round,
+                        )
+                        .all()
+                    )
+
+                    if (
+                        matches_in_round
+                        and all(
+                            m.status
+                            == STATUS_FINISHED
+                            for m in matches_in_round
+                        )
+                    ):
+
+                        queued = 0
+
+                        for m in matches_in_round:
+
+                            if not m.is_settled:
+
+                                if _submit_settlement(
+                                    m.id
+                                ):
                                     queued += 1
 
-                            if queued:
+                        if queued:
 
-                                logger.info(
-                                    "✅ Season %s Round %s "
-                                    "settlement queued: %d match(es)",
-                                    active_season,
-                                    current_round,
-                                    queued,
-                                )
+                            logger.info(
+                                "✅ Season %s Round %s "
+                                "settlement queued: %d match(es)",
+                                active_season,
+                                current_round,
+                                queued,
+                            )
 
-                    except Exception as e:
+                except Exception as e:
 
-                        logger.exception(
-                            "Engine error: %s",
-                            e,
-                        )
+                    logger.exception(
+                        "Engine error: %s",
+                        e,
+                    )
 
+                    try:
                         db.session.rollback()
+                    except Exception:
+                        pass
 
-                    _sleep_or_shutdown(1)
-
-                logger.info(
-                    "Engine loop exited"
+                _sleep_or_shutdown(
+                    1
                 )
 
-        # ====================================================
-        # START THREAD
-        # ====================================================
-
-        engine_thread = threading.Thread(
-            target=run_engine,
-            daemon=True,
-            name="virtual-engine",
-        )
-
-        engine_thread.start()
-
         logger.info(
-            "✅ Virtual engine started"
+            "Engine loop exited"
         )
+
+    # ========================================================
+    # START ENGINE THREAD
+    # ========================================================
+
+    engine_thread = threading.Thread(
+        target=run_engine,
+        daemon=True,
+        name="virtual-engine",
+    )
+
+    engine_thread.start()
+
+    logger.info(
+        "✅ Virtual engine started"
+    )
 
     return engine_thread
 
@@ -1818,17 +2256,20 @@ def stop_engine(
     )
 
     # --------------------------------------------------------
-    # 1. Stop engine loop
+    # 1. Stop accepting NEW work.
     # --------------------------------------------------------
 
     shutdown_flag.set()
 
     # --------------------------------------------------------
-    # 2. Wait for engine thread
+    # 2. Wait for the engine loop to stop first.
+    #
+    # This is the critical fix:
+    # the engine must finish before executors are shut down.
     # --------------------------------------------------------
 
     if (
-        engine_thread
+        engine_thread is not None
         and engine_thread.is_alive()
     ):
 
@@ -1837,55 +2278,69 @@ def stop_engine(
         )
 
     # --------------------------------------------------------
-    # 3. Stop simulation executor
+    # 3. Shut down executors under one lock.
     # --------------------------------------------------------
 
-    if simulation_executor is not None:
+    with executor_lock:
 
-        try:
+        # ----------------------------------------------------
+        # Simulation executor
+        # ----------------------------------------------------
 
-            simulation_executor.shutdown(
-                wait=False,
-                cancel_futures=True,
-            )
+        if simulation_executor is not None:
 
-        except Exception:
+            try:
 
-            logger.exception(
-                "Error shutting down "
-                "simulation executor"
-            )
+                simulation_executor.shutdown(
+                    wait=False,
+                    cancel_futures=True,
+                )
 
-        finally:
+            except Exception:
 
-            simulation_executor = None
+                logger.exception(
+                    "Error shutting down "
+                    "simulation executor"
+                )
+
+            finally:
+
+                simulation_executor = None
+
+        # ----------------------------------------------------
+        # Settlement executor
+        # ----------------------------------------------------
+
+        if settlement_executor is not None:
+
+            try:
+
+                settlement_executor.shutdown(
+                    wait=False,
+                    cancel_futures=True,
+                )
+
+            except Exception:
+
+                logger.exception(
+                    "Error shutting down "
+                    "settlement executor"
+                )
+
+            finally:
+
+                settlement_executor = None
 
     # --------------------------------------------------------
-    # 4. Stop settlement executor
+    # 4. Clear any local active simulation claims.
     # --------------------------------------------------------
 
-    if settlement_executor is not None:
+    with simulation_guard_lock:
 
-        try:
-
-            settlement_executor.shutdown(
-                wait=False,
-                cancel_futures=True,
-            )
-
-        except Exception:
-
-            logger.exception(
-                "Error shutting down "
-                "settlement executor"
-            )
-
-        finally:
-
-            settlement_executor = None
+        active_simulations.clear()
 
     # --------------------------------------------------------
-    # 5. Release PostgreSQL advisory lock last
+    # 5. Release PostgreSQL advisory lock LAST.
     # --------------------------------------------------------
 
     _release_engine_advisory_lock()
