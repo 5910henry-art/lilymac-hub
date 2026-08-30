@@ -431,6 +431,11 @@ def _log_engine_health(db, Fixture, STATUS_RUNNING, STATUS_FINISHED):
 
 
 def start_virtual_engine(emit_update_callback=None):
+    logger.warning(
+        "🔥 ENGINE CALLBACK | callback=%r | module=%s",
+        emit_update_callback,
+        getattr(emit_update_callback, "__module__", None),
+    )
     global engine_thread
     global simulation_executor
     global settlement_executor

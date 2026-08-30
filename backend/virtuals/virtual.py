@@ -153,6 +153,12 @@ def handle_leave_virtual_lobby():
 # --------------------------------------------------
 
 def emit_fixture_update(fixture, event=None):
+    logger.warning(
+        "🔥🔥 EMIT_FIXTURE_UPDATE ENTERED | match=%s | status=%s | event=%s",
+        getattr(fixture, "id", None),
+        getattr(fixture, "status", None),
+        getattr(event, "type", None) if event else None,
+    )
     """
     Broadcast a live virtual fixture update.
 

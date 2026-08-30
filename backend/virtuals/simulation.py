@@ -548,6 +548,12 @@ def _record_simulation_metrics(match):
 
 # ---------------- Simulation ----------------
 def simulate_match(match_id, emit_update_callback=None):
+    logger.warning(
+        "🔥 CALLBACK VALUE | match=%s | callback=%r | module=%s",
+        match_id,
+        emit_update_callback,
+        getattr(emit_update_callback, "__module__", None),
+    )
     logger.info("[simulate] match %s", match_id)
     SessionMaker = get_session_local()
 
