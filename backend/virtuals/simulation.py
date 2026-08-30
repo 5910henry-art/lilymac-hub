@@ -1,3 +1,5 @@
+# backend/virtuals/simulation.py
+
 from __future__ import annotations
 
 import math
@@ -23,13 +25,16 @@ from virtuals.config_settings import (
 from virtuals.model import Odds, Fixture, Event
 from virtuals.odds_updated import generate_odds
 from virtuals.settlement import settle_virtual_bets
+
 from virtuals.sim_events import (
     _apply_goal_event,
     _build_event_plan,
     _event_timestamp_for_minute,
     _wait_until,
 )
+
 from virtuals.sim_helpers import _clamp, _seed_int
+
 from virtuals.utils import (
     get_session_local,
     match_lock,
@@ -38,32 +43,109 @@ from virtuals.utils import (
     shutdown_flag,
 )
 
-# Try to load the football intelligence model from engineering file.
+
+# ============================================================================
+# FLASK / SQLALCHEMY INITIALIZATION
+# ============================================================================
+
+def _ensure_app_initialized():
+    """
+    Ensure the Flask application has initialized SQLAlchemy.
+
+    This allows simulate_match() to work both when:
+        1. virtuals.virtual has already initialized the application
+        2. simulate_match() is called directly from the command line
+
+    Without this, get_session_local() can fail with:
+
+        RuntimeError:
+        The current Flask app is not registered with this
+        'SQLAlchemy' instance.
+    """
+
+    with app.app_context():
+
+        if "sqlalchemy" not in app.extensions:
+
+            logger.info(
+                "[simulate] SQLAlchemy not initialized; "
+                "initializing Flask application"
+            )
+
+            from virtuals.config import init_app
+
+            init_app()
+
+
+# ============================================================================
+# FOOTBALL INTELLIGENCE MODEL
+# ============================================================================
+
 try:
-    from virtuals.engineering.test import build_team_stats, load_data, predict_match
+    from virtuals.engineering.test import (
+        build_team_stats,
+        load_data,
+        predict_match,
+    )
+
 except Exception:  # pragma: no cover
+
     build_team_stats = None
     load_data = None
     predict_match = None
 
+
+# ============================================================================
+# MARKET TEAM NORMALIZATION
+# ============================================================================
+
 try:
-    from virtuals.sim_odds import normalize_team_name as normalize_market_team_name
+    from virtuals.sim_odds import (
+        normalize_team_name as normalize_market_team_name
+    )
+
 except Exception:  # pragma: no cover
+
     normalize_market_team_name = None
 
 
-# ---------------- Executors ----------------
-settlement_executor = ThreadPoolExecutor(max_workers=3)
+# ============================================================================
+# EXECUTORS
+# ============================================================================
 
-# ---------------- Security ----------------
-SECRET_SALT = os.getenv("SIM_SECRET", "change_this_in_prod")
+settlement_executor = ThreadPoolExecutor(
+    max_workers=3
+)
 
-# ---------------- Model path ----------------
+
+# ============================================================================
+# SECURITY
+# ============================================================================
+
+SECRET_SALT = os.getenv(
+    "SIM_SECRET",
+    "change_this_in_prod",
+)
+
+
+# ============================================================================
+# MODEL PATH
+# ============================================================================
+
 SIM_RESULT_PATH = os.getenv(
     "SIM_RESULT_PATH",
-    str(Path(__file__).resolve().parent / "engineering" / "result.txt")
+    str(
+        Path(__file__).resolve().parent
+        / "engineering"
+        / "result.txt"
+    ),
 )
-# ---------------- State ----------------
+
+
+# ============================================================================
+# REALISM STATE
+# ============================================================================
+
 REALISM_STATE = {
     "home_streak": {},
     "away_streak": {},
@@ -72,143 +154,408 @@ REALISM_STATE = {
 }
 
 
+# ============================================================================
+# RANDOM SEED
+# ============================================================================
+
 def _secure_seed(*args):
-    return _seed_int(*args, SECRET_SALT, os.urandom(4))
+    return _seed_int(
+        *args,
+        SECRET_SALT,
+        os.urandom(4),
+    )
 
 
-# ---------------- Helpers ----------------
+# ============================================================================
+# SETTLEMENT
+# ============================================================================
+
 def _settle_virtual_bets_with_context(match_id):
+    """
+    Run settlement inside a Flask application context.
+    """
+
     with app.app_context():
         settle_virtual_bets(match_id)
 
 
-def _normalize_three(a: float, b: float, c: float):
+# ============================================================================
+# PROBABILITY HELPERS
+# ============================================================================
+
+def _normalize_three(
+    a: float,
+    b: float,
+    c: float,
+):
     total = a + b + c
+
     if total <= 0:
-        return 1 / 3, 1 / 3, 1 / 3
-    return a / total, b / total, c / total
+        return (
+            1 / 3,
+            1 / 3,
+            1 / 3,
+        )
 
-
-def _entropy_three(home_p, draw_p, away_p):
-    eps = 1e-9
-    return -(
-        home_p * math.log(home_p + eps)
-        + draw_p * math.log(draw_p + eps)
-        + away_p * math.log(away_p + eps)
+    return (
+        a / total,
+        b / total,
+        c / total,
     )
 
 
-def _trap_index_v121(home_p, draw_p, away_p):
-    fav = max(home_p, away_p)
-    dog = min(home_p, away_p)
+def _entropy_three(
+    home_p,
+    draw_p,
+    away_p,
+):
+    eps = 1e-9
+
+    return -(
+        home_p * math.log(
+            home_p + eps
+        )
+        + draw_p * math.log(
+            draw_p + eps
+        )
+        + away_p * math.log(
+            away_p + eps
+        )
+    )
+
+
+def _trap_index_v121(
+    home_p,
+    draw_p,
+    away_p,
+):
+    fav = max(
+        home_p,
+        away_p,
+    )
+
+    dog = min(
+        home_p,
+        away_p,
+    )
 
     if dog <= 0:
         return 100.0
 
-    raw = (fav / dog) * (1 - draw_p)
-    trap = 100 / (1 + math.exp(-0.08 * (raw - 10)))
-    return round(trap, 2)
+    raw = (
+        fav / dog
+    ) * (
+        1 - draw_p
+    )
+
+    trap = 100 / (
+        1
+        + math.exp(
+            -0.08 * (
+                raw - 10
+            )
+        )
+    )
+
+    return round(
+        trap,
+        2,
+    )
 
 
-def _stability_v121(home_p, away_p):
-    return round((1 - abs(home_p - away_p)) * 100, 2)
+def _stability_v121(
+    home_p,
+    away_p,
+):
+    return round(
+        (
+            1
+            - abs(
+                home_p - away_p
+            )
+        )
+        * 100,
+        2,
+    )
 
 
-def _zone_v121(entropy, trap, stability):
+def _zone_v121(
+    entropy,
+    trap,
+    stability,
+):
+
     if trap > 70:
         return "DETONATION_TRAP"
-    if entropy > 1.0 and stability < 55:
+
+    if (
+        entropy > 1.0
+        and stability < 55
+    ):
         return "CHAOS_ZONE"
+
     if stability > 70:
         return "CONTROLLED_FAVORITE"
+
     if entropy < 0.9:
         return "DRAW_FIELD"
+
     return "BALANCED"
 
 
-def _market_state_v121(draw_p, trap, stability, entropy):
-    if trap > 70 and entropy > 1.0:
+def _market_state_v121(
+    draw_p,
+    trap,
+    stability,
+    entropy,
+):
+
+    if (
+        trap > 70
+        and entropy > 1.0
+    ):
         return "HIGH_MANIPULATION"
+
     if draw_p > 0.38:
         return "DRAW_PRESSURE"
-    if stability > 70 and trap < 35:
+
+    if (
+        stability > 70
+        and trap < 35
+    ):
         return "DEAD_MARKET"
+
     if entropy > 1.02:
         return "HIGH_VARIANCE"
+
     return "NORMAL"
 
 
-def _odds_to_normalized_probs(source: Any):
-    """
-    Accepts either:
-    - Odds ORM row with home/draw/away odds
-    - dict from generate_odds() with home_odds/draw_odds/away_odds
-    - dict with nested odds like {"odds": {"home": ...}}
-    """
-    if source is None:
-        return 1 / 3, 1 / 3, 1 / 3
+# ============================================================================
+# ODDS → PROBABILITIES
+# ============================================================================
 
-    if isinstance(source, Mapping) and isinstance(source.get("odds"), Mapping):
+def _odds_to_normalized_probs(
+    source: Any,
+):
+    """
+    Accepts:
+
+        Odds ORM row:
+            home / draw / away
+
+        generate_odds() dict:
+            home_odds / draw_odds / away_odds
+
+        Nested dict:
+            {"odds": {"home": ..., "draw": ..., "away": ...}}
+    """
+
+    if source is None:
+        return (
+            1 / 3,
+            1 / 3,
+            1 / 3,
+        )
+
+    if (
+        isinstance(source, Mapping)
+        and isinstance(
+            source.get("odds"),
+            Mapping,
+        )
+    ):
         source = source["odds"]
 
     def pick(*names: str):
-        if isinstance(source, Mapping):
+
+        if isinstance(
+            source,
+            Mapping,
+        ):
+
             for name in names:
+
                 if source.get(name) is not None:
+
                     try:
-                        return float(source[name])
+                        return float(
+                            source[name]
+                        )
+
                     except Exception:
                         pass
+
         for name in names:
-            if hasattr(source, name):
-                value = getattr(source, name)
+
+            if hasattr(
+                source,
+                name,
+            ):
+
+                value = getattr(
+                    source,
+                    name,
+                )
+
                 if value is not None:
+
                     try:
-                        return float(value)
+                        return float(
+                            value
+                        )
+
                     except Exception:
                         pass
+
         return None
 
-    home = pick("home", "home_odds", "1", "odds1", "odd1")
-    draw = pick("draw", "draw_odds", "x", "X", "oddsx", "oddx")
-    away = pick("away", "away_odds", "2", "odds2", "odd2")
+    home = pick(
+        "home",
+        "home_odds",
+        "1",
+        "odds1",
+        "odd1",
+    )
 
-    if not home or not draw or not away or home <= 0 or draw <= 0 or away <= 0:
-        return 1 / 3, 1 / 3, 1 / 3
+    draw = pick(
+        "draw",
+        "draw_odds",
+        "x",
+        "X",
+        "oddsx",
+        "oddx",
+    )
 
-    inv = np.array([1.0 / home, 1.0 / draw, 1.0 / away], dtype=float)
-    s = float(inv.sum())
-    if s <= 0:
-        return 1 / 3, 1 / 3, 1 / 3
-    inv /= s
-    return float(inv[0]), float(inv[1]), float(inv[2])
+    away = pick(
+        "away",
+        "away_odds",
+        "2",
+        "odds2",
+        "odd2",
+    )
+
+    if (
+        not home
+        or not draw
+        or not away
+        or home <= 0
+        or draw <= 0
+        or away <= 0
+    ):
+        return (
+            1 / 3,
+            1 / 3,
+            1 / 3,
+        )
+
+    inv = np.array(
+        [
+            1.0 / home,
+            1.0 / draw,
+            1.0 / away,
+        ],
+        dtype=float,
+    )
+
+    total = float(
+        inv.sum()
+    )
+
+    if total <= 0:
+        return (
+            1 / 3,
+            1 / 3,
+            1 / 3,
+        )
+
+    inv /= total
+
+    return (
+        float(inv[0]),
+        float(inv[1]),
+        float(inv[2]),
+    )
 
 
-def _resolve_stats_team(team: str, stats_map: dict) -> Optional[str]:
+# ============================================================================
+# TEAM RESOLUTION
+# ============================================================================
+
+def _resolve_stats_team(
+    team: str,
+    stats_map: dict,
+) -> Optional[str]:
+
     if team in stats_map:
         return team
 
     if normalize_market_team_name is not None:
+
         try:
-            normalized = normalize_market_team_name(team)
+
+            normalized = (
+                normalize_market_team_name(
+                    team
+                )
+            )
+
             if normalized in stats_map:
                 return normalized
+
         except Exception:
             pass
 
-    raw = str(team).strip().lower()
-    raw = re.sub(r"[._-]+", " ", raw)
-    raw = " ".join(raw.split())
-    compact = raw.replace(" ", "")
+    raw = str(
+        team
+    ).strip().lower()
+
+    raw = re.sub(
+        r"[._-]+",
+        " ",
+        raw,
+    )
+
+    raw = " ".join(
+        raw.split()
+    )
+
+    compact = raw.replace(
+        " ",
+        "",
+    )
 
     for key in stats_map.keys():
-        k = str(key).strip().lower()
-        k_norm = re.sub(r"[._-]+", " ", k)
-        k_norm = " ".join(k_norm.split())
-        if k_norm == raw or k_norm.replace(" ", "") == compact:
+
+        k = str(
+            key
+        ).strip().lower()
+
+        k_norm = re.sub(
+            r"[._-]+",
+            " ",
+            k,
+        )
+
+        k_norm = " ".join(
+            k_norm.split()
+        )
+
+        if (
+            k_norm == raw
+            or k_norm.replace(
+                " ",
+                "",
+            ) == compact
+        ):
             return key
 
     return None
+
+
+# ============================================================================
+# FOOTBALL MODEL LOADING
+# ============================================================================
 
 @lru_cache(maxsize=1)
 def _load_football_model():
@@ -216,50 +563,78 @@ def _load_football_model():
     Load the football intelligence model once.
 
     Returns:
-        (stats_map, params)
 
-    stats_map is built from SIM_RESULT_PATH and params are fitted
-    from the same historical dataset.
+        stats_map, params
     """
+
     if (
         load_data is None
         or build_team_stats is None
         or predict_match is None
     ):
+
         logger.warning(
             "Football model helpers are unavailable; "
             "market-only fallback will be used."
         )
+
         return {}, None
 
-    path = Path(SIM_RESULT_PATH)
+    path = Path(
+        SIM_RESULT_PATH
+    )
+
     if not path.exists():
-        logger.warning("SIM_RESULT_PATH not found: %s", path)
+
+        logger.warning(
+            "SIM_RESULT_PATH not found: %s",
+            path,
+        )
+
         return {}, None
 
     try:
-        df = load_data(str(path))
+
+        df = load_data(
+            str(path)
+        )
 
         if df.empty:
+
             logger.warning(
                 "Football model dataset is empty: %s",
                 path,
             )
+
             return {}, None
 
-        team_df = build_team_stats(df)
-        stats_map = team_df.set_index("team").to_dict("index")
+        team_df = build_team_stats(
+            df
+        )
 
-        # Fit the model parameters once from the same historical data.
-        from virtuals.engineering.test import fit_params
+        stats_map = (
+            team_df
+            .set_index("team")
+            .to_dict("index")
+        )
 
-        params = fit_params(df)
+        from virtuals.engineering.test import (
+            fit_params
+        )
+
+        params = fit_params(
+            df
+        )
 
         logger.info(
-            "[football-model] loaded | teams=%s | matches=%s | "
-            "attack_share=%.2f | home_adv=%.2f | "
-            "draw_gap_boost=%.2f | temp=%.2f | "
-            "home_form=%.2f | away_form=%.2f",
+            "[football-model] loaded | "
+            "teams=%s | matches=%s | "
+            "attack_share=%.2f | "
+            "home_adv=%.2f | "
+            "draw_gap_boost=%.2f | "
+            "temp=%.2f | "
+            "home_form=%.2f | "
+            "away_form=%.2f",
             len(stats_map),
             len(df),
             params.attack_share,
@@ -270,36 +645,67 @@ def _load_football_model():
             params.away_form_weight,
         )
 
-        return stats_map, params
+        return (
+            stats_map,
+            params,
+        )
 
     except Exception:
+
         logger.exception(
             "Failed loading football model from %s",
             path,
         )
+
         return {}, None
-def _football_model_prediction(home: str, away: str):
-    """
-    Returns the football model prediction dict, or None if unavailable.
-    """
+
+
+# ============================================================================
+# FOOTBALL MODEL PREDICTION
+# ============================================================================
+
+def _football_model_prediction(
+    home: str,
+    away: str,
+):
+
     if predict_match is None:
         return None
 
-    stats_map, params = _load_football_model()
+    stats_map, params = (
+        _load_football_model()
+    )
 
-    if not stats_map or params is None:
+    if (
+        not stats_map
+        or params is None
+    ):
         return None
 
     try:
-        home_key = _resolve_stats_team(home, stats_map)
-        away_key = _resolve_stats_team(away, stats_map)
 
-        if home_key is None or away_key is None:
+        home_key = _resolve_stats_team(
+            home,
+            stats_map,
+        )
+
+        away_key = _resolve_stats_team(
+            away,
+            stats_map,
+        )
+
+        if (
+            home_key is None
+            or away_key is None
+        ):
+
             logger.warning(
-                "Football model team not found: %s vs %s",
+                "Football model team not found: "
+                "%s vs %s",
                 home,
                 away,
             )
+
             return None
 
         return predict_match(
@@ -310,90 +716,200 @@ def _football_model_prediction(home: str, away: str):
         )
 
     except Exception:
+
         logger.exception(
-            "Football model prediction failed for %s vs %s",
+            "Football model prediction failed "
+            "for %s vs %s",
             home,
             away,
         )
+
         return None
 
 
-def _market_probs_for_match(home: str, away: str, session, match_id):
-    """
-    Prefer persisted odds from DB. If missing, generate a temporary market estimate.
-    """
-    odds_row = session.query(Odds).filter(Odds.match_id == match_id).first()
+# ============================================================================
+# MARKET PROBABILITIES
+# ============================================================================
+
+def _market_probs_for_match(
+    home: str,
+    away: str,
+    session,
+    match_id,
+):
+
+    odds_row = (
+        session
+        .query(Odds)
+        .filter(
+            Odds.match_id == match_id
+        )
+        .first()
+    )
+
     if odds_row is not None:
-        return _odds_to_normalized_probs(odds_row)
+
+        return _odds_to_normalized_probs(
+            odds_row
+        )
 
     try:
-        generated = generate_odds(home, away)
-        return _odds_to_normalized_probs(generated)
+
+        generated = generate_odds(
+            home,
+            away,
+        )
+
+        return _odds_to_normalized_probs(
+            generated
+        )
+
     except Exception:
-        logger.exception("Market odds generation failed for %s vs %s", home, away)
+
+        logger.exception(
+            "Market odds generation failed "
+            "for %s vs %s",
+            home,
+            away,
+        )
 
     if normalize_market_team_name is not None:
+
         try:
-            nh = normalize_market_team_name(home)
-            na = normalize_market_team_name(away)
-            generated = generate_odds(nh, na)
-            return _odds_to_normalized_probs(generated)
+
+            nh = normalize_market_team_name(
+                home
+            )
+
+            na = normalize_market_team_name(
+                away
+            )
+
+            generated = generate_odds(
+                nh,
+                na,
+            )
+
+            return _odds_to_normalized_probs(
+                generated
+            )
+
         except Exception:
+
             logger.exception(
-                "Fallback market odds generation failed for normalized names %s vs %s",
+                "Fallback market odds generation failed "
+                "for normalized names %s vs %s",
                 home,
                 away,
             )
 
-    return 1 / 3, 1 / 3, 1 / 3
+    return (
+        1 / 3,
+        1 / 3,
+        1 / 3,
+    )
 
 
-def _normalize_scoreline_item(item):
-    """
-    Accepts:
-    - ((hg, ag), prob)
-    - ("1-1", prob)
-    - ((hg, ag),)
-    """
+# ============================================================================
+# SCORELINE NORMALIZATION
+# ============================================================================
+
+def _normalize_scoreline_item(
+    item
+):
+
     if not item:
         return None
 
     score = None
     prob = None
 
-    if isinstance(item, (list, tuple)):
+    if isinstance(
+        item,
+        (list, tuple),
+    ):
+
         if len(item) >= 2:
-            score, prob = item[0], item[1]
+
+            score = item[0]
+            prob = item[1]
+
         elif len(item) == 1:
+
             score = item[0]
             prob = 1.0
+
         else:
             return None
+
     else:
         return None
 
-    if isinstance(score, str):
-        m = re.match(r"^\s*(\d+)\s*-\s*(\d+)\s*$", score)
+    if isinstance(
+        score,
+        str,
+    ):
+
+        m = re.match(
+            r"^\s*(\d+)\s*-\s*(\d+)\s*$",
+            score,
+        )
+
         if not m:
             return None
-        hg, ag = int(m.group(1)), int(m.group(2))
-    elif isinstance(score, (list, tuple)) and len(score) >= 2:
-        hg, ag = int(score[0]), int(score[1])
+
+        hg = int(
+            m.group(1)
+        )
+
+        ag = int(
+            m.group(2)
+        )
+
+    elif (
+        isinstance(
+            score,
+            (list, tuple),
+        )
+        and len(score) >= 2
+    ):
+
+        hg = int(
+            score[0]
+        )
+
+        ag = int(
+            score[1]
+        )
+
     else:
         return None
 
     try:
-        prob = float(prob)
+
+        prob = float(
+            prob
+        )
+
     except Exception:
+
         prob = 0.0
 
     if prob < 0:
         prob = 0.0
 
-    return (hg, ag), prob
+    return (
+        (hg, ag),
+        prob,
+    )
 
+
+# ============================================================================
+# FALLBACK SCORELINES
+# ============================================================================
 
 def _fallback_scorelines():
+
     return [
         ((1, 1), 0.24),
         ((2, 1), 0.18),
@@ -406,186 +922,588 @@ def _fallback_scorelines():
     ]
 
 
-def _scoreline_zone_weight(score, zone, market_probs):
-    hg, ag = score
-    total = hg + ag
-    gap = abs(hg - ag)
+# ============================================================================
+# SCORELINE ZONE WEIGHT
+# ============================================================================
 
-    home_p, draw_p, away_p = market_probs
-    fav_is_home = home_p >= away_p
-    is_draw = hg == ag
-    home_win = hg > ag
-    away_win = ag > hg
+def _scoreline_zone_weight(
+    score,
+    zone,
+    market_probs,
+):
+
+    hg, ag = score
+
+    total = hg + ag
+    gap = abs(
+        hg - ag
+    )
+
+    home_p, draw_p, away_p = (
+        market_probs
+    )
+
+    fav_is_home = (
+        home_p >= away_p
+    )
+
+    is_draw = (
+        hg == ag
+    )
+
+    home_win = (
+        hg > ag
+    )
+
+    away_win = (
+        ag > hg
+    )
 
     weight = 1.0
 
     if zone == "DRAW_FIELD":
+
         if is_draw:
-            weight *= 1.35 if total <= 4 else 1.18
+
+            weight *= (
+                1.35
+                if total <= 4
+                else 1.18
+            )
+
         elif gap == 1:
+
             weight *= 1.08
+
         else:
+
             weight *= 0.88
 
     elif zone == "CONTROLLED_FAVORITE":
-        fav_win = (fav_is_home and home_win) or ((not fav_is_home) and away_win)
+
+        fav_win = (
+            fav_is_home
+            and home_win
+        ) or (
+            not fav_is_home
+            and away_win
+        )
+
         if fav_win:
-            weight *= 1.20 if gap <= 1 else 1.08
+
+            weight *= (
+                1.20
+                if gap <= 1
+                else 1.08
+            )
+
         elif is_draw:
+
             weight *= 0.90
+
         else:
+
             weight *= 0.80
 
     elif zone == "DETONATION_TRAP":
+
         if fav_is_home:
+
             if away_win:
                 weight *= 1.40
+
             elif is_draw:
                 weight *= 1.15
+
             else:
                 weight *= 0.78
+
         else:
+
             if home_win:
                 weight *= 1.40
+
             elif is_draw:
                 weight *= 1.15
+
             else:
                 weight *= 0.78
 
     elif zone == "CHAOS_ZONE":
-        # Flatten slightly and keep scorelines competitive
-        if abs(total - 3) <= 1:
+
+        if abs(
+            total - 3
+        ) <= 1:
+
             weight *= 1.05
+
         if gap >= 2:
+
             weight *= 1.03
+
         weight *= 0.98
 
-    else:  # BALANCED
+    else:
+
         if is_draw:
+
             weight *= 1.02
+
         elif gap == 1:
+
             weight *= 1.01
 
-    if draw_p >= 0.35 and is_draw:
+    if (
+        draw_p >= 0.35
+        and is_draw
+    ):
+
         weight *= 1.05
 
-    return max(weight, 1e-9)
+    return max(
+        weight,
+        1e-9,
+    )
 
 
-def _prepare_scoring_pool(football_pred, market_probs, zone):
+# ============================================================================
+# PREPARE SCORING POOL
+# ============================================================================
+
+def _prepare_scoring_pool(
+    football_pred,
+    market_probs,
+    zone,
+):
+
     raw_scores = []
+
     if football_pred is not None:
-        raw_scores = football_pred.get("top_scores") or football_pred.get("scorelines") or []
+
+        raw_scores = (
+            football_pred.get(
+                "top_scores"
+            )
+            or football_pred.get(
+                "scorelines"
+            )
+            or []
+        )
 
     candidates = []
+
     for item in raw_scores:
-        parsed = _normalize_scoreline_item(item)
+
+        parsed = (
+            _normalize_scoreline_item(
+                item
+            )
+        )
+
         if parsed is None:
             continue
+
         score, prob = parsed
-        candidates.append((score, prob))
+
+        candidates.append(
+            (
+                score,
+                prob,
+            )
+        )
 
     if not candidates:
-        candidates = _fallback_scorelines()
+
+        candidates = (
+            _fallback_scorelines()
+        )
 
     weighted = []
+
     for score, prob in candidates:
-        zone_weight = _scoreline_zone_weight(score, zone, market_probs)
-        final_weight = max(float(prob), 1e-9) * zone_weight
-        weighted.append((score, final_weight))
 
-    total = sum(w for _, w in weighted)
+        zone_weight = (
+            _scoreline_zone_weight(
+                score,
+                zone,
+                market_probs,
+            )
+        )
+
+        final_weight = (
+            max(
+                float(prob),
+                1e-9,
+            )
+            * zone_weight
+        )
+
+        weighted.append(
+            (
+                score,
+                final_weight,
+            )
+        )
+
+    total = sum(
+        weight
+        for _, weight in weighted
+    )
+
     if total <= 0:
-        return _fallback_scorelines()
 
-    return [(score, w / total) for score, w in weighted]
+        return (
+            _fallback_scorelines()
+        )
+
+    return [
+        (
+            score,
+            weight / total,
+        )
+        for score, weight in weighted
+    ]
 
 
-def _pick_weighted_scoreline(rng: random.Random, scoring_pool: Sequence[Tuple[Tuple[int, int], float]]):
+# ============================================================================
+# PICK SCORELINE
+# ============================================================================
+
+def _pick_weighted_scoreline(
+    rng: random.Random,
+    scoring_pool: Sequence[
+        Tuple[
+            Tuple[int, int],
+            float,
+        ]
+    ],
+):
+
     if not scoring_pool:
         return 1, 1
 
-    total = sum(max(weight, 0.0) for _, weight in scoring_pool)
+    total = sum(
+        max(
+            weight,
+            0.0,
+        )
+        for _, weight in scoring_pool
+    )
+
     if total <= 0:
         return scoring_pool[0][0]
 
-    pick = rng.uniform(0.0, total)
+    pick = rng.uniform(
+        0.0,
+        total,
+    )
+
     cumulative = 0.0
+
     for score, weight in scoring_pool:
-        cumulative += max(weight, 0.0)
+
+        cumulative += max(
+            weight,
+            0.0,
+        )
+
         if pick <= cumulative:
             return score
 
     return scoring_pool[-1][0]
 
 
-def _score_to_outcome(home_goals: int, away_goals: int) -> str:
+# ============================================================================
+# OUTCOME
+# ============================================================================
+
+def _score_to_outcome(
+    home_goals: int,
+    away_goals: int,
+):
+
     if home_goals > away_goals:
         return "HOME"
+
     if home_goals < away_goals:
         return "AWAY"
+
     return "DRAW"
 
 
-def _record_simulation_metrics(match):
-    home = match.home_score or 0
-    away = match.away_score or 0
-    total = home + away
+# ============================================================================
+# REALISM METRICS
+# ============================================================================
 
-    REALISM_STATE["goal_trend"].append(total)
+def _record_simulation_metrics(
+    match
+):
+
+    home = (
+        match.home_score
+        or 0
+    )
+
+    away = (
+        match.away_score
+        or 0
+    )
+
+    total = (
+        home + away
+    )
+
+    REALISM_STATE[
+        "goal_trend"
+    ].append(total)
 
     if home > away:
-        REALISM_STATE["home_streak"][match.home] = REALISM_STATE["home_streak"].get(match.home, 0) + 1
-        REALISM_STATE["away_streak"][match.away] = 0
-        REALISM_STATE["draw_streak"] = 0
+
+        REALISM_STATE[
+            "home_streak"
+        ][match.home] = (
+            REALISM_STATE[
+                "home_streak"
+            ].get(
+                match.home,
+                0,
+            )
+            + 1
+        )
+
+        REALISM_STATE[
+            "away_streak"
+        ][match.away] = 0
+
+        REALISM_STATE[
+            "draw_streak"
+        ] = 0
+
     elif away > home:
-        REALISM_STATE["away_streak"][match.away] = REALISM_STATE["away_streak"].get(match.away, 0) + 1
-        REALISM_STATE["home_streak"][match.home] = 0
-        REALISM_STATE["draw_streak"] = 0
+
+        REALISM_STATE[
+            "away_streak"
+        ][match.away] = (
+            REALISM_STATE[
+                "away_streak"
+            ].get(
+                match.away,
+                0,
+            )
+            + 1
+        )
+
+        REALISM_STATE[
+            "home_streak"
+        ][match.home] = 0
+
+        REALISM_STATE[
+            "draw_streak"
+        ] = 0
+
     else:
-        REALISM_STATE["draw_streak"] += 1
+
+        REALISM_STATE[
+            "draw_streak"
+        ] += 1
 
 
-# ---------------- Simulation ----------------
-def simulate_match(match_id, emit_update_callback=None):
+# ============================================================================
+# MAIN MATCH SIMULATION
+# ============================================================================
+
+def simulate_match(
+    match_id,
+    emit_update_callback=None,
+):
+    """
+    Simulate one virtual football match.
+
+    Supports both:
+
+        from virtuals.virtual import ...
+
+    and direct calls:
+
+        from virtuals.simulation import simulate_match
+
+    The Flask/SQLAlchemy initialization is handled automatically.
+    """
+
     logger.warning(
         "🔥 CALLBACK VALUE | match=%s | callback=%r | module=%s",
         match_id,
         emit_update_callback,
-        getattr(emit_update_callback, "__module__", None),
+        getattr(
+            emit_update_callback,
+            "__module__",
+            None,
+        ),
     )
-    logger.info("[simulate] match %s", match_id)
+
+    logger.info(
+        "[simulate] match %s",
+        match_id,
+    )
+
+    # ========================================================================
+    # FIX FOR SQLALCHEMY INITIALIZATION ERROR
+    # ========================================================================
+
+    _ensure_app_initialized()
+
     SessionMaker = get_session_local()
 
     try:
+
+        # ====================================================================
+        # LOAD MATCH
+        # ====================================================================
+
         with app.app_context():
+
             with match_lock(match_id):
+
                 with SessionMaker() as session:
-                    match = session.query(Fixture).filter(Fixture.id == match_id).first()
-                    if not match or match.status not in (STATUS_OPEN, STATUS_RUNNING):
+
+                    match = (
+                        session
+                        .query(Fixture)
+                        .filter(
+                            Fixture.id == match_id
+                        )
+                        .first()
+                    )
+
+                    if match is None:
+
+                        logger.warning(
+                            "[simulate] match %s not found",
+                            match_id,
+                        )
+
                         return
 
-                    match.status = STATUS_RUNNING
+                    if match.status not in (
+                        STATUS_OPEN,
+                        STATUS_RUNNING,
+                    ):
+
+                        logger.warning(
+                            "[simulate] match %s "
+                            "has invalid status=%s",
+                            match_id,
+                            match.status,
+                        )
+
+                        return
+
+                    # ========================================================
+                    # MARK MATCH AS RUNNING
+                    # ========================================================
+
+                    match.status = (
+                        STATUS_RUNNING
+                    )
+
                     match.is_simulating = True
-                    safe_commit(session)
+
+                    safe_commit(
+                        session
+                    )
 
                     home = match.home
                     away = match.away
 
-                    market_probs = _market_probs_for_match(home, away, session, match.id)
-                    home_p, draw_p, away_p = market_probs
+                    # ========================================================
+                    # MARKET PROBABILITIES
+                    # ========================================================
 
-                    entropy = _entropy_three(home_p, draw_p, away_p)
-                    trap = _trap_index_v121(home_p, draw_p, away_p)
-                    stability = _stability_v121(home_p, away_p)
-                    zone = _zone_v121(entropy, trap, stability)
-                    market_state = _market_state_v121(draw_p, trap, stability, entropy)
+                    market_probs = (
+                        _market_probs_for_match(
+                            home,
+                            away,
+                            session,
+                            match.id,
+                        )
+                    )
 
-                    football_pred = _football_model_prediction(home, away)
-                    scoring_pool = _prepare_scoring_pool(football_pred, market_probs, zone)
+                    home_p, draw_p, away_p = (
+                        market_probs
+                    )
+
+                    # ========================================================
+                    # MARKET ANALYSIS
+                    # ========================================================
+
+                    entropy = (
+                        _entropy_three(
+                            home_p,
+                            draw_p,
+                            away_p,
+                        )
+                    )
+
+                    trap = (
+                        _trap_index_v121(
+                            home_p,
+                            draw_p,
+                            away_p,
+                        )
+                    )
+
+                    stability = (
+                        _stability_v121(
+                            home_p,
+                            away_p,
+                        )
+                    )
+
+                    zone = (
+                        _zone_v121(
+                            entropy,
+                            trap,
+                            stability,
+                        )
+                    )
+
+                    market_state = (
+                        _market_state_v121(
+                            draw_p,
+                            trap,
+                            stability,
+                            entropy,
+                        )
+                    )
+
+                    # ========================================================
+                    # FOOTBALL MODEL
+                    # ========================================================
+
+                    football_pred = (
+                        _football_model_prediction(
+                            home,
+                            away,
+                        )
+                    )
+
+                    # ========================================================
+                    # SCORING POOL
+                    # ========================================================
+
+                    scoring_pool = (
+                        _prepare_scoring_pool(
+                            football_pred,
+                            market_probs,
+                            zone,
+                        )
+                    )
 
                     logger.info(
-                        "[simulate] match %s | zone=%s | state=%s | market=%.3f/%.3f/%.3f",
+                        "[simulate] match %s | "
+                        "zone=%s | "
+                        "state=%s | "
+                        "market=%.3f/%.3f/%.3f",
                         match_id,
                         zone,
                         market_state,
@@ -594,97 +1512,358 @@ def simulate_match(match_id, emit_update_callback=None):
                         away_p,
                     )
 
-        rng = random.Random(_secure_seed(match_id, home, away))
-        final_home, final_away = _pick_weighted_scoreline(rng, scoring_pool)
-        outcome = _score_to_outcome(final_home, final_away)
+        # ====================================================================
+        # FINAL SCORE
+        # ====================================================================
+
+        rng = random.Random(
+            _secure_seed(
+                match_id,
+                home,
+                away,
+            )
+        )
+
+        final_home, final_away = (
+            _pick_weighted_scoreline(
+                rng,
+                scoring_pool,
+            )
+        )
+
+        outcome = (
+            _score_to_outcome(
+                final_home,
+                final_away,
+            )
+        )
+
+        # ====================================================================
+        # EXPECTED GOALS
+        # ====================================================================
 
         if football_pred is not None:
-            expected_goals = float(football_pred.get("total_goals", final_home + final_away))
-            likely_type = football_pred.get("likely_type")
+
+            expected_goals = float(
+                football_pred.get(
+                    "total_goals",
+                    final_home + final_away,
+                )
+            )
+
+            likely_type = (
+                football_pred.get(
+                    "likely_type"
+                )
+            )
+
         else:
-            expected_goals = float(final_home + final_away)
+
+            expected_goals = float(
+                final_home + final_away
+            )
+
             likely_type = None
 
-        # ---------------- EVENT SYNC ----------------
-        event_rng = random.Random(_secure_seed(match_id, "events"))
+        # ====================================================================
+        # EVENT PLAN
+        # ====================================================================
+
+        event_rng = random.Random(
+            _secure_seed(
+                match_id,
+                "events",
+            )
+        )
 
         match_snapshot = {
             "home": home,
             "away": away,
         }
 
-        event_plan = _build_event_plan(
-            match_snapshot,
-            final_home,
-            final_away,
-            max(expected_goals, 0.5),
-            event_rng,
-        )
-
-        start_dt = now_utc()
-        end_dt = start_dt + timedelta(seconds=MATCH_SIM_SECONDS)
-
-        with SessionMaker() as session:
-            match_live = session.query(Fixture).filter(Fixture.id == match_id).first()
-            if match_live is None:
-                return
-
-            for item in event_plan:
-                if shutdown_flag.is_set():
-                    break
-
-                event_dt = _event_timestamp_for_minute(start_dt, end_dt, item["minute"])
-
-                if not _wait_until(event_dt):
-                    break
-
-                if item["type"] == "GOAL":
-                    _apply_goal_event(match_live, item["team"])
-
-                event = Event(
-                    match_id=match_live.id,
-                    minute=item["minute"],
-                    team=item["team"],
-                    type=item["type"],
-                    description=item["description"],
-                )
-
-                session.add(event)
-
-                match_live.event_count = (match_live.event_count or 0) + 1
-                safe_commit(session)
-
-                if emit_update_callback:
-                    emit_update_callback(
-                        match_live,
-                        event,
-                    )
-
-            # FINALIZE
-            match_live.home_score = final_home
-            match_live.away_score = final_away
-            match_live.status = STATUS_FINISHED
-            match_live.is_simulating = False
-
-            safe_commit(session)
-
-            if emit_update_callback:
-                emit_update_callback(
-                    match_live,
-                    None,
-                )
-
-            settlement_executor.submit(_settle_virtual_bets_with_context, match_id)
-            _record_simulation_metrics(match_live)
-
-            logger.info(
-                "[simulate] finished match %s | score=%s-%s | outcome=%s | likely_type=%s",
-                match_id,
+        event_plan = (
+            _build_event_plan(
+                match_snapshot,
                 final_home,
                 final_away,
-                outcome,
-                likely_type,
+                max(
+                    expected_goals,
+                    0.5,
+                ),
+                event_rng,
             )
+        )
+
+        # ====================================================================
+        # MATCH CLOCK
+        # ====================================================================
+
+        start_dt = now_utc()
+
+        end_dt = (
+            start_dt
+            + timedelta(
+                seconds=MATCH_SIM_SECONDS
+            )
+        )
+
+        # ====================================================================
+        # LIVE EVENT LOOP
+        # ====================================================================
+
+        with app.app_context():
+
+            with SessionMaker() as session:
+
+                match_live = (
+                    session
+                    .query(Fixture)
+                    .filter(
+                        Fixture.id == match_id
+                    )
+                    .first()
+                )
+
+                if match_live is None:
+
+                    logger.warning(
+                        "[simulate] match %s "
+                        "disappeared before event loop",
+                        match_id,
+                    )
+
+                    return
+
+                for item in event_plan:
+
+                    # ========================================================
+                    # SHUTDOWN CHECK
+                    # ========================================================
+
+                    if shutdown_flag.is_set():
+
+                        logger.warning(
+                            "[simulate] shutdown requested "
+                            "for match %s",
+                            match_id,
+                        )
+
+                        break
+
+                    # ========================================================
+                    # EVENT TIME
+                    # ========================================================
+
+                    event_dt = (
+                        _event_timestamp_for_minute(
+                            start_dt,
+                            end_dt,
+                            item["minute"],
+                        )
+                    )
+
+                    if not _wait_until(
+                        event_dt
+                    ):
+                        break
+
+                    # ========================================================
+                    # GOAL EVENT
+                    # ========================================================
+
+                    if item["type"] == "GOAL":
+
+                        _apply_goal_event(
+                            match_live,
+                            item["team"],
+                        )
+
+                    # ========================================================
+                    # DATABASE EVENT
+                    # ========================================================
+
+                    event = Event(
+                        match_id=match_live.id,
+                        minute=item["minute"],
+                        team=item["team"],
+                        type=item["type"],
+                        description=item[
+                            "description"
+                        ],
+                    )
+
+                    session.add(
+                        event
+                    )
+
+                    match_live.event_count = (
+                        match_live.event_count
+                        or 0
+                    ) + 1
+
+                    safe_commit(
+                        session
+                    )
+
+                    logger.debug(
+                        "[simulate] match %s | "
+                        "minute=%s | "
+                        "team=%s | "
+                        "type=%s",
+                        match_id,
+                        item["minute"],
+                        item["team"],
+                        item["type"],
+                    )
+
+                    # ========================================================
+                    # REALTIME CALLBACK
+                    # ========================================================
+
+                    if emit_update_callback:
+
+                        try:
+
+                            emit_update_callback(
+                                match_live,
+                                event,
+                            )
+
+                        except Exception:
+
+                            logger.exception(
+                                "[simulate] callback failed "
+                                "for match %s",
+                                match_id,
+                            )
+
+                # ============================================================
+                # FINALIZE MATCH
+                # ============================================================
+
+                match_live.home_score = (
+                    final_home
+                )
+
+                match_live.away_score = (
+                    final_away
+                )
+
+                match_live.status = (
+                    STATUS_FINISHED
+                )
+
+                match_live.is_simulating = False
+
+                safe_commit(
+                    session
+                )
+
+                # ============================================================
+                # FINAL REALTIME UPDATE
+                # ============================================================
+
+                if emit_update_callback:
+
+                    try:
+
+                        emit_update_callback(
+                            match_live,
+                            None,
+                        )
+
+                    except Exception:
+
+                        logger.exception(
+                            "[simulate] final callback failed "
+                            "for match %s",
+                            match_id,
+                        )
+
+                # ============================================================
+                # BET SETTLEMENT
+                # ============================================================
+
+                settlement_executor.submit(
+                    _settle_virtual_bets_with_context,
+                    match_id,
+                )
+
+                # ============================================================
+                # REALISM METRICS
+                # ============================================================
+
+                _record_simulation_metrics(
+                    match_live
+                )
+
+                # ============================================================
+                # FINAL LOG
+                # ============================================================
+
+                logger.info(
+                    "[simulate] finished match %s | "
+                    "score=%s-%s | "
+                    "outcome=%s | "
+                    "likely_type=%s",
+                    match_id,
+                    final_home,
+                    final_away,
+                    outcome,
+                    likely_type,
+                )
 
     except Exception:
-        logger.exception("Simulation error %s", match_id)
+
+        logger.exception(
+            "Simulation error %s",
+            match_id,
+        )
+
+        # ====================================================================
+        # RECOVERY
+        #
+        # If simulation crashes after setting is_simulating=True,
+        # prevent the fixture from remaining permanently locked.
+        # ====================================================================
+
+        try:
+
+            with app.app_context():
+
+                with SessionMaker() as session:
+
+                    failed_match = (
+                        session
+                        .query(Fixture)
+                        .filter(
+                            Fixture.id == match_id
+                        )
+                        .first()
+                    )
+
+                    if failed_match is not None:
+
+                        failed_match.is_simulating = (
+                            False
+                        )
+
+                        if failed_match.status != (
+                            STATUS_FINISHED
+                        ):
+
+                            failed_match.status = (
+                                STATUS_RUNNING
+                            )
+
+                        safe_commit(
+                            session
+                        )
+
+        except Exception:
+
+            logger.exception(
+                "[simulate] failed to recover "
+                "fixture state for match %s",
+                match_id,
+            )
