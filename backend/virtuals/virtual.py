@@ -167,7 +167,12 @@ def emit_fixture_update(fixture, event=None):
     2. virtual:match:<id>
        -> users watching this specific match
     """
-
+    logger.info(
+        "📡 EMIT FIXTURE UPDATE | match=%s | status=%s | event=%s",
+        getattr(fixture, "id", None),
+        getattr(fixture, "status", None),
+        getattr(event, "type", None) if event else None,
+    )
     if fixture is None:
         return
 
