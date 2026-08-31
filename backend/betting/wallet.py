@@ -131,81 +131,138 @@ def register_wallet_routes(app):
                 _balance(user)
             ),
         })
+# ========================================================
+# TRANSACTIONS
+# ========================================================
 
-    # ========================================================
-    # TRANSACTIONS
-    # ========================================================
+@app.route(
+    "/transactions",
+    methods=["GET"],
+)
+@jwt_required()
+def get_transactions():
 
-    @app.route(
-        "/transactions",
-        methods=["GET"],
-    )
-    @jwt_required()
-    def get_transactions():
+    try:
+        uid = int(
+            get_jwt_identity()
+        )
+    except (TypeError, ValueError):
+        return _error(
+            "invalid user identity",
+            401,
+        )
 
-        try:
-            uid = int(
-                get_jwt_identity()
+    try:
+
+        txs = (
+            db.session.query(Transaction)
+            .filter(
+                Transaction.user_id == uid
             )
-        except (TypeError, ValueError):
-            return _error(
-                "invalid user identity",
-                401,
+            .order_by(
+                Transaction.created.desc()
+            )
+            .all()
+        )
+
+        data = []
+
+        for tx in txs:
+
+            # ------------------------------------------------
+            # Safely read optional fields.
+            #
+            # This prevents the API from crashing if your
+            # Transaction model does not contain one of them.
+            # ------------------------------------------------
+
+            description = getattr(
+                tx,
+                "description",
+                None,
             )
 
-        try:
-
-            txs = (
-                db.session.query(Transaction)
-                .filter(
-                    Transaction.user_id == uid
-                )
-                .order_by(
-                    Transaction.created.desc()
-                )
-                .all()
+            reference = getattr(
+                tx,
+                "reference",
+                None,
             )
 
-            data = []
+            status = getattr(
+                tx,
+                "status",
+                None,
+            )
 
-            for tx in txs:
+            created_at = (
+                tx.created.isoformat()
+                if tx.created
+                else None
+            )
 
-                data.append({
-                    "id": tx.id,
-                    "type": tx.type,
-                    "amount": float(
-                        to_decimal(tx.amount)
-                    ),
-                    "balance_after": float(
-                        to_decimal(
-                            tx.balance_after
-                        )
-                    ),
-                    "created": (
-                        tx.created.isoformat()
-                        if tx.created
-                        else None
-                    ),
-                })
+            data.append({
+                "id": tx.id,
 
-            return jsonify({
-                "success": True,
-                "data": data,
+                "type": (
+                    tx.type
+                    if tx.type
+                    else "transaction"
+                ),
+
+                "amount": float(
+                    to_decimal(
+                        tx.amount
+                    )
+                ),
+
+                "balance_after": float(
+                    to_decimal(
+                        tx.balance_after
+                    )
+                ),
+
+                # Frontend-friendly timestamp
+                "created_at": created_at,
+
+                "created": created_at,
+
+                "description": (
+                    description
+                    if description
+                    else ""
+                ),
+
+                "reference": (
+                    reference
+                    if reference
+                    else ""
+                ),
+
+                "status": (
+                    status
+                    if status
+                    else "completed"
+                ),
             })
 
-        except Exception as e:
+        return jsonify({
+            "success": True,
+            "data": data,
+            "count": len(data),
+        })
 
-            logger.exception(
-                "Error loading transactions for user %s: %s",
-                uid,
-                e,
-            )
+    except Exception as e:
 
-            return _error(
-                "failed to load transactions",
-                500,
-            )
+        logger.exception(
+            "Error loading transactions for user %s: %s",
+            uid,
+            e,
+        )
 
+        return _error(
+            "failed to load transactions",
+            500,
+        )
     # ========================================================
     # BALANCE HISTORY
     # ========================================================
