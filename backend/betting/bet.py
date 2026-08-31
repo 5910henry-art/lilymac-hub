@@ -2,10 +2,16 @@
 import os
 import logging
 import atexit
+import threading
+
 from flask import Flask
 from flask_jwt_extended import JWTManager
 from flask_cors import CORS
-import threading
+
+# -------------------------
+# Central database config
+# -------------------------
+from config2 import SQLALCHEMY_DATABASE_URL, DB_SCHEMA
 
 # -------------------------
 # Relative imports
@@ -17,30 +23,34 @@ from .wallet import register_wallet_routes
 from .admin import register_admin_routes
 from .bets import bet_bp
 
+
 # -------------------------
 # Flask app setup
 # -------------------------
 app = Flask(__name__)
 
-db_url = os.environ.get("DATABASE_URL")
+# Use the SAME PostgreSQL configuration as the main backend
+app.config["SQLALCHEMY_DATABASE_URI"] = SQLALCHEMY_DATABASE_URL
 
-if db_url and db_url.startswith("postgres://"):
-    db_url = db_url.replace("postgres://", "postgresql://", 1)
-
-app.config["SQLALCHEMY_DATABASE_URI"] = db_url or "sqlite:///fallback.db"
 app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
     "connect_args": {
-        "options": "-csearch_path=henry_schema,public"
+        "options": f"-csearch_path={DB_SCHEMA},public"
     }
 }
+
 app.config["JWT_SECRET_KEY"] = os.environ.get(
     "JWT_SECRET",
     "1223f671617d47d847101ee330653227e3c6241351a3e28baa12dafef84d5c2743802b7a7cd0c36d32260272c79d6c2fc321ed4b4178b3fbe40f577a4c132536"
 )
+
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
+
+# -------------------------
 # Enable CORS
+# -------------------------
 CORS(app)
+
 
 # -------------------------
 # Initialize extensions
@@ -48,20 +58,25 @@ CORS(app)
 db.init_app(app)
 jwt = JWTManager(app)
 
+
 # -------------------------
 # Register blueprints/routes
 # -------------------------
 app.register_blueprint(auth_bp)
 app.register_blueprint(bet_bp)
+
 register_wallet_routes(app)
 register_admin_routes(app)
+
 
 # -------------------------
 # Debug: list all routes
 # -------------------------
 print("🔹 Registered routes:")
+
 for rule in app.url_map.iter_rules():
-    logging.info(f"{rule.endpoint} -> {rule}")
+    logging.info("%s -> %s", rule.endpoint, rule)
+
 
 # -------------------------
 # Health check
@@ -70,8 +85,9 @@ for rule in app.url_map.iter_rules():
 def health():
     return {"status": "ok"}
 
+
 # -------------------------
-# Initialize database & scheduler
+# Scheduler
 # -------------------------
 stop_event = threading.Event()
 scheduler_thread = None
@@ -81,16 +97,27 @@ def init_services():
     global scheduler_thread
 
     with app.app_context():
+        # Verify database connection before starting scheduler
+        db.session.execute(db.text("SELECT 1"))
         db.create_all()
+
+        print(
+            f"✅ PostgreSQL connected | schema={DB_SCHEMA}"
+        )
 
     if scheduler_thread is None:
         scheduler_thread = start_scheduler(
             app,
             interval_seconds=60,
-            stop_event=stop_event
+            stop_event=stop_event,
         )
 
+        print("✅ Betting scheduler started | interval=60s")
 
+
+# -------------------------
+# Graceful shutdown
+# -------------------------
 def shutdown_scheduler():
     global scheduler_thread
 
@@ -102,9 +129,22 @@ def shutdown_scheduler():
 
 atexit.register(shutdown_scheduler)
 
+
+# -------------------------
+# Start application
+# -------------------------
 if __name__ == "__main__":
     init_services()
 
     port = int(os.environ.get("PORT", 5005))
-    print(f"🚀 Starting bet_app on port {port}...")
-    app.run(debug=True, host="0.0.0.0", port=port)
+
+    print(
+        f"🚀 Starting bet_app on port {port}..."
+    )
+
+    app.run(
+        debug=True,
+        use_reloader=False,
+        host="0.0.0.0",
+        port=port,
+    )

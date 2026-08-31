@@ -1,101 +1,523 @@
 # wallet.py
+
+import logging
+from decimal import Decimal, InvalidOperation
+
 from flask import request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
+from sqlalchemy import select
+
 from betting.models import db, User, Transaction
 from betting.utils import to_decimal
-from decimal import Decimal
 
-MAX_DEPOSIT = Decimal("5000")
+
+logger = logging.getLogger(__name__)
+
+
+# ============================================================
+# WALLET SETTINGS
+# ============================================================
+
+MAX_DEPOSIT = Decimal("5000.00")
+MIN_DEPOSIT = Decimal("0.01")
+MIN_WITHDRAWAL = Decimal("0.01")
+
+
+# ============================================================
+# MONEY HELPERS
+# ============================================================
+
+def _parse_amount(value):
+    """
+    Safely parse a wallet amount.
+
+    Rejects:
+        - missing values
+        - invalid strings
+        - NaN
+        - Infinity
+        - zero / negative values
+    """
+
+    if value is None:
+        return None
+
+    try:
+        amount = Decimal(str(value))
+    except (InvalidOperation, ValueError, TypeError):
+        return None
+
+    if not amount.is_finite():
+        return None
+
+    amount = amount.quantize(
+        Decimal("0.01")
+    )
+
+    if amount <= 0:
+        return None
+
+    return amount
+
+
+def _balance(user):
+    """
+    Return user's balance as a Decimal.
+    """
+
+    return to_decimal(
+        getattr(
+            user,
+            "balance",
+            Decimal("0.00"),
+        )
+    )
+
+
+def _error(message, status=400):
+    return jsonify({
+        "success": False,
+        "error": message,
+    }), status
+
+
+def _success(balance):
+    return jsonify({
+        "success": True,
+        "balance": float(
+            to_decimal(balance)
+        ),
+    })
+
+
+# ============================================================
+# REGISTER WALLET ROUTES
+# ============================================================
 
 def register_wallet_routes(app):
+
+    # ========================================================
+    # BALANCE
+    # ========================================================
 
     @app.route("/balance", methods=["GET"])
     @jwt_required()
     def get_balance():
-        uid = int(get_jwt_identity())
-        user = db.session.get(User, uid)
-        if not user:
-            return jsonify({"success": False, "error": "user not found"}), 404
-        return jsonify({"success": True, "balance": float(user.balance or 0)})
 
-    @app.route("/transactions", methods=["GET"])
+        try:
+            uid = int(
+                get_jwt_identity()
+            )
+        except (TypeError, ValueError):
+            return _error(
+                "invalid user identity",
+                401,
+            )
+
+        user = db.session.get(
+            User,
+            uid,
+        )
+
+        if not user:
+            return _error(
+                "user not found",
+                404,
+            )
+
+        return jsonify({
+            "success": True,
+            "balance": float(
+                _balance(user)
+            ),
+        })
+
+    # ========================================================
+    # TRANSACTIONS
+    # ========================================================
+
+    @app.route(
+        "/transactions",
+        methods=["GET"],
+    )
     @jwt_required()
     def get_transactions():
-        uid = int(get_jwt_identity())
-        txs = db.session.query(Transaction).filter_by(user_id=uid).order_by(Transaction.created.desc()).all()
-        data = [{
-            "id": tx.id,
-            "type": tx.type,
-            "amount": float(tx.amount),
-            "balance_after": float(tx.balance_after),
-            "created": tx.created.isoformat() if tx.created else None
-        } for tx in txs]
-        return jsonify({"success": True, "data": data})
 
-    @app.route("/balance_history", methods=["GET"])
+        try:
+            uid = int(
+                get_jwt_identity()
+            )
+        except (TypeError, ValueError):
+            return _error(
+                "invalid user identity",
+                401,
+            )
+
+        try:
+
+            txs = (
+                db.session.query(Transaction)
+                .filter(
+                    Transaction.user_id == uid
+                )
+                .order_by(
+                    Transaction.created.desc()
+                )
+                .all()
+            )
+
+            data = []
+
+            for tx in txs:
+
+                data.append({
+                    "id": tx.id,
+                    "type": tx.type,
+                    "amount": float(
+                        to_decimal(tx.amount)
+                    ),
+                    "balance_after": float(
+                        to_decimal(
+                            tx.balance_after
+                        )
+                    ),
+                    "created": (
+                        tx.created.isoformat()
+                        if tx.created
+                        else None
+                    ),
+                })
+
+            return jsonify({
+                "success": True,
+                "data": data,
+            })
+
+        except Exception as e:
+
+            logger.exception(
+                "Error loading transactions for user %s: %s",
+                uid,
+                e,
+            )
+
+            return _error(
+                "failed to load transactions",
+                500,
+            )
+
+    # ========================================================
+    # BALANCE HISTORY
+    # ========================================================
+
+    @app.route(
+        "/balance_history",
+        methods=["GET"],
+    )
     @jwt_required()
     def get_balance_history():
-        uid = int(get_jwt_identity())
-        txs = db.session.query(Transaction).filter_by(user_id=uid).order_by(Transaction.created.asc()).all()
-        history = [{
-            "date": tx.created.isoformat() if tx.created else None,
-            "balance": float(tx.balance_after)
-        } for tx in txs]
-        return jsonify({"success": True, "data": history})
 
-    @app.route("/deposit", methods=["POST"])
+        try:
+            uid = int(
+                get_jwt_identity()
+            )
+        except (TypeError, ValueError):
+            return _error(
+                "invalid user identity",
+                401,
+            )
+
+        try:
+
+            txs = (
+                db.session.query(Transaction)
+                .filter(
+                    Transaction.user_id == uid
+                )
+                .order_by(
+                    Transaction.created.asc()
+                )
+                .all()
+            )
+
+            history = []
+
+            for tx in txs:
+
+                history.append({
+                    "date": (
+                        tx.created.isoformat()
+                        if tx.created
+                        else None
+                    ),
+                    "balance": float(
+                        to_decimal(
+                            tx.balance_after
+                        )
+                    ),
+                })
+
+            return jsonify({
+                "success": True,
+                "data": history,
+            })
+
+        except Exception as e:
+
+            logger.exception(
+                "Error loading balance history for user %s: %s",
+                uid,
+                e,
+            )
+
+            return _error(
+                "failed to load balance history",
+                500,
+            )
+
+    # ========================================================
+    # DEPOSIT
+    # ========================================================
+
+    @app.route(
+        "/deposit",
+        methods=["POST"],
+    )
     @jwt_required()
     def deposit():
-        uid = int(get_jwt_identity())
-        data = request.json or {}
-        amount = to_decimal(data.get("amount", 0))
 
-        if amount <= 0 or amount > MAX_DEPOSIT:
-            return jsonify({"success": False, "error": "invalid deposit amount"}), 400
+        try:
+            uid = int(
+                get_jwt_identity()
+            )
+        except (TypeError, ValueError):
+            return _error(
+                "invalid user identity",
+                401,
+            )
 
-        with db.session.begin():
-            user = db.session.query(User).with_for_update().filter_by(id=uid).first()
+        data = request.get_json(
+            silent=True
+        ) or {}
+
+        amount = _parse_amount(
+            data.get("amount")
+        )
+
+        if amount is None:
+
+            return _error(
+                "invalid deposit amount"
+            )
+
+        if amount < MIN_DEPOSIT:
+
+            return _error(
+                f"minimum deposit is {MIN_DEPOSIT:.2f}"
+            )
+
+        if amount > MAX_DEPOSIT:
+
+            return _error(
+                f"maximum deposit is {MAX_DEPOSIT:.2f}"
+            )
+
+        try:
+
+            # ------------------------------------------------
+            # Lock the user row.
+            #
+            # This prevents two simultaneous wallet operations
+            # from modifying the same balance at the same time.
+            # ------------------------------------------------
+
+            user = (
+                db.session.query(User)
+                .with_for_update()
+                .filter(
+                    User.id == uid
+                )
+                .first()
+            )
+
             if not user:
-                return jsonify({"success": False, "error": "user not found"}), 404
 
-            user.balance = to_decimal(user.balance) + amount
+                db.session.rollback()
+
+                return _error(
+                    "user not found",
+                    404,
+                )
+
+            current_balance = _balance(
+                user
+            )
+
+            new_balance = (
+                current_balance
+                + amount
+            )
+
+            user.balance = new_balance
 
             tx = Transaction(
                 user_id=uid,
                 type="deposit",
                 amount=amount,
-                balance_after=user.balance
+                balance_after=new_balance,
             )
+
             db.session.add(tx)
 
-        return jsonify({"success": True, "balance": float(user.balance)})
+            db.session.commit()
 
-    @app.route("/withdraw", methods=["POST"])
+            logger.info(
+                "Deposit successful | user=%s | amount=%s | balance=%s",
+                uid,
+                amount,
+                new_balance,
+            )
+
+            return _success(
+                new_balance
+            )
+
+        except Exception as e:
+
+            db.session.rollback()
+
+            logger.exception(
+                "Deposit failed for user %s: %s",
+                uid,
+                e,
+            )
+
+            return _error(
+                "deposit failed",
+                500,
+            )
+
+    # ========================================================
+    # WITHDRAW
+    # ========================================================
+
+    @app.route(
+        "/withdraw",
+        methods=["POST"],
+    )
     @jwt_required()
     def withdraw():
-        uid = int(get_jwt_identity())
-        data = request.json or {}
-        amount = to_decimal(data.get("amount", 0))
 
-        if amount <= 0:
-            return jsonify({"success": False, "error": "invalid amount"}), 400
+        try:
+            uid = int(
+                get_jwt_identity()
+            )
+        except (TypeError, ValueError):
+            return _error(
+                "invalid user identity",
+                401,
+            )
 
-        with db.session.begin():
-            user = db.session.query(User).with_for_update().filter_by(id=uid).first()
+        data = request.get_json(
+            silent=True
+        ) or {}
+
+        amount = _parse_amount(
+            data.get("amount")
+        )
+
+        if amount is None:
+
+            return _error(
+                "invalid withdrawal amount"
+            )
+
+        if amount < MIN_WITHDRAWAL:
+
+            return _error(
+                f"minimum withdrawal is {MIN_WITHDRAWAL:.2f}"
+            )
+
+        try:
+
+            # ------------------------------------------------
+            # Lock user row before checking balance.
+            #
+            # This is important because two simultaneous
+            # withdrawal requests must not both spend the same
+            # balance.
+            # ------------------------------------------------
+
+            user = (
+                db.session.query(User)
+                .with_for_update()
+                .filter(
+                    User.id == uid
+                )
+                .first()
+            )
+
             if not user:
-                return jsonify({"success": False, "error": "user not found"}), 404
 
-            if to_decimal(user.balance) < amount:
-                return jsonify({"success": False, "error": "insufficient funds"}), 400
+                db.session.rollback()
 
-            user.balance = to_decimal(user.balance) - amount
+                return _error(
+                    "user not found",
+                    404,
+                )
+
+            current_balance = _balance(
+                user
+            )
+
+            if current_balance < amount:
+
+                db.session.rollback()
+
+                return _error(
+                    "insufficient funds"
+                )
+
+            new_balance = (
+                current_balance
+                - amount
+            )
+
+            user.balance = new_balance
 
             tx = Transaction(
                 user_id=uid,
                 type="withdraw",
                 amount=amount,
-                balance_after=user.balance
+                balance_after=new_balance,
             )
+
             db.session.add(tx)
 
-        return jsonify({"success": True, "balance": float(user.balance)})
+            db.session.commit()
+
+            logger.info(
+                "Withdrawal successful | user=%s | amount=%s | balance=%s",
+                uid,
+                amount,
+                new_balance,
+            )
+
+            return _success(
+                new_balance
+            )
+
+        except Exception as e:
+
+            db.session.rollback()
+
+            logger.exception(
+                "Withdrawal failed for user %s: %s",
+                uid,
+                e,
+            )
+
+            return _error(
+                "withdrawal failed",
+                500,
+            )
