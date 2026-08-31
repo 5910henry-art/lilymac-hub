@@ -910,6 +910,9 @@ def _force_finish_stuck_running_matches(
     """
     Force-finish RUNNING matches that are stuck beyond the
     configured grace window.
+
+    The status, end_time, and simulation flag are updated in
+    one atomic SQL UPDATE to prevent ORM stale-data races.
     """
 
     now = now_utc()
@@ -944,37 +947,29 @@ def _force_finish_stuck_running_matches(
 
     for m in running_matches:
 
+        match_id = m.id
+
         try:
 
             if m.end_time is not None:
-
                 effective_end = m.end_time
 
             elif m.start_time is not None:
-
                 effective_end = (
                     m.start_time
-                    + timedelta(
-                        seconds=45
-                    )
+                    + timedelta(seconds=45)
                 )
 
             elif m.open_time is not None:
-
                 effective_end = (
                     m.open_time
-                    + timedelta(
-                        seconds=45
-                    )
+                    + timedelta(seconds=45)
                 )
 
             else:
-
                 effective_end = (
                     now
-                    - timedelta(
-                        seconds=1
-                    )
+                    - timedelta(seconds=1)
                 )
 
             if effective_end > cutoff:
@@ -982,54 +977,41 @@ def _force_finish_stuck_running_matches(
 
             updated = try_set_fixture_status_atomic(
                 db.session,
-                m.id,
+                match_id,
                 STATUS_RUNNING,
                 STATUS_FINISHED,
+                end_time=effective_end,
+                is_simulating=False,
             )
 
             if not updated:
+                db.session.rollback()
                 continue
-
-            if (
-                m.end_time is None
-                or m.end_time < effective_end
-            ):
-                m.end_time = effective_end
-
-            if hasattr(
-                m,
-                "is_simulating",
-            ):
-                m.is_simulating = False
 
             db.session.commit()
 
             logger.warning(
-                "âš ï¸ FORCE FINISH Match %d | "
+                "⚠️ FORCE FINISH Match %d | "
                 "season=%s | round=%s | "
                 "open_time=%s | start_time=%s | end_time=%s",
-                m.id,
+                match_id,
                 m.season,
                 m.round,
                 _fmt_dt(m.open_time),
                 _fmt_dt(m.start_time),
-                _fmt_dt(m.end_time),
+                _fmt_dt(effective_end),
             )
 
             forced += 1
 
         except Exception:
 
+            db.session.rollback()
+
             logger.exception(
                 "Failed force-finishing stuck match %s",
-                getattr(
-                    m,
-                    "id",
-                    "?",
-                ),
+                match_id,
             )
-
-            db.session.rollback()
 
     return forced
 

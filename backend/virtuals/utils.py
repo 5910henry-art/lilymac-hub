@@ -1,3 +1,5 @@
+# virtuals/utils.py
+
 import threading
 import time
 from contextlib import contextmanager
@@ -17,23 +19,36 @@ from virtuals.config_settings import (
 from virtuals.config import logger, db, redis_client, app
 from virtuals.model import Odds
 
-# ---------------- DB session helper ----------------
+
+# ============================================================
+# DB SESSION HELPER
+# ============================================================
+
 SessionLocal = None
 
 
 def get_session_local():
     """
-    Lazily create a session factory bound to the current SQLAlchemy engine.
+    Lazily create a session factory bound to the current
+    SQLAlchemy engine.
+
     Must be called inside an app context before first use.
     """
     global SessionLocal
+
     if SessionLocal is None:
         with app.app_context():
-            SessionLocal = sessionmaker(bind=db.engine)
+            SessionLocal = sessionmaker(
+                bind=db.engine
+            )
+
     return SessionLocal
 
 
-# ---------------- time helpers ----------------
+# ============================================================
+# TIME HELPERS
+# ============================================================
+
 def now_utc():
     return datetime.now(timezone.utc)
 
@@ -41,158 +56,548 @@ def now_utc():
 def to_utc(dt):
     if dt is None:
         return None
-    return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
+
+    return (
+        dt.replace(tzinfo=timezone.utc)
+        if dt.tzinfo is None
+        else dt
+    )
 
 
-# ---------------- shutdown flag ----------------
+# ============================================================
+# SHUTDOWN FLAG
+# ============================================================
+
 shutdown_flag = threading.Event()
 
 
-# ---------------- concurrency primitives ----------------
+# ============================================================
+# CONCURRENCY PRIMITIVES
+# ============================================================
+
 _match_locks = {}
 _match_locks_lock = threading.Lock()
 
 
 @contextmanager
-def match_lock(match_id, blocking=True, timeout=None):
+def match_lock(
+    match_id,
+    blocking=True,
+    timeout=None,
+):
+    """
+    Per-match in-process lock.
+
+    Prevents multiple local workers from simultaneously
+    performing operations against the same fixture.
+    """
+
     with _match_locks_lock:
+
         if match_id not in _match_locks:
             _match_locks[match_id] = threading.Lock()
+
         lock = _match_locks[match_id]
 
     acquired = (
-        lock.acquire(blocking=blocking, timeout=timeout)
+        lock.acquire(
+            blocking=blocking,
+            timeout=timeout,
+        )
         if timeout is not None
-        else lock.acquire(blocking=blocking)
+        else lock.acquire(
+            blocking=blocking
+        )
     )
+
     try:
+
         if not acquired:
-            raise RuntimeError(f"Could not acquire lock for match {match_id}")
+            raise RuntimeError(
+                f"Could not acquire lock for match {match_id}"
+            )
+
         yield
+
     finally:
+
         if acquired:
+
             try:
                 lock.release()
             except RuntimeError:
                 pass
 
 
-# ---------------- DB helpers ----------------
-def try_set_fixture_status_atomic(session, match_id, expected_status, new_status):
+# ============================================================
+# DB HELPERS
+# ============================================================
+
+def try_set_fixture_status_atomic(
+    session,
+    match_id,
+    expected_status,
+    new_status,
+    end_time=None,
+    is_simulating=None,
+):
     """
-    Atomic UPDATE ... WHERE status = expected_status.
-    Prevents race conditions between scheduler workers.
+    Atomically update a fixture.
+
+    The fixture is changed only when its current status still
+    matches expected_status.
+
+    This prevents races between:
+        - simulation workers
+        - scheduler workers
+        - force-finish recovery
+        - other engine loops
+
+    Optional fields:
+        end_time
+        is_simulating
+
+    are updated in the SAME SQL UPDATE.
+
+    Returns:
+        True  -> exactly one fixture was updated
+        False -> another worker already changed the fixture
     """
-    q = text(
-        f"UPDATE {T_FIXTURES} "
-        "SET status = :new "
-        "WHERE id = :mid AND status = :exp"
+
+    values = {
+        "new": new_status,
+        "mid": match_id,
+        "exp": expected_status,
+    }
+
+    set_parts = [
+        "status = :new",
+    ]
+
+    # -----------------------------------------------
+    # Optional end_time update
+    # -----------------------------------------------
+
+    if end_time is not None:
+
+        set_parts.append(
+            "end_time = :end_time"
+        )
+
+        values["end_time"] = end_time
+
+    # -----------------------------------------------
+    # Optional simulation flag update
+    # -----------------------------------------------
+
+    if is_simulating is not None:
+
+        set_parts.append(
+            "is_simulating = :is_simulating"
+        )
+
+        values["is_simulating"] = is_simulating
+
+    # -----------------------------------------------
+    # Atomic compare-and-set
+    # -----------------------------------------------
+
+    query = text(
+        f"""
+        UPDATE {T_FIXTURES}
+        SET {", ".join(set_parts)}
+        WHERE id = :mid
+          AND status = :exp
+        """
     )
-    res = session.execute(q, {"new": new_status, "mid": match_id, "exp": expected_status})
-    return getattr(res, "rowcount", 0) == 1
+
+    result = session.execute(
+        query,
+        values,
+    )
+
+    return (
+        getattr(
+            result,
+            "rowcount",
+            0,
+        )
+        == 1
+    )
 
 
-def safe_commit(session, max_retries=3, backoff=0.05):
+# ============================================================
+# SAFE COMMIT
+# ============================================================
+
+def safe_commit(
+    session,
+    max_retries=3,
+    backoff=0.05,
+):
     """
     Commit with retry for optimistic concurrency conflicts.
     """
-    for attempt in range(1, max_retries + 1):
+
+    for attempt in range(
+        1,
+        max_retries + 1,
+    ):
+
         try:
+
             session.commit()
+
             return True
+
         except StaleDataError as e:
+
             session.rollback()
+
             logger.warning(
-                "StaleDataError on commit (attempt %d/%d): %s",
+                "StaleDataError on commit "
+                "(attempt %d/%d): %s",
                 attempt,
                 max_retries,
                 e,
             )
+
             if attempt == max_retries:
                 raise
-            time.sleep(backoff * attempt)
+
+            time.sleep(
+                backoff * attempt
+            )
+
         except Exception:
+
             session.rollback()
+
             raise
 
+    return False
 
-# ---------------- Match status helper ----------------
+
+# ============================================================
+# MATCH STATUS HELPER
+# ============================================================
+
 def compute_match_status(m):
-    now = now_utc()
-    ot = to_utc(getattr(m, "open_time", None))
-    st = to_utc(getattr(m, "start_time", None))
-    et = to_utc(getattr(m, "end_time", None))
+    """
+    Calculate the externally visible fixture status
+    from its timestamps.
+    """
 
-    if st and et and st <= now <= et:
+    now = now_utc()
+
+    open_time = to_utc(
+        getattr(
+            m,
+            "open_time",
+            None,
+        )
+    )
+
+    start_time = to_utc(
+        getattr(
+            m,
+            "start_time",
+            None,
+        )
+    )
+
+    end_time = to_utc(
+        getattr(
+            m,
+            "end_time",
+            None,
+        )
+    )
+
+    # -----------------------------------------------
+    # RUNNING
+    # -----------------------------------------------
+
+    if (
+        start_time
+        and end_time
+        and start_time <= now <= end_time
+    ):
         return STATUS_RUNNING
-    if et and now > et:
+
+    # -----------------------------------------------
+    # FINISHED
+    # -----------------------------------------------
+
+    if (
+        end_time
+        and now > end_time
+    ):
         return STATUS_FINISHED
-    if ot and now >= ot and (not st or now < st):
+
+    # -----------------------------------------------
+    # OPEN
+    # -----------------------------------------------
+
+    if (
+        open_time
+        and now >= open_time
+        and (
+            not start_time
+            or now < start_time
+        )
+    ):
         return STATUS_OPEN
+
+    # -----------------------------------------------
+    # SCHEDULED
+    # -----------------------------------------------
+
     return STATUS_SCHEDULED
 
 
-# ---------------- Redis / odds cache keys ----------------
-def exposure_key(match_id, selection):
-    return f"match:{match_id}:exposure:{selection}"
+# ============================================================
+# REDIS / ODDS CACHE KEYS
+# ============================================================
+
+def exposure_key(
+    match_id,
+    selection,
+):
+    return (
+        f"match:{match_id}:"
+        f"exposure:{selection}"
+    )
 
 
 def total_exposure_key(match_id):
-    return f"match:{match_id}:exposure:total"
+    return (
+        f"match:{match_id}:"
+        f"exposure:total"
+    )
 
 
 def cache_odds_key(match_id):
-    return f"match:{match_id}:odds:cached"
+    return (
+        f"match:{match_id}:"
+        f"odds:cached"
+    )
 
 
-# ---------------- Match serialization ----------------
+# ============================================================
+# MATCH SERIALIZATION
+# ============================================================
+
 def _match_to_dict(m):
+    """
+    Convert a Fixture ORM object into the API representation.
+    """
+
+    # -----------------------------------------------
+    # Redis odds cache
+    # -----------------------------------------------
+
     cached = {}
+
     try:
-        cached_raw = redis_client.hgetall(cache_odds_key(m.id))
+
+        cached_raw = redis_client.hgetall(
+            cache_odds_key(m.id)
+        )
+
         if cached_raw:
-            cached = {k.decode(): float(v.decode()) for k, v in cached_raw.items()}
+
+            cached = {
+                k.decode(): float(v.decode())
+                for k, v in cached_raw.items()
+            }
+
     except Exception:
-        logger.exception("Failed to read cached odds for match %s", m.id)
+
+        logger.exception(
+            "Failed to read cached odds for match %s",
+            m.id,
+        )
 
     odds = cached or None
+
+    # -----------------------------------------------
+    # Database odds fallback
+    # -----------------------------------------------
+
     if not odds:
+
         odds_row = (
-            db.session.query(Odds)
-            .filter_by(match_id=m.id)
-            .order_by(Odds.created_at.desc())
+            db.session
+            .query(Odds)
+            .filter_by(
+                match_id=m.id
+            )
+            .order_by(
+                Odds.created_at.desc()
+            )
             .first()
         )
+
         if odds_row:
+
             odds = {
-             "home": float(odds_row.home) if odds_row.home is not None else None,
-             "draw": float(odds_row.draw) if odds_row.draw is not None else None,
-             "away": float(odds_row.away) if odds_row.away is not None else None,
-             "over25": float(odds_row.over25) if odds_row.over25 is not None else None,
-             "under25": float(odds_row.under25) if odds_row.under25 is not None else None,
-             "over15": float(odds_row.over15) if odds_row.over15 is not None else None,
-             "under15": float(odds_row.under15) if odds_row.under15 is not None else None,
-             "btts_yes": float(odds_row.btts_yes) if odds_row.btts_yes is not None else None,
-             "btts_no": float(odds_row.btts_no) if odds_row.btts_no is not None else None,
-}
+                "home": (
+                    float(odds_row.home)
+                    if odds_row.home is not None
+                    else None
+                ),
+
+                "draw": (
+                    float(odds_row.draw)
+                    if odds_row.draw is not None
+                    else None
+                ),
+
+                "away": (
+                    float(odds_row.away)
+                    if odds_row.away is not None
+                    else None
+                ),
+
+                "over25": (
+                    float(odds_row.over25)
+                    if odds_row.over25 is not None
+                    else None
+                ),
+
+                "under25": (
+                    float(odds_row.under25)
+                    if odds_row.under25 is not None
+                    else None
+                ),
+
+                "over15": (
+                    float(odds_row.over15)
+                    if odds_row.over15 is not None
+                    else None
+                ),
+
+                "under15": (
+                    float(odds_row.under15)
+                    if odds_row.under15 is not None
+                    else None
+                ),
+
+                "btts_yes": (
+                    float(odds_row.btts_yes)
+                    if odds_row.btts_yes is not None
+                    else None
+                ),
+
+                "btts_no": (
+                    float(odds_row.btts_no)
+                    if odds_row.btts_no is not None
+                    else None
+                ),
+            }
+
+    # -----------------------------------------------
+    # Time values
+    # -----------------------------------------------
 
     now = now_utc()
-    start = to_utc(getattr(m, "start_time", None))
-    end = to_utc(getattr(m, "end_time", None))
-    open_time = to_utc(getattr(m, "open_time", None))
+
+    start = to_utc(
+        getattr(
+            m,
+            "start_time",
+            None,
+        )
+    )
+
+    end = to_utc(
+        getattr(
+            m,
+            "end_time",
+            None,
+        )
+    )
+
+    open_time = to_utc(
+        getattr(
+            m,
+            "open_time",
+            None,
+        )
+    )
+
+    # -----------------------------------------------
+    # Serialized fixture
+    # -----------------------------------------------
 
     return {
         "id": m.id,
+
         "home": m.home,
+
         "away": m.away,
+
         "status": compute_match_status(m),
-        "round": getattr(m, "round", None),
-        "open_time": open_time.isoformat() if open_time else None,
-        "start_time": start.isoformat() if start else None,
-        "end_time": end.isoformat() if end else None,
-        "score": f"{getattr(m, 'home_score', 0) or 0}-{getattr(m, 'away_score', 0) or 0}",
-        "time_to_start": int((start - now).total_seconds()) if start else None,
-        "time_to_end": int((end - now).total_seconds()) if end else None,
-        "event_count": getattr(m, "event_count", 0) or 0,
+
+        "round": getattr(
+            m,
+            "round",
+            None,
+        ),
+
+        "open_time": (
+            open_time.isoformat()
+            if open_time
+            else None
+        ),
+
+        "start_time": (
+            start.isoformat()
+            if start
+            else None
+        ),
+
+        "end_time": (
+            end.isoformat()
+            if end
+            else None
+        ),
+
+        "score": (
+            f"{getattr(m, 'home_score', 0) or 0}"
+            f"-"
+            f"{getattr(m, 'away_score', 0) or 0}"
+        ),
+
+        "time_to_start": (
+            int(
+                (
+                    start - now
+                ).total_seconds()
+            )
+            if start
+            else None
+        ),
+
+        "time_to_end": (
+            int(
+                (
+                    end - now
+                ).total_seconds()
+            )
+            if end
+            else None
+        ),
+
+        "event_count": (
+            getattr(
+                m,
+                "event_count",
+                0,
+            )
+            or 0
+        ),
+
         "odds": odds,
     }
