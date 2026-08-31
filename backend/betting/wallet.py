@@ -5,7 +5,6 @@ from decimal import Decimal, InvalidOperation
 
 from flask import request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
-from sqlalchemy import select
 
 from betting.models import db, User, Transaction
 from betting.utils import to_decimal
@@ -30,13 +29,6 @@ MIN_WITHDRAWAL = Decimal("0.01")
 def _parse_amount(value):
     """
     Safely parse a wallet amount.
-
-    Rejects:
-        - missing values
-        - invalid strings
-        - NaN
-        - Infinity
-        - zero / negative values
     """
 
     if value is None:
@@ -100,7 +92,10 @@ def register_wallet_routes(app):
     # BALANCE
     # ========================================================
 
-    @app.route("/balance", methods=["GET"])
+    @app.route(
+        "/balance",
+        methods=["GET"],
+    )
     @jwt_required()
     def get_balance():
 
@@ -131,138 +126,134 @@ def register_wallet_routes(app):
                 _balance(user)
             ),
         })
-# ========================================================
-# TRANSACTIONS
-# ========================================================
 
-@app.route(
-    "/transactions",
-    methods=["GET"],
-)
-@jwt_required()
-def get_transactions():
 
-    try:
-        uid = int(
-            get_jwt_identity()
-        )
-    except (TypeError, ValueError):
-        return _error(
-            "invalid user identity",
-            401,
-        )
+    # ========================================================
+    # TRANSACTIONS
+    # ========================================================
 
-    try:
+    @app.route(
+        "/transactions",
+        methods=["GET"],
+    )
+    @jwt_required()
+    def get_transactions():
 
-        txs = (
-            db.session.query(Transaction)
-            .filter(
-                Transaction.user_id == uid
+        try:
+            uid = int(
+                get_jwt_identity()
             )
-            .order_by(
-                Transaction.created.desc()
-            )
-            .all()
-        )
-
-        data = []
-
-        for tx in txs:
-
-            # ------------------------------------------------
-            # Safely read optional fields.
-            #
-            # This prevents the API from crashing if your
-            # Transaction model does not contain one of them.
-            # ------------------------------------------------
-
-            description = getattr(
-                tx,
-                "description",
-                None,
+        except (TypeError, ValueError):
+            return _error(
+                "invalid user identity",
+                401,
             )
 
-            reference = getattr(
-                tx,
-                "reference",
-                None,
+        try:
+
+            txs = (
+                db.session.query(Transaction)
+                .filter(
+                    Transaction.user_id == uid
+                )
+                .order_by(
+                    Transaction.created.desc()
+                )
+                .all()
             )
 
-            status = getattr(
-                tx,
-                "status",
-                None,
-            )
+            data = []
 
-            created_at = (
-                tx.created.isoformat()
-                if tx.created
-                else None
-            )
+            for tx in txs:
 
-            data.append({
-                "id": tx.id,
+                description = getattr(
+                    tx,
+                    "description",
+                    None,
+                )
 
-                "type": (
-                    tx.type
-                    if tx.type
-                    else "transaction"
-                ),
+                reference = getattr(
+                    tx,
+                    "reference",
+                    None,
+                )
 
-                "amount": float(
-                    to_decimal(
-                        tx.amount
-                    )
-                ),
+                status = getattr(
+                    tx,
+                    "status",
+                    None,
+                )
 
-                "balance_after": float(
-                    to_decimal(
-                        tx.balance_after
-                    )
-                ),
+                created_at = (
+                    tx.created.isoformat()
+                    if tx.created
+                    else None
+                )
 
-                # Frontend-friendly timestamp
-                "created_at": created_at,
+                data.append({
+                    "id": tx.id,
 
-                "created": created_at,
+                    "type": (
+                        tx.type
+                        if tx.type
+                        else "transaction"
+                    ),
 
-                "description": (
-                    description
-                    if description
-                    else ""
-                ),
+                    "amount": float(
+                        to_decimal(
+                            tx.amount
+                        )
+                    ),
 
-                "reference": (
-                    reference
-                    if reference
-                    else ""
-                ),
+                    "balance_after": float(
+                        to_decimal(
+                            tx.balance_after
+                        )
+                    ),
 
-                "status": (
-                    status
-                    if status
-                    else "completed"
-                ),
+                    "created_at": created_at,
+
+                    "created": created_at,
+
+                    "description": (
+                        description
+                        if description
+                        else ""
+                    ),
+
+                    "reference": (
+                        reference
+                        if reference
+                        else ""
+                    ),
+
+                    "status": (
+                        status
+                        if status
+                        else "completed"
+                    ),
+                })
+
+            return jsonify({
+                "success": True,
+                "data": data,
+                "count": len(data),
             })
 
-        return jsonify({
-            "success": True,
-            "data": data,
-            "count": len(data),
-        })
+        except Exception as e:
 
-    except Exception as e:
+            logger.exception(
+                "Error loading transactions for user %s: %s",
+                uid,
+                e,
+            )
 
-        logger.exception(
-            "Error loading transactions for user %s: %s",
-            uid,
-            e,
-        )
+            return _error(
+                "failed to load transactions",
+                500,
+            )
 
-        return _error(
-            "failed to load transactions",
-            500,
-        )
+
     # ========================================================
     # BALANCE HISTORY
     # ========================================================
@@ -307,6 +298,7 @@ def get_transactions():
                         if tx.created
                         else None
                     ),
+
                     "balance": float(
                         to_decimal(
                             tx.balance_after
@@ -317,6 +309,7 @@ def get_transactions():
             return jsonify({
                 "success": True,
                 "data": history,
+                "count": len(history),
             })
 
         except Exception as e:
@@ -331,6 +324,7 @@ def get_transactions():
                 "failed to load balance history",
                 500,
             )
+
 
     # ========================================================
     # DEPOSIT
@@ -362,31 +356,21 @@ def get_transactions():
         )
 
         if amount is None:
-
             return _error(
                 "invalid deposit amount"
             )
 
         if amount < MIN_DEPOSIT:
-
             return _error(
                 f"minimum deposit is {MIN_DEPOSIT:.2f}"
             )
 
         if amount > MAX_DEPOSIT:
-
             return _error(
                 f"maximum deposit is {MAX_DEPOSIT:.2f}"
             )
 
         try:
-
-            # ------------------------------------------------
-            # Lock the user row.
-            #
-            # This prevents two simultaneous wallet operations
-            # from modifying the same balance at the same time.
-            # ------------------------------------------------
 
             user = (
                 db.session.query(User)
@@ -454,6 +438,7 @@ def get_transactions():
                 500,
             )
 
+
     # ========================================================
     # WITHDRAW
     # ========================================================
@@ -484,26 +469,16 @@ def get_transactions():
         )
 
         if amount is None:
-
             return _error(
                 "invalid withdrawal amount"
             )
 
         if amount < MIN_WITHDRAWAL:
-
             return _error(
                 f"minimum withdrawal is {MIN_WITHDRAWAL:.2f}"
             )
 
         try:
-
-            # ------------------------------------------------
-            # Lock user row before checking balance.
-            #
-            # This is important because two simultaneous
-            # withdrawal requests must not both spend the same
-            # balance.
-            # ------------------------------------------------
 
             user = (
                 db.session.query(User)
