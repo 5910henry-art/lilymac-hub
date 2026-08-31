@@ -234,13 +234,13 @@ def register_wallet_routes(app):
                     ),
                 })
 
-           return jsonify({
+            return jsonify({
                 "success": True,
                 "data": {
-                "transactions": data,
-             },
+                    "transactions": data,
+                },
                 "count": len(data),
-             })
+            })
 
         except Exception as e:
 
