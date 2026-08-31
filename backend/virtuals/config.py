@@ -51,8 +51,7 @@ else:
 db = SQLAlchemy()
 jwt = JWTManager()
 
-# ✅ Use threading instead of eventlet
-socketio = SocketIO(async_mode="threading")
+socketio = SocketIO(async_mode="gevent")
 
 def init_app():
     """Initialize Flask app, extensions, and database."""
