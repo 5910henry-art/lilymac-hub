@@ -19,7 +19,7 @@ from werkzeug.middleware.dispatcher import DispatcherMiddleware
 
 from app import app as main_app
 from vipadmin import app as vipadmin_app
-from betting.bet import app as bet_app
+from betting.bet import app as bet_app, init_services
 
 
 # ============================================================
@@ -130,6 +130,26 @@ limiter = Limiter(
         or "memory://"
     ),
 )
+
+
+# ============================================================
+# Betting scheduler
+#
+# The scheduler is started by the gateway so Render does not
+# need a separate scheduler process.
+# ============================================================
+
+try:
+    init_services()
+
+    logger.info(
+        "✅ Betting scheduler initialized from gateway"
+    )
+
+except Exception:
+    logger.exception(
+        "❌ Failed to initialize betting scheduler"
+    )
 
 
 # ============================================================

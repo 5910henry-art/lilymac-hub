@@ -1,4 +1,5 @@
 # bet.py
+
 import os
 import logging
 import atexit
@@ -96,23 +97,35 @@ scheduler_thread = None
 def init_services():
     global scheduler_thread
 
+    # Prevent duplicate scheduler instances.
+    if scheduler_thread is not None and scheduler_thread.is_alive():
+        logging.info(
+            "Betting scheduler already running."
+        )
+        return scheduler_thread
+
+    # Verify PostgreSQL before starting scheduler.
     with app.app_context():
-        # Verify database connection before starting scheduler
         db.session.execute(db.text("SELECT 1"))
+
         db.create_all()
 
         print(
             f"✅ PostgreSQL connected | schema={DB_SCHEMA}"
         )
 
-    if scheduler_thread is None:
-        scheduler_thread = start_scheduler(
-            app,
-            interval_seconds=60,
-            stop_event=stop_event,
-        )
+    # Start the scheduler.
+    scheduler_thread = start_scheduler(
+        app,
+        interval_seconds=60,
+        stop_event=stop_event,
+    )
 
-        print("✅ Betting scheduler started | interval=60s")
+    print(
+        "✅ Betting scheduler started | interval=60s"
+    )
+
+    return scheduler_thread
 
 
 # -------------------------
@@ -121,10 +134,17 @@ def init_services():
 def shutdown_scheduler():
     global scheduler_thread
 
-    if scheduler_thread:
+    if scheduler_thread is not None:
         stop_event.set()
-        scheduler_thread.join(timeout=5)
-        logging.info("Scheduler stopped gracefully.")
+
+        if scheduler_thread.is_alive():
+            scheduler_thread.join(timeout=5)
+
+        scheduler_thread = None
+
+        logging.info(
+            "Scheduler stopped gracefully."
+        )
 
 
 atexit.register(shutdown_scheduler)
@@ -136,7 +156,12 @@ atexit.register(shutdown_scheduler)
 if __name__ == "__main__":
     init_services()
 
-    port = int(os.environ.get("PORT", 5005))
+    port = int(
+        os.environ.get(
+            "PORT",
+            5005,
+        )
+    )
 
     print(
         f"🚀 Starting bet_app on port {port}..."
