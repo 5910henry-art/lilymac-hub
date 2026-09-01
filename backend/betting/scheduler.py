@@ -271,15 +271,6 @@ def _resolve_match_for_selection(
     matches_map,
     bookmarks_map,
 ):
-    """
-    Resolve the Match belonging to a BetSelection.
-
-    IMPORTANT:
-
-    Bookmark uses match_id.
-
-    There is NO Bookmark.id assumption.
-    """
 
     if not sel.bookmark_id:
         return None
@@ -344,13 +335,6 @@ def _load_betting_context(
 
     if not bookmark_ids:
         return {}, {}
-
-    # --------------------------------------------------------
-    # Bookmark lookup
-    #
-    # IMPORTANT:
-    # Bookmark has match_id.
-    # --------------------------------------------------------
 
     bookmarks = (
         session.query(Bookmark)
@@ -877,7 +861,6 @@ def _selection_market_family(selection):
 
     return "other"
 
-
 # ============================================================
 # LEG PROBABILITY
 # ============================================================
@@ -890,20 +873,16 @@ def _leg_probability(
     """
     Calculate current probability of one accumulator leg.
 
-    WON:
-        1.00
+    IMPORTANT:
+    - WON      -> 1.00
+    - LOST     -> 0.00
+    - VOIDED   -> 0.00
+    - FINISHED -> evaluate final result
+    - IN_PLAY  -> live probability
+    - PREMATCH -> pre-match probability
 
-    LOST:
-        0.00
-
-    FINISHED:
-        evaluate final score
-
-    IN_PLAY:
-        live probability
-
-    TIMED / SCHEDULED:
-        pre-match probability
+    A selection that is merely losing while a match is still
+    in play is NOT considered lost.
     """
 
     selection = (
@@ -915,7 +894,16 @@ def _leg_probability(
         or ""
     ).lower()
 
-    status = (
+    selection_status = (
+        getattr(
+            sel,
+            "status",
+            "",
+        )
+        or ""
+    ).lower()
+
+    match_status = (
         getattr(
             match,
             "status",
@@ -924,14 +912,32 @@ def _leg_probability(
         or ""
     ).lower()
 
+    home = int(
+        getattr(
+            match,
+            "home_score",
+            0,
+        )
+        or 0
+    )
+
+    away = int(
+        getattr(
+            match,
+            "away_score",
+            0,
+        )
+        or 0
+    )
+
     # ========================================================
     # DATABASE SELECTION STATUS
     # ========================================================
 
-    if sel.status == "won":
+    if selection_status == "won":
         return Decimal("1.00")
 
-    if sel.status in (
+    if selection_status in (
         "lost",
         "voided",
     ):
@@ -941,33 +947,35 @@ def _leg_probability(
     # FINISHED MATCH
     # ========================================================
 
-    if status == "finished":
-
-        if (
-            match.home_score is None
-            or match.away_score is None
-        ):
-            return Decimal("0.01")
+    if match_status == "finished":
 
         result = evaluate_selection_win(
-            match.home_score,
-            match.away_score,
+            home,
+            away,
             selection,
         )
 
         if result is True:
+
+            sel.status = "won"
+
             return Decimal("1.00")
 
         if result is False:
+
+            sel.status = "lost"
+
             return Decimal("0.00")
 
-        return Decimal("0.01")
+        # Unknown market/result should NOT be given
+        # a positive cashout probability.
+        return Decimal("0.00")
 
     # ========================================================
     # PRE-MATCH
     # ========================================================
 
-    if status in (
+    if match_status in (
         "timed",
         "scheduled",
         "upcoming",
@@ -975,10 +983,6 @@ def _leg_probability(
         "not_started",
         "",
     ):
-
-        # ----------------------------------------------------
-        # Prefer model probability from Bookmark
-        # ----------------------------------------------------
 
         if bookmark:
 
@@ -1019,97 +1023,203 @@ def _leg_probability(
                         None,
                     )
 
-                if value is not None:
+                probability = normalize_probability(
+                    value
+                )
 
-                    value = to_decimal(
-                        value,
-                        quantize=False,
-                    )
-
-                    if value > 1:
-                        value /= Decimal("100")
+                if probability is not None:
 
                     return max(
                         Decimal("0.01"),
                         min(
                             Decimal("0.99"),
-                            value,
+                            probability,
                         ),
                     )
 
             except Exception:
                 pass
 
-        # ----------------------------------------------------
         # Odds fallback
-        # ----------------------------------------------------
+        odds = getattr(
+            sel,
+            "odds",
+            None,
+        )
 
-        try:
+        if odds is None and bookmark:
 
-            odds = to_decimal(
-                getattr(
-                    sel,
-                    "odds",
-                    None,
-                ),
-                quantize=False,
-            )
+            try:
 
-            if odds > 0:
+                if selection in (
+                    "home_odds",
+                    "home",
+                ):
+                    odds = bookmark.home_odds
 
-                probability = (
-                    Decimal("1")
-                    / odds
-                )
+                elif selection in (
+                    "draw_odds",
+                    "draw",
+                ):
+                    odds = bookmark.draw_odds
 
-                return max(
-                    Decimal("0.01"),
-                    min(
-                        Decimal("0.99"),
-                        probability,
-                    ),
-                )
+                elif selection in (
+                    "away_odds",
+                    "away",
+                ):
+                    odds = bookmark.away_odds
 
-        except Exception:
-            pass
+                elif selection == "over05":
+                    odds = bookmark.over05
 
-        return Decimal("0.50")
+                elif selection == "under05":
+                    odds = bookmark.under05
+
+                elif selection == "over15":
+                    odds = bookmark.over15
+
+                elif selection == "under15":
+                    odds = bookmark.under15
+
+                elif selection == "over25":
+                    odds = bookmark.over25
+
+                elif selection == "under25":
+                    odds = bookmark.under25
+
+                elif selection == "over35":
+                    odds = bookmark.over35
+
+                elif selection == "under35":
+                    odds = bookmark.under35
+
+                elif selection in (
+                    "gg_odds",
+                    "btts",
+                ):
+                    odds = bookmark.gg_odds
+
+                elif selection in (
+                    "ng_odds",
+                    "no_btts",
+                ):
+                    odds = bookmark.ng_odds
+
+            except Exception:
+                pass
+
+        probability = implied_probability_from_odds(
+            odds
+        )
+
+        if probability is None:
+            probability = Decimal("0.50")
+
+        return max(
+            Decimal("0.01"),
+            min(
+                Decimal("0.99"),
+                probability,
+            ),
+        )
 
     # ========================================================
     # LIVE MATCH
     # ========================================================
 
-    if status == "in_play":
+    if match_status == "in_play":
 
-        class TempBet:
-            pass
+        # ----------------------------------------------------
+        # 1X2
+        # ----------------------------------------------------
 
-        temp = TempBet()
+        if selection in (
+            "home_odds",
+            "home",
+            "draw_odds",
+            "draw",
+            "away_odds",
+            "away",
+        ):
 
-        temp.status = "pending"
-        temp.cashed_out = False
-        temp.selection = sel.selection
-        temp.odds = sel.odds
-        temp.potential = Decimal("1.00")
-        temp.stake = Decimal("1.00")
+            diff = home - away
 
-        try:
+            # HOME WIN
+            if selection in (
+                "home_odds",
+                "home",
+            ):
 
-            live_value = calculate_live_cashout(
-                temp,
-                match,
-                bookmark,
-            )
+                if diff > 0:
 
-            probability = to_decimal(
-                live_value,
-                quantize=False,
-            )
+                    probability = Decimal("0.60")
 
-            # calculate_live_cashout applies approximately
-            # 8% margin. Remove that effect so the value can
-            # be used as an approximate probability.
-            probability /= Decimal("0.92")
+                    if diff >= 2:
+                        probability = Decimal("0.85")
+
+                    if _match_minute(match) >= 75:
+                        probability += Decimal("0.08")
+
+                elif diff < 0:
+
+                    probability = Decimal("0.20")
+
+                    if diff <= -2:
+                        probability = Decimal("0.05")
+
+                    if _match_minute(match) >= 75:
+                        probability *= Decimal("0.65")
+
+                else:
+
+                    probability = Decimal("0.35")
+
+            # DRAW
+            elif selection in (
+                "draw_odds",
+                "draw",
+            ):
+
+                if diff == 0:
+
+                    probability = Decimal("0.35")
+
+                    if _match_minute(match) >= 75:
+                        probability = Decimal("0.55")
+
+                else:
+
+                    probability = Decimal("0.15")
+
+                    if _match_minute(match) >= 75:
+                        probability = Decimal("0.08")
+
+            # AWAY WIN
+            else:
+
+                if diff < 0:
+
+                    probability = Decimal("0.60")
+
+                    if diff <= -2:
+                        probability = Decimal("0.85")
+
+                    if _match_minute(match) >= 75:
+                        probability += Decimal("0.08")
+
+                elif diff > 0:
+
+                    probability = Decimal("0.20")
+
+                    if diff >= 2:
+                        probability = Decimal("0.05")
+
+                    if _match_minute(match) >= 75:
+                        probability *= Decimal("0.65")
+
+                else:
+
+                    probability = Decimal("0.35")
 
             return max(
                 Decimal("0.01"),
@@ -1119,12 +1229,139 @@ def _leg_probability(
                 ),
             )
 
-        except Exception:
+        # ----------------------------------------------------
+        # OVER / UNDER
+        # ----------------------------------------------------
 
-            return Decimal("0.01")
+        if (
+            selection.startswith("over")
+            or selection.startswith("under")
+        ):
 
-    return Decimal("0.50")
+            threshold = parse_over_under_threshold(
+                selection
+            )
 
+            if threshold is None:
+                return Decimal("0.00")
+
+            total = home + away
+            minute = _match_minute(match)
+
+            # OVER
+            if selection.startswith("over"):
+
+                if total > threshold:
+                    return Decimal("1.00")
+
+                goals_needed = (
+                    Decimal(str(threshold))
+                    - Decimal(str(total))
+                )
+
+                if goals_needed <= 1:
+
+                    if minute >= 75:
+                        return Decimal("0.30")
+
+                    if minute >= 60:
+                        return Decimal("0.45")
+
+                    return Decimal("0.65")
+
+                if goals_needed <= 2:
+
+                    if minute >= 75:
+                        return Decimal("0.08")
+
+                    if minute >= 60:
+                        return Decimal("0.20")
+
+                    return Decimal("0.40")
+
+                if minute >= 75:
+                    return Decimal("0.02")
+
+                return Decimal("0.15")
+
+            # UNDER
+            else:
+
+                # Under has definitively lost if the total
+                # has reached/passed the line.
+                if Decimal(str(total)) >= Decimal(
+                    str(threshold)
+                ):
+                    return Decimal("0.00")
+
+                remaining = (
+                    Decimal(str(threshold))
+                    - Decimal(str(total))
+                )
+
+                if minute >= 75:
+                    return Decimal("0.85")
+
+                if minute >= 60:
+                    return Decimal("0.70")
+
+                if remaining >= 2:
+                    return Decimal("0.65")
+
+                return Decimal("0.45")
+
+        # ----------------------------------------------------
+        # BTTS
+        # ----------------------------------------------------
+
+        if selection in (
+            "gg_odds",
+            "btts",
+        ):
+
+            if home > 0 and away > 0:
+                return Decimal("1.00")
+
+            minute = _match_minute(match)
+
+            if minute >= 75:
+                return Decimal("0.20")
+
+            if minute >= 60:
+                return Decimal("0.35")
+
+            return Decimal("0.55")
+
+        # ----------------------------------------------------
+        # NO BTTS
+        # ----------------------------------------------------
+
+        if selection in (
+            "ng_odds",
+            "no_btts",
+        ):
+
+            if home > 0 and away > 0:
+                return Decimal("0.00")
+
+            minute = _match_minute(match)
+
+            if minute >= 75:
+                return Decimal("0.85")
+
+            if minute >= 60:
+                return Decimal("0.70")
+
+            return Decimal("0.55")
+
+        # Unknown live market
+        return Decimal("0.00")
+
+    # ========================================================
+    # UNKNOWN MATCH STATE
+    # ========================================================
+
+    return Decimal("0.00")
 
 # ============================================================
 # CORRELATION
@@ -1198,31 +1435,6 @@ def update_betslip_cashout(
     bookmarks_map,
     now,
 ):
-    """
-    Dynamic accumulator cashout.
-
-    Examples:
-
-        1 leg:
-            probability(A)
-
-        2 legs:
-            probability(A) * probability(B)
-
-        4 legs:
-            probability(A)
-            * probability(B)
-            * probability(C)
-            * probability(D)
-
-    A leg already WON contributes 1.00.
-
-    A leg that is LOST contributes 0.00.
-
-    An unstarted leg uses its current pre-match probability.
-
-    A live leg uses its current live probability.
-    """
 
     try:
 
@@ -1604,25 +1816,6 @@ def update_betslip_cashout(
             max_cashout,
         )
 
-        # ====================================================
-        # MINIMUM FLOOR
-        #
-        # Important:
-        # Do not force a huge cashout when the bet is nearly
-        # dead. Only keep a small minimum based on stake.
-        # ====================================================
-
-        if stake > 0:
-
-            minimum_cashout = (
-                stake
-                * Decimal("0.01")
-            )
-
-            cashout = max(
-                cashout,
-                minimum_cashout,
-            )
 
         # ====================================================
         # FINAL ROUNDING
@@ -1670,24 +1863,6 @@ def update_betslip_cashout(
 # ============================================================
 
 def auto_settle_bets(session=None):
-    """
-    Efficient pending-only settlement.
-
-    Does NOT scan every finished Match.
-
-    Process:
-
-        1. Find match IDs from pending normal Bets
-        2. Load only finished referenced matches
-        3. Settle normal Bets
-        4. Load pending BetSelections in batches
-        5. Load only referenced Bookmarks/Matches
-        6. Settle selections
-        7. Load pending BetSlips
-        8. Settle completed slips
-
-    No FOR UPDATE is used.
-    """
 
     session = session or db.session
 
@@ -1846,19 +2021,6 @@ def auto_settle_bets(session=None):
 # ============================================================
 
 def auto_update_live_cashouts(session=None):
-    """
-    Update cashout for:
-
-        - normal pending Bets
-        - pending BetSlips
-
-    IMPORTANT:
-
-    BetSlip cashout is NOT dependent on there being a normal
-    Bet record.
-
-    This fixes accumulator-only cashout updates.
-    """
 
     session = session or db.session
 
@@ -1967,9 +2129,6 @@ def auto_update_live_cashouts(session=None):
 
     # ========================================================
     # 6. LOAD ONLY REQUIRED MATCHES
-    #
-    # Include both IN_PLAY and TIMED/SCHEDULED because
-    # accumulator cashout needs the unstarted leg's probability.
     # ========================================================
 
     relevant_matches = (
@@ -1994,6 +2153,14 @@ def auto_update_live_cashouts(session=None):
             or_(
                 Match.utcdate.is_(None),
                 Match.utcdate <= now,
+                Match.status.in_(
+                    [
+                       "TIMED",
+                       "SCHEDULED",
+                       "UPCOMING",
+                       "PENDING",
+                    ]
+              ),
             ),
         )
         .all()

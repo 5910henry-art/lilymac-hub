@@ -1,0 +1,476 @@
+# ============================================================
+# BETSLIP CASHOUT
+# ============================================================
+
+def update_betslip_cashout(
+    session,
+    slip,
+    matches_map,
+    bookmarks_map,
+    now,
+):
+    """
+    Dynamic accumulator cashout.
+
+    Examples:
+
+        1 leg:
+            probability(A)
+
+        2 legs:
+            probability(A) * probability(B)
+
+        4 legs:
+            probability(A)
+            * probability(B)
+            * probability(C)
+            * probability(D)
+
+    A leg already WON contributes 1.00.
+
+    A leg that is LOST contributes 0.00.
+
+    An unstarted leg uses its current pre-match probability.
+
+    A live leg uses its current live probability.
+    """
+
+    try:
+
+        if slip.status != "pending":
+            return False
+
+        potential = to_decimal(
+            getattr(
+                slip,
+                "potential",
+                Decimal("0.00"),
+            )
+        )
+
+        stake = to_decimal(
+            getattr(
+                slip,
+                "stake",
+                Decimal("0.00"),
+            )
+        )
+
+        if potential <= 0:
+
+            slip.current_cashout = (
+                Decimal("0.00")
+            )
+
+            session.add(slip)
+
+            return False
+
+        selections = list(
+            slip.selections
+        )
+
+        if not selections:
+
+            slip.current_cashout = (
+                Decimal("0.00")
+            )
+
+            session.add(slip)
+
+            return False
+
+        combined_probability = (
+            Decimal("1.00")
+        )
+
+        won_legs = 0
+        live_legs = 0
+        future_legs = 0
+        unresolved_legs = 0
+
+        # ====================================================
+        # PROCESS EVERY LEG
+        # ====================================================
+
+        for sel in selections:
+
+            # ------------------------------------------------
+            # ALREADY WON
+            # ------------------------------------------------
+
+            if sel.status == "won":
+
+                won_legs += 1
+
+                # A confirmed winner has probability 1.
+                continue
+
+            # ------------------------------------------------
+            # LOST / VOIDED
+            # ------------------------------------------------
+
+            if sel.status in (
+                "lost",
+                "voided",
+            ):
+
+                slip.current_cashout = (
+                    Decimal("0.00")
+                )
+
+                session.add(slip)
+
+                logger.info(
+                    "BetSlip %s cashout=0 | "
+                    "selection=%s status=%s",
+                    slip.id,
+                    sel.id,
+                    sel.status,
+                )
+
+                return True
+
+            # ------------------------------------------------
+            # RESOLVE BOOKMARK
+            # ------------------------------------------------
+
+            bookmark = None
+
+            if sel.bookmark_id:
+
+                bookmark = bookmarks_map.get(
+                    sel.bookmark_id
+                )
+
+            match = None
+
+            if bookmark:
+
+                match_id = getattr(
+                    bookmark,
+                    "match_id",
+                    None,
+                )
+
+                if match_id:
+
+                    match = matches_map.get(
+                        match_id
+                    )
+
+            # Legacy fallback
+            if (
+                not match
+                and sel.bookmark_id
+            ):
+
+                match = matches_map.get(
+                    sel.bookmark_id
+                )
+
+            if not match:
+
+                _safe_add_warning(
+                    _missing_cashout_logged,
+                    f"slip-sel-no-match-cashout-{sel.id}",
+                    "BetSelection %s has no match for cashout",
+                    sel.id,
+                )
+
+                # Unknown leg is treated conservatively.
+                combined_probability *= (
+                    Decimal("0.01")
+                )
+
+                unresolved_legs += 1
+
+                continue
+
+            # ------------------------------------------------
+            # FUTURE MATCH
+            # ------------------------------------------------
+
+            if (
+                match.utcdate
+                and match.utcdate > now
+            ):
+
+                future_legs += 1
+
+            # ------------------------------------------------
+            # FINISHED MATCH
+            # ------------------------------------------------
+
+            if match.status == "FINISHED":
+
+                if (
+                    match.home_score is None
+                    or match.away_score is None
+                ):
+
+                    combined_probability *= (
+                        Decimal("0.01")
+                    )
+
+                    unresolved_legs += 1
+
+                    continue
+
+                result = evaluate_selection_win(
+                    match.home_score,
+                    match.away_score,
+                    sel.selection,
+                )
+
+                # ------------------------------------------------
+                # Finished and WON
+                # ------------------------------------------------
+
+                if result is True:
+
+                    sel.status = "won"
+
+                    session.add(sel)
+
+                    won_legs += 1
+
+                    continue
+
+                # ------------------------------------------------
+                # Finished and LOST
+                # ------------------------------------------------
+
+                if result is False:
+
+                    sel.status = "lost"
+
+                    session.add(sel)
+
+                    slip.current_cashout = (
+                        Decimal("0.00")
+                    )
+
+                    logger.info(
+                        "BetSlip %s cashout=0 | "
+                        "selection=%s lost | "
+                        "match=%s | score=%s-%s",
+                        slip.id,
+                        sel.id,
+                        match.id,
+                        match.home_score,
+                        match.away_score,
+                    )
+
+                    return True
+
+            # ------------------------------------------------
+            # LIVE
+            # ------------------------------------------------
+
+            if match.status == "IN_PLAY":
+
+                live_legs += 1
+
+            # ------------------------------------------------
+            # GET CURRENT PROBABILITY
+            # ------------------------------------------------
+
+            probability = _leg_probability(
+                sel,
+                match,
+                bookmark,
+            )
+
+            probability = max(
+                Decimal("0.01"),
+                min(
+                    Decimal("0.99"),
+                    probability,
+                ),
+            )
+
+            combined_probability *= (
+                probability
+            )
+
+            unresolved_legs += 1
+
+            logger.debug(
+                "Slip %s | selection=%s | "
+                "match=%s | status=%s | probability=%s",
+                slip.id,
+                sel.id,
+                match.id,
+                match.status,
+                probability,
+            )
+
+        # ====================================================
+        # ALL LEGS WON
+        # ====================================================
+
+        if unresolved_legs == 0:
+
+            slip.current_cashout = (
+                potential
+            )
+
+            session.add(slip)
+
+            logger.info(
+                "BetSlip %s fully won | cashout=%s",
+                slip.id,
+                potential,
+            )
+
+            return True
+
+        # ====================================================
+        # CALCULATE FAIR VALUE
+        # ====================================================
+
+        cashout = (
+            potential
+            * combined_probability
+        )
+
+        # ====================================================
+        # CORRELATION
+        # ====================================================
+
+        legs_for_correlation = []
+
+        for sel in selections:
+
+            if sel.status in (
+                "lost",
+                "voided",
+            ):
+                continue
+
+            bookmark = (
+                bookmarks_map.get(
+                    sel.bookmark_id
+                )
+                if sel.bookmark_id
+                else None
+            )
+
+            match = None
+
+            if bookmark:
+
+                match = matches_map.get(
+                    getattr(
+                        bookmark,
+                        "match_id",
+                        None,
+                    )
+                )
+
+            if not match and sel.bookmark_id:
+
+                match = matches_map.get(
+                    sel.bookmark_id
+                )
+
+            if not match:
+                continue
+
+            legs_for_correlation.append(
+                {
+                    "sel_id": sel.id,
+                    "match_id": match.id,
+                    "family": _selection_market_family(
+                        sel.selection
+                    ),
+                    "prob": Decimal("1.00"),
+                }
+            )
+
+        correlation = _correlation_factor(
+            legs_for_correlation
+        )
+
+        cashout *= correlation
+
+        # ====================================================
+        # BOOKMAKER MARGIN
+        # ====================================================
+
+        cashout *= Decimal("0.93")
+
+        # ====================================================
+        # MAXIMUM CASHOUT
+        # ====================================================
+
+        max_cashout = (
+            potential
+            * Decimal("0.98")
+        )
+
+        cashout = min(
+            cashout,
+            max_cashout,
+        )
+
+        # ====================================================
+        # MINIMUM FLOOR
+        #
+        # Important:
+        # Do not force a huge cashout when the bet is nearly
+        # dead. Only keep a small minimum based on stake.
+        # ====================================================
+
+        if stake > 0:
+
+            minimum_cashout = (
+                stake
+                * Decimal("0.01")
+            )
+
+            cashout = max(
+                cashout,
+                minimum_cashout,
+            )
+
+        # ====================================================
+        # FINAL ROUNDING
+        # ====================================================
+
+        slip.current_cashout = (
+            cashout.quantize(
+                Decimal("0.01"),
+                rounding=ROUND_DOWN,
+            )
+        )
+
+        session.add(slip)
+
+        logger.info(
+            "BetSlip %s cashout updated | "
+            "won=%d | unresolved=%d | "
+            "live=%d | future=%d | "
+            "combined_probability=%s | "
+            "cashout=%s",
+            slip.id,
+            won_legs,
+            unresolved_legs,
+            live_legs,
+            future_legs,
+            combined_probability,
+            slip.current_cashout,
+        )
+
+        return True
+
+    except Exception as e:
+
+        logger.exception(
+            "Error updating BetSlip %s cashout: %s",
+            slip.id,
+            e,
+        )
+
+        return False

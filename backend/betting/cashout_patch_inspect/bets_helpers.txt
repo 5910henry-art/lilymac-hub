@@ -1,0 +1,91 @@
+            (
+                f"odds changed "
+                f"(live={odds}, client={client_value})"
+            ),
+        )
+
+    return odds, True, ""
+
+
+# ============================================================
+# CASHOUT HELPERS
+# ============================================================
+
+def _pending_cashout_amount(stake):
+    """
+    Default pending cashout value.
+
+    Current business rule:
+        95% of original stake.
+    """
+
+    return _money(
+        _d(stake) * Decimal("0.95")
+    )
+
+
+def _cashout_amount_for_betslip(slip):
+    status = (
+        getattr(slip, "status", "") or ""
+    ).lower()
+
+    if status == "lost":
+        return Decimal("0.00")
+
+    if status == "pending":
+        return _pending_cashout_amount(
+            slip.stake
+        )
+
+    stored = getattr(
+        slip,
+        "current_cashout",
+        None,
+    )
+
+    if stored is None:
+        return Decimal("0.00")
+
+    amount = _d(stored)
+
+    if amount <= 0:
+        return Decimal("0.00")
+
+    return _money(amount)
+
+
+def _cashout_amount_for_legacy_bet(bet):
+    status = (
+        getattr(bet, "status", "") or ""
+    ).lower()
+
+    if status == "lost":
+        return Decimal("0.00")
+
+    if status == "pending":
+        return _pending_cashout_amount(
+            bet.amount
+        )
+
+    stored = getattr(
+        bet,
+        "current_cashout",
+        None,
+    )
+
+    if stored is None:
+        return Decimal("0.00")
+
+    amount = _d(stored)
+
+    if amount <= 0:
+        return Decimal("0.00")
+
+    return _money(amount)
+
+
+# ============================================================
+# SCORE HELPERS
+# ============================================================
+
+def _fetch_match_scores(match_ids):

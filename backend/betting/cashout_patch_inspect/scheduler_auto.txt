@@ -1,0 +1,291 @@
+        "slips_voided": total_slip_voided,
+    }
+
+
+# ============================================================
+# AUTO LIVE CASHOUT
+# ============================================================
+
+def auto_update_live_cashouts(session=None):
+    """
+    Update cashout for:
+
+        - normal pending Bets
+        - pending BetSlips
+
+    IMPORTANT:
+
+    BetSlip cashout is NOT dependent on there being a normal
+    Bet record.
+
+    This fixes accumulator-only cashout updates.
+    """
+
+    session = session or db.session
+
+    now = _utcnow()
+
+    # ========================================================
+    # 1. FIND PENDING NORMAL BET MATCH IDS
+    # ========================================================
+
+    normal_bet_match_ids = {
+        row[0]
+        for row in (
+            session.query(Bet.match_id)
+            .filter(
+                Bet.status == "pending",
+                Bet.match_id.isnot(None),
+            )
+            .distinct()
+            .all()
+        )
+    }
+
+    # ========================================================
+    # 2. FIND PENDING BETSLIP SELECTIONS
+    # ========================================================
+
+    pending_slip_selections = (
+        session.query(BetSelection)
+        .join(
+            BetSlip,
+            BetSlip.id
+            == BetSelection.betslip_id,
+        )
+        .filter(
+            BetSlip.status == "pending",
+            BetSelection.status == "pending",
+        )
+        .all()
+    )
+
+    slip_bookmark_ids = {
+        sel.bookmark_id
+        for sel in pending_slip_selections
+        if sel.bookmark_id
+    }
+
+    # ========================================================
+    # 3. LOAD BOOKMARKS FOR BETSLIPS
+    # ========================================================
+
+    slip_bookmarks = []
+
+    if slip_bookmark_ids:
+
+        slip_bookmarks = (
+            session.query(Bookmark)
+            .filter(
+                Bookmark.match_id.in_(
+                    slip_bookmark_ids
+                )
+            )
+            .all()
+        )
+
+    slip_bookmarks_map = {
+        b.match_id: b
+        for b in slip_bookmarks
+        if getattr(b, "match_id", None)
+        is not None
+    }
+
+    # ========================================================
+    # 4. GET MATCH IDS FROM BETSLIP BOOKMARKS
+    # ========================================================
+
+    slip_match_ids = {
+        b.match_id
+        for b in slip_bookmarks
+        if getattr(b, "match_id", None)
+    }
+
+    # Legacy fallback
+    for bookmark_id in slip_bookmark_ids:
+
+        if bookmark_id not in slip_bookmarks_map:
+
+            slip_match_ids.add(
+                bookmark_id
+            )
+
+    # ========================================================
+    # 5. COMBINE ALL MATCH IDS
+    # ========================================================
+
+    all_match_ids = (
+        normal_bet_match_ids
+        | slip_match_ids
+    )
+
+    if not all_match_ids:
+
+        return {
+            "bets_updated": 0,
+            "slips_updated": 0,
+        }
+
+    # ========================================================
+    # 6. LOAD ONLY REQUIRED MATCHES
+    #
+    # Include both IN_PLAY and TIMED/SCHEDULED because
+    # accumulator cashout needs the unstarted leg's probability.
+    # ========================================================
+
+    relevant_matches = (
+        session.query(Match)
+        .filter(
+            Match.id.in_(
+                list(all_match_ids)
+            ),
+            or_(
+                Match.status.in_(
+                    [
+                        "IN_PLAY",
+                        "TIMED",
+                        "SCHEDULED",
+                        "UPCOMING",
+                        "PENDING",
+                        "FINISHED",
+                    ]
+                ),
+                Match.status.is_(None),
+            ),
+            or_(
+                Match.utcdate.is_(None),
+                Match.utcdate <= now,
+            ),
+        )
+        .all()
+    )
+
+    matches_map = {
+        m.id: m
+        for m in relevant_matches
+    }
+
+    # ========================================================
+    # 7. LOAD BOOKMARKS FOR NORMAL BETS
+    # ========================================================
+
+    normal_bet_bookmark_ids = {
+        match_id
+        for match_id in normal_bet_match_ids
+    }
+
+    normal_bookmarks = []
+
+    if normal_bet_bookmark_ids:
+
+        normal_bookmarks = (
+            session.query(Bookmark)
+            .filter(
+                Bookmark.match_id.in_(
+                    normal_bet_bookmark_ids
+                )
+            )
+            .all()
+        )
+
+    bookmarks_map = {
+        b.match_id: b
+        for b in (
+            slip_bookmarks
+            + normal_bookmarks
+        )
+        if getattr(b, "match_id", None)
+        is not None
+    }
+
+    total_bets = 0
+    total_slips = 0
+
+    # ========================================================
+    # 8. NORMAL BET CASHOUT
+    # ========================================================
+
+    last_id = 0
+
+    while True:
+
+        bets = (
+            session.query(Bet)
+            .enable_eagerloads(False)
+            .filter(
+                Bet.status == "pending",
+                Bet.id > last_id,
+                Bet.match_id.in_(
+                    list(normal_bet_match_ids)
+                ),
+            )
+            .order_by(Bet.id)
+            .limit(BATCH_SIZE)
+            .all()
+        )
+
+        if not bets:
+            break
+
+        for bet in bets:
+
+            if update_bet_cashout(
+                session,
+                bet,
+                matches_map,
+                bookmarks_map,
+                now,
+            ):
+
+                total_bets += 1
+
+        last_id = bets[-1].id
+
+        session.flush()
+
+    # ========================================================
+    # 9. BETSLIP CASHOUT
+    #
+    # IMPORTANT:
+    #
+    # Every pending slip is evaluated, even if there are no
+    # normal Bet rows.
+    # ========================================================
+
+    last_id = 0
+
+    while True:
+
+        slips = (
+            session.query(BetSlip)
+            .enable_eagerloads(False)
+            .filter(
+                BetSlip.status == "pending",
+                BetSlip.id > last_id,
+            )
+            .order_by(BetSlip.id)
+            .limit(BATCH_SIZE)
+            .all()
+        )
+
+        if not slips:
+            break
+
+        for slip in slips:
+
+            if update_betslip_cashout(
+                session,
+                slip,
+                matches_map,
+                bookmarks_map,
+                now,
+            ):
+
+                total_slips += 1
+
+        last_id = slips[-1].id
+
+        session.flush()
+
+    return {
+        "bets_updated": total_bets,

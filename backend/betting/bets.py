@@ -19,8 +19,11 @@ from betting.models import (
     Transaction,
     Match,
 )
-from betting.utils import to_decimal
-
+from .utils import (
+    to_decimal,
+    evaluate_selection_win,
+    parse_over_under_threshold,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -489,6 +492,265 @@ def _client_odds_validate(
 # ============================================================
 # CASHOUT HELPERS
 # ============================================================
+# ============================================================
+# BETSLIP CASHOUT VALIDATION
+# ============================================================
+
+def _validate_betslip_cashout(slip):
+    """
+    Final server-side validation before paying accumulator
+    cashout.
+
+    Returns:
+
+        (True, "")
+        (False, reason)
+
+    A single definitively lost selection makes the entire
+    accumulator unavailable for cashout.
+    """
+
+    selections = list(
+        getattr(
+            slip,
+            "selections",
+            [],
+        )
+        or []
+    )
+
+    if not selections:
+        return False, "no selections"
+
+    for sel in selections:
+
+        sel_status = (
+            getattr(
+                sel,
+                "status",
+                "",
+            )
+            or ""
+        ).lower()
+
+        # Already known lost
+        if sel_status in (
+            "lost",
+            "voided",
+        ):
+            return (
+                False,
+                "selection already lost",
+            )
+
+        # Already won is fine
+        if sel_status == "won":
+            continue
+
+        bookmark = getattr(
+            sel,
+            "bookmark",
+            None,
+        )
+
+        match = None
+
+        if bookmark:
+            match = getattr(
+                bookmark,
+                "match",
+                None,
+            )
+
+        # Fallback through Bookmark.match_id
+        if not match and bookmark:
+
+            match_id = getattr(
+                bookmark,
+                "match_id",
+                None,
+            )
+
+            if match_id:
+
+                match = (
+                    db.session.query(Match)
+                    .filter_by(id=match_id)
+                    .first()
+                )
+
+        # Final fallback
+        if not match and getattr(
+            sel,
+            "bookmark_id",
+            None,
+        ):
+
+            match = (
+                db.session.query(Match)
+                .filter_by(
+                    id=sel.bookmark_id
+                )
+                .first()
+            )
+
+        if not match:
+            return (
+                False,
+                "match unavailable",
+            )
+
+        match_status = (
+            getattr(
+                match,
+                "status",
+                "",
+            )
+            or ""
+        ).lower()
+
+        home = int(
+            getattr(
+                match,
+                "home_score",
+                0,
+            )
+            or 0
+        )
+
+        away = int(
+            getattr(
+                match,
+                "away_score",
+                0,
+            )
+            or 0
+        )
+
+        selection = (
+            getattr(
+                sel,
+                "selection",
+                "",
+            )
+            or ""
+        )
+
+        # ----------------------------------------------------
+        # FINISHED
+        # ----------------------------------------------------
+
+        if match_status == "finished":
+
+            result = evaluate_selection_win(
+                home,
+                away,
+                selection,
+            )
+
+            if result is False:
+
+                sel.status = "lost"
+
+                return (
+                    False,
+                    "selection lost",
+                )
+
+            if result is True:
+
+                sel.status = "won"
+
+                continue
+
+            return (
+                False,
+                "selection result unavailable",
+            )
+
+        # ----------------------------------------------------
+        # LIVE — check markets that can already be
+        # mathematically dead.
+        # ----------------------------------------------------
+
+        if match_status == "in_play":
+
+            sel_lower = selection.lower()
+
+            # OVER
+            if sel_lower.startswith("over"):
+
+                threshold = parse_over_under_threshold(
+                    sel_lower
+                )
+
+                if threshold is not None:
+
+                    total = home + away
+
+                    # Over is already impossible only if
+                    # the match has actually finished.
+                    #
+                    # While IN_PLAY, do NOT mark it lost.
+                    pass
+
+            # UNDER
+            elif sel_lower.startswith("under"):
+
+                threshold = parse_over_under_threshold(
+                    sel_lower
+                )
+
+                if threshold is not None:
+
+                    total = home + away
+
+                    # Under is definitely lost once the
+                    # score reaches the line.
+                    if Decimal(str(total)) >= Decimal(
+                        str(threshold)
+                    ):
+
+                        sel.status = "lost"
+
+                        return (
+                            False,
+                            "under selection already lost",
+                        )
+
+            # BTTS
+            elif sel_lower in (
+                "gg_odds",
+                "btts",
+            ):
+
+                # If the match is still in-play and one side
+                # has not scored, BTTS is still alive.
+                pass
+
+            # NO BTTS
+            elif sel_lower in (
+                "ng_odds",
+                "no_btts",
+            ):
+
+                if home > 0 and away > 0:
+
+                    sel.status = "lost"
+
+                    return (
+                        False,
+                        "no-btts already lost",
+                    )
+
+            # 1X2
+            #
+            # Being behind does NOT mean lost while IN_PLAY.
+            # The match can still change.
+            #
+            # Therefore do nothing here.
+
+    return True, ""
 
 def _pending_cashout_amount(stake):
     """
@@ -504,17 +766,34 @@ def _pending_cashout_amount(stake):
 
 
 def _cashout_amount_for_betslip(slip):
+    """
+    Return the scheduler-calculated cashout.
+
+    IMPORTANT:
+    A pending BetSlip does NOT automatically receive 95%
+    of its stake.
+
+    The current_cashout value must have been calculated by
+    the cashout engine.
+    """
+
     status = (
-        getattr(slip, "status", "") or ""
+        getattr(
+            slip,
+            "status",
+            "",
+        )
+        or ""
     ).lower()
 
-    if status == "lost":
+    if status in (
+        "lost",
+        "voided",
+        "settled",
+        "cancelled",
+        "cashed_out",
+    ):
         return Decimal("0.00")
-
-    if status == "pending":
-        return _pending_cashout_amount(
-            slip.stake
-        )
 
     stored = getattr(
         slip,
@@ -1668,6 +1947,26 @@ def cashout(bet_id):
                 ):
                     raise BetRequestError(
                         "cannot cashout",
+                        400,
+                    )
+                # ------------------------------------------------
+                # FINAL SERVER-SIDE VALIDATION
+                # ------------------------------------------------
+
+                valid, reason = _validate_betslip_cashout(
+                    slip
+                )
+
+                if not valid:
+
+                    slip.current_cashout = (
+                        Decimal("0.00")
+                    )
+
+                    db.session.add(slip)
+
+                    raise BetRequestError(
+                        "cashout unavailable: " + reason,
                         400,
                     )
 

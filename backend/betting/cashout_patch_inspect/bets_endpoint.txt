@@ -1,0 +1,251 @@
+    })
+
+
+# ============================================================
+# CASHOUT
+# ============================================================
+
+@bet_bp.route(
+    "/cashout/<int:bet_id>",
+    methods=["POST"],
+)
+@jwt_required()
+def cashout(bet_id):
+
+    try:
+        uid = int(
+            get_jwt_identity()
+        )
+
+    except (TypeError, ValueError):
+        return jsonify({
+            "error": "invalid user identity"
+        }), 401
+
+    try:
+
+        with db.session.begin():
+
+            # ------------------------------------------------
+            # TRY BETSLIP FIRST
+            # ------------------------------------------------
+
+            slip = (
+                db.session.query(BetSlip)
+                .with_for_update()
+                .filter_by(id=bet_id)
+                .first()
+            )
+
+            if slip:
+
+                if int(slip.user_id) != int(uid):
+                    raise BetRequestError(
+                        "bet not found",
+                        404,
+                    )
+
+                status = (
+                    slip.status or ""
+                ).lower()
+
+                if (
+                    getattr(
+                        slip,
+                        "cashed_out",
+                        False,
+                    )
+                    or status != "pending"
+                ):
+                    raise BetRequestError(
+                        "cannot cashout",
+                        400,
+                    )
+
+                user = (
+                    db.session.query(User)
+                    .with_for_update()
+                    .filter_by(id=uid)
+                    .first()
+                )
+
+                if not user:
+                    raise BetRequestError(
+                        "user not found",
+                        404,
+                    )
+
+                amount = (
+                    _cashout_amount_for_betslip(
+                        slip
+                    )
+                )
+
+                if amount <= 0:
+                    raise BetRequestError(
+                        "cashout unavailable",
+                        400,
+                    )
+
+                slip.cashed_out = True
+                slip.status = "cashed_out"
+                slip.current_cashout = amount
+
+                user.balance = _money(
+                    _d(user.balance)
+                    + amount
+                )
+
+                transaction = Transaction(
+                    user_id=uid,
+                    type="cashout",
+                    amount=amount,
+                    balance_after=user.balance,
+                    created=_now_utc(),
+                )
+
+                db.session.add(
+                    transaction
+                )
+
+                db.session.flush()
+
+                slip.cashout_tx_id = (
+                    transaction.id
+                )
+
+                return jsonify({
+                    "msg": "cashed out",
+                    "amount": str(amount),
+                    "balance": str(
+                        user.balance
+                    ),
+                    "cashout_id": (
+                        transaction.id
+                    ),
+                    "created": (
+                        transaction.created.isoformat()
+                    ),
+                })
+
+            # ------------------------------------------------
+            # LEGACY SINGLE BET
+            # ------------------------------------------------
+
+            bet = (
+                db.session.query(Bet)
+                .with_for_update()
+                .filter_by(id=bet_id)
+                .first()
+            )
+
+            if not bet:
+                raise BetRequestError(
+                    "bet not found",
+                    404,
+                )
+
+            if int(bet.user_id) != int(uid):
+                raise BetRequestError(
+                    "bet not found",
+                    404,
+                )
+
+            status = (
+                bet.status or ""
+            ).lower()
+
+            if (
+                getattr(
+                    bet,
+                    "cashed_out",
+                    False,
+                )
+                or status != "pending"
+            ):
+                raise BetRequestError(
+                    "cannot cashout",
+                    400,
+                )
+
+            user = (
+                db.session.query(User)
+                .with_for_update()
+                .filter_by(id=uid)
+                .first()
+            )
+
+            if not user:
+                raise BetRequestError(
+                    "user not found",
+                    404,
+                )
+
+            amount = (
+                _cashout_amount_for_legacy_bet(
+                    bet
+                )
+            )
+
+            if amount <= 0:
+                raise BetRequestError(
+                    "cashout unavailable",
+                    400,
+                )
+
+            bet.cashed_out = True
+            bet.status = "cashed_out"
+            bet.current_cashout = amount
+
+            user.balance = _money(
+                _d(user.balance)
+                + amount
+            )
+
+            transaction = Transaction(
+                user_id=uid,
+                type="cashout",
+                amount=amount,
+                balance_after=user.balance,
+                created=_now_utc(),
+            )
+
+            db.session.add(
+                transaction
+            )
+
+            db.session.flush()
+
+            bet.cashout_tx_id = (
+                transaction.id
+            )
+
+            return jsonify({
+                "msg": "cashed out",
+                "amount": str(amount),
+                "balance": str(
+                    user.balance
+                ),
+                "cashout_id": (
+                    transaction.id
+                ),
+                "created": (
+                    transaction.created.isoformat()
+                ),
+            })
+
+    except BetRequestError as exc:
+
+        db.session.rollback()
+
+        return jsonify({
+            "error": exc.message
+        }), exc.status
+
+    except Exception:
+
+        db.session.rollback()
+
+        logger.exception(
+            "Cashout failed "
+            "user=%s bet_id=%s",

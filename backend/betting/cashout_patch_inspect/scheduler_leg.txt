@@ -1,0 +1,306 @@
+def _leg_probability(
+    sel,
+    match,
+    bookmark,
+):
+    """
+    Calculate current probability of one accumulator leg.
+
+    WON:
+        1.00
+
+    LOST:
+        0.00
+
+    FINISHED:
+        evaluate final score
+
+    IN_PLAY:
+        live probability
+
+    TIMED / SCHEDULED:
+        pre-match probability
+    """
+
+    selection = (
+        getattr(
+            sel,
+            "selection",
+            "",
+        )
+        or ""
+    ).lower()
+
+    status = (
+        getattr(
+            match,
+            "status",
+            "",
+        )
+        or ""
+    ).lower()
+
+    # ========================================================
+    # DATABASE SELECTION STATUS
+    # ========================================================
+
+    if sel.status == "won":
+        return Decimal("1.00")
+
+    if sel.status in (
+        "lost",
+        "voided",
+    ):
+        return Decimal("0.00")
+
+    # ========================================================
+    # FINISHED MATCH
+    # ========================================================
+
+    if status == "finished":
+
+        if (
+            match.home_score is None
+            or match.away_score is None
+        ):
+            return Decimal("0.01")
+
+        result = evaluate_selection_win(
+            match.home_score,
+            match.away_score,
+            selection,
+        )
+
+        if result is True:
+            return Decimal("1.00")
+
+        if result is False:
+            return Decimal("0.00")
+
+        return Decimal("0.01")
+
+    # ========================================================
+    # PRE-MATCH
+    # ========================================================
+
+    if status in (
+        "timed",
+        "scheduled",
+        "upcoming",
+        "pending",
+        "not_started",
+        "",
+    ):
+
+        # ----------------------------------------------------
+        # Prefer model probability from Bookmark
+        # ----------------------------------------------------
+
+        if bookmark:
+
+            try:
+
+                value = None
+
+                if selection in (
+                    "home_odds",
+                    "home",
+                ):
+
+                    value = getattr(
+                        bookmark,
+                        "p_home",
+                        None,
+                    )
+
+                elif selection in (
+                    "draw_odds",
+                    "draw",
+                ):
+
+                    value = getattr(
+                        bookmark,
+                        "p_draw",
+                        None,
+                    )
+
+                elif selection in (
+                    "away_odds",
+                    "away",
+                ):
+
+                    value = getattr(
+                        bookmark,
+                        "p_away",
+                        None,
+                    )
+
+                if value is not None:
+
+                    value = to_decimal(
+                        value,
+                        quantize=False,
+                    )
+
+                    if value > 1:
+                        value /= Decimal("100")
+
+                    return max(
+                        Decimal("0.01"),
+                        min(
+                            Decimal("0.99"),
+                            value,
+                        ),
+                    )
+
+            except Exception:
+                pass
+
+        # ----------------------------------------------------
+        # Odds fallback
+        # ----------------------------------------------------
+
+        try:
+
+            odds = to_decimal(
+                getattr(
+                    sel,
+                    "odds",
+                    None,
+                ),
+                quantize=False,
+            )
+
+            if odds > 0:
+
+                probability = (
+                    Decimal("1")
+                    / odds
+                )
+
+                return max(
+                    Decimal("0.01"),
+                    min(
+                        Decimal("0.99"),
+                        probability,
+                    ),
+                )
+
+        except Exception:
+            pass
+
+        return Decimal("0.50")
+
+    # ========================================================
+    # LIVE MATCH
+    # ========================================================
+
+    if status == "in_play":
+
+        class TempBet:
+            pass
+
+        temp = TempBet()
+
+        temp.status = "pending"
+        temp.cashed_out = False
+        temp.selection = sel.selection
+        temp.odds = sel.odds
+        temp.potential = Decimal("1.00")
+        temp.stake = Decimal("1.00")
+
+        try:
+
+            live_value = calculate_live_cashout(
+                temp,
+                match,
+                bookmark,
+            )
+
+            probability = to_decimal(
+                live_value,
+                quantize=False,
+            )
+
+            # calculate_live_cashout applies approximately
+            # 8% margin. Remove that effect so the value can
+            # be used as an approximate probability.
+            probability /= Decimal("0.92")
+
+            return max(
+                Decimal("0.01"),
+                min(
+                    Decimal("0.99"),
+                    probability,
+                ),
+            )
+
+        except Exception:
+
+            return Decimal("0.01")
+
+    return Decimal("0.50")
+
+
+# ============================================================
+# CORRELATION
+# ============================================================
+
+def _correlation_factor(legs):
+    """
+    Reduce cashout slightly when selections are correlated.
+    """
+
+    factor = Decimal("1.00")
+
+    match_counts = {}
+    family_counts = {}
+
+    for leg in legs:
+
+        match_id = leg["match_id"]
+        family = leg["family"]
+
+        match_counts[match_id] = (
+            match_counts.get(match_id, 0)
+            + 1
+        )
+
+        family_counts[family] = (
+            family_counts.get(family, 0)
+            + 1
+        )
+
+    # Multiple markets on same match
+    for count in match_counts.values():
+
+        if count > 1:
+
+            factor *= (
+                Decimal("0.88")
+                ** (count - 1)
+            )
+
+    # Same market family
+    for count in family_counts.values():
+
+        if count > 1:
+
+            factor *= (
+                Decimal("0.95")
+                ** (count - 1)
+            )
+
+    if len(legs) >= 4:
+        factor *= Decimal("0.98")
+
+    return max(
+        Decimal("0.50"),
+        min(
+            Decimal("1.00"),
+            factor,
+        ),
+    )
+
+
+# ============================================================
