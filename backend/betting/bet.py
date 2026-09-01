@@ -117,12 +117,12 @@ def init_services():
     # Start the scheduler.
     scheduler_thread = start_scheduler(
         app,
-        interval_seconds=60,
+        interval_seconds=1,
         stop_event=stop_event,
     )
 
     print(
-        "✅ Betting scheduler started | interval=60s"
+        "✅ Betting scheduler started | interval=1s"
     )
 
     return scheduler_thread
