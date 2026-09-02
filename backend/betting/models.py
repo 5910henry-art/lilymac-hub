@@ -362,3 +362,79 @@ class MpesaTransaction(db.Model):
             lazy="selectin",
         ),
     )
+# ============================================================
+# HOUSE WALLET
+# ============================================================
+
+class HouseWallet(db.Model):
+    __tablename__ = "house_wallet"
+
+    id = db.Column(
+        db.Integer,
+        primary_key=True,
+    )
+
+    balance = db.Column(
+        Numeric(14, 2),
+        nullable=False,
+        default=Decimal("0.00"),
+    )
+
+    created = db.Column(
+        db.DateTime,
+        default=datetime.utcnow,
+        nullable=False,
+    )
+
+    updated = db.Column(
+        db.DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
+    )
+
+
+# ============================================================
+# HOUSE WALLET TRANSACTION
+# ============================================================
+
+class HouseTransaction(db.Model):
+    __tablename__ = "house_transaction"
+
+    id = db.Column(
+        db.Integer,
+        primary_key=True,
+        autoincrement=True,
+    )
+
+    type = db.Column(
+        db.String(50),
+        nullable=False,
+        index=True,
+    )
+
+    amount = db.Column(
+        Numeric(14, 2),
+        nullable=False,
+    )
+
+    balance_after = db.Column(
+        Numeric(14, 2),
+        nullable=False,
+    )
+
+    reference = db.Column(
+        db.String(100),
+        index=True,
+    )
+
+    description = db.Column(
+        db.String(255),
+    )
+
+    created = db.Column(
+        db.DateTime,
+        default=datetime.utcnow,
+        nullable=False,
+        index=True,
+    )

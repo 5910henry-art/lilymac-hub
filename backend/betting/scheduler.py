@@ -18,6 +18,8 @@ from betting.models import (
     Bookmark,
     User,
     Transaction,
+    HouseWallet,
+    HouseTransaction,
 )
 
 from betting.utils import (
@@ -47,6 +49,77 @@ _missing_cashout_logged = set()
 
 def _utcnow():
     return datetime.now(timezone.utc)
+
+
+def _debit_house(session, amount, reference=None, description=None, transaction_type="bet_payout"):
+    """
+    Debit the house wallet for a normal football payout/refund.
+
+    Uses the existing scheduler database session so the house
+    debit remains part of the same settlement transaction.
+    """
+    amount = to_decimal(amount)
+
+    if amount is None:
+        raise ValueError("invalid house debit amount")
+
+    amount = Decimal(str(amount)).quantize(
+        Decimal("0.01"),
+        rounding=ROUND_DOWN,
+    )
+
+    if amount <= Decimal("0.00"):
+        raise ValueError("invalid house debit amount")
+
+    house = (
+        session.query(HouseWallet)
+        .with_for_update()
+        .filter(HouseWallet.id == 1)
+        .first()
+    )
+
+    if not house:
+        raise RuntimeError(
+            "House wallet is not initialized"
+        )
+
+    current_balance = Decimal(
+        str(to_decimal(house.balance))
+    ).quantize(
+        Decimal("0.01"),
+        rounding=ROUND_DOWN,
+    )
+
+    if current_balance < amount:
+        raise RuntimeError(
+            "house wallet has insufficient funds"
+        )
+
+    house.balance = (
+        current_balance - amount
+    ).quantize(
+        Decimal("0.01"),
+        rounding=ROUND_DOWN,
+    )
+
+    session.add(
+        HouseTransaction(
+            type=transaction_type,
+            amount=amount,
+            balance_after=house.balance,
+            reference=(
+                str(reference)
+                if reference is not None
+                else None
+            ),
+            description=(
+                description
+                or "Normal football bet payout"
+            ),
+        )
+    )
+
+    return house
 
 
 # ============================================================
@@ -152,6 +225,13 @@ def settle_single_bet(session, bet, match):
 
     if won is True:
 
+        _debit_house(
+            session,
+            bet.potential,
+            reference=f"bet:{bet.id}",
+            description="Normal football single bet payout",
+        )
+
         bet.status = "won"
 
         user.balance = (
@@ -255,6 +335,8 @@ def settle_bets_for_matches(session, finished_matches):
                         bet.id,
                         e,
                     )
+
+                    raise
 
             last_id = bets[-1].id
 
@@ -644,6 +726,14 @@ def settle_betslips(
                     )
                 )
 
+                _debit_house(
+                    session,
+                    stake,
+                    reference=f"betslip:{slip.id}",
+                    description="Normal football accumulator stake refund",
+                    transaction_type="bet_refund",
+                )
+
                 user.balance = (
                     to_decimal(user.balance)
                     + stake
@@ -711,6 +801,13 @@ def settle_betslips(
                     slip.potential
                 )
 
+                _debit_house(
+                    session,
+                    potential,
+                    reference=f"betslip:{slip.id}",
+                    description="Normal football accumulator payout",
+                )
+
                 user.balance = (
                     to_decimal(user.balance)
                     + potential
@@ -738,13 +835,12 @@ def settle_betslips(
             settled += 1
 
         except Exception as e:
-
             logger.exception(
                 "Error settling BetSlip %s: %s",
                 slip.id,
                 e,
             )
-
+            raise
     return settled, voided
 
 

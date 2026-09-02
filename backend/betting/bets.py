@@ -18,6 +18,8 @@ from betting.models import (
     Bet,
     Transaction,
     Match,
+    HouseWallet,
+    HouseTransaction,
 )
 from .utils import (
     to_decimal,
@@ -86,6 +88,116 @@ def _money(value):
         rounding=ROUND_DOWN,
     )
 
+def _credit_house(stake, reference=None, description=None):
+    """
+    Credit the house wallet with a normal football bet stake.
+
+    Must run inside the existing database transaction.
+    """
+    stake = _money(stake)
+
+    if stake <= Decimal("0.00"):
+        raise BetRequestError(
+            "invalid house credit amount",
+            400,
+        )
+
+    house = (
+        db.session.query(HouseWallet)
+        .with_for_update()
+        .filter(HouseWallet.id == 1)
+        .first()
+    )
+
+    if not house:
+        raise RuntimeError(
+            "House wallet is not initialized"
+        )
+
+    house.balance = _money(
+        _d(house.balance) + stake
+    )
+
+    house_transaction = HouseTransaction(
+        type="bet_stake",
+        amount=stake,
+        balance_after=house.balance,
+        reference=(
+            str(reference)
+            if reference is not None
+            else None
+        ),
+        description=(
+            description
+            or "Normal football bet stake received"
+        ),
+    )
+
+    db.session.add(house_transaction)
+
+    return house
+
+
+def _debit_house(amount, reference=None, description=None, transaction_type="bet_payout"):
+    """
+    Debit the house wallet for a payout or refund.
+
+    Must run inside the existing database transaction.
+    The house wallet row is locked to prevent concurrent
+    payouts from using the same balance.
+    """
+    amount = _money(amount)
+
+    if amount <= Decimal("0.00"):
+        raise BetRequestError(
+            "invalid house debit amount",
+            400,
+        )
+
+    house = (
+        db.session.query(HouseWallet)
+        .with_for_update()
+        .filter(HouseWallet.id == 1)
+        .first()
+    )
+
+    if not house:
+        raise RuntimeError(
+            "House wallet is not initialized"
+        )
+
+    current_balance = _money(
+        _d(house.balance)
+    )
+
+    if current_balance < amount:
+        raise BetRequestError(
+            "house wallet has insufficient funds",
+            503,
+        )
+
+    house.balance = _money(
+        current_balance - amount
+    )
+
+    house_transaction = HouseTransaction(
+        type=transaction_type,
+        amount=amount,
+        balance_after=house.balance,
+        reference=(
+            str(reference)
+            if reference is not None
+            else None
+        ),
+        description=(
+            description
+            or "Normal football bet payout"
+        ),
+    )
+
+    db.session.add(house_transaction)
+
+    return house
 
 def _get_config_decimal(key):
     value = current_app.config.get(
@@ -1012,6 +1124,13 @@ def _handle_single_bet(
     )
 
     db.session.add(transaction)
+
+    _credit_house(
+       stake,
+       reference=f"bet:{bet.id}",
+       description="Normal football single bet stake",
+    )
+
     db.session.flush()
 
     return {
@@ -1191,6 +1310,12 @@ def _handle_accumulator_bet(
     )
 
     db.session.add(transaction)
+    _credit_house(
+       stake,
+       reference=f"betslip:{betslip.id}",
+       description="Normal football accumulator bet stake",
+    )
+
     db.session.flush()
 
     return {
@@ -1272,6 +1397,11 @@ def place_bet():
 
         if previous is not None:
             return jsonify(previous), 200
+
+        # _read_idempotency() performs a SELECT, which starts
+        # an SQLAlchemy transaction. End that read-only transaction
+        # before starting the atomic bet transaction below.
+        db.session.rollback()
 
     # --------------------------------------------------------
     # STAKE
@@ -2016,6 +2146,13 @@ def cashout(bet_id):
                     transaction
                 )
 
+                _debit_house(
+                    amount,
+                    reference=f"cashout:slip:{slip.id}",
+                    description="Normal football accumulator cashout",
+                    transaction_type="cashout",
+                )
+
                 db.session.flush()
 
                 slip.cashout_tx_id = (
@@ -2120,6 +2257,13 @@ def cashout(bet_id):
 
             db.session.add(
                 transaction
+            )
+
+            _debit_house(
+                amount,
+                reference=f"cashout:bet:{bet.id}",
+                description="Normal football single bet cashout",
+                transaction_type="cashout",
             )
 
             db.session.flush()
