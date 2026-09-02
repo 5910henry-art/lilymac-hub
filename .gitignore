@@ -12,3 +12,7 @@ frontend/.env.local
 *.zip
 *.tgz
 ngrok
+.vercel
+.env*.local
+.env.local
+backend/core

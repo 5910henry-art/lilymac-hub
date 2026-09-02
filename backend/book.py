@@ -23,8 +23,9 @@ Features:
     - GG / NG
     - Prediction deduplication
     - Duplicate ID protection
-    - Safe transactional bookmark rebuild
+    - Safe transactional bookmark update
     - Automatic odds_event_id column creation
+    - Preserves bookmarks referenced by bet_selection
 """
 
 import re
@@ -33,7 +34,6 @@ import unicodedata
 import pandas as pd
 from rapidfuzz import fuzz
 from sqlalchemy import create_engine, text
-
 from config2 import DATABASE_URL, DB_SCHEMA
 
 
@@ -65,7 +65,7 @@ print("=" * 70)
 print("LILYMAC BOOKMARK GENERATOR")
 print("=" * 70)
 
-print(f"\n[CONFIG]")
+print("\n[CONFIG]")
 print(f"Season:                  {SEASON}")
 print(f"Time tolerance:          {TIME_TOLERANCE_MINUTES} minutes")
 print(f"Team threshold:          {TEAM_MATCH_THRESHOLD}")
@@ -829,6 +829,7 @@ duplicate_match_ids = df_matched[
 
 
 if not duplicate_match_ids.empty:
+
     print(
         duplicate_match_ids[
             [
@@ -882,8 +883,8 @@ if not duplicate_odds_ids.empty:
                 "home_team",
                 "away_team",
                 "match_time"
-               ]
-            ].to_string(index=False)
+            ]
+        ].to_string(index=False)
     )
 
     raise RuntimeError(
@@ -1376,47 +1377,48 @@ print(
 
 
 # ============================================================
-# DATABASE COLUMN CHECK
+# SAFE DATABASE UPDATE
 # ============================================================
 
 print(
-    "\n[7/7] Safely rebuilding bookmark..."
+    "\n[7/7] Safely updating bookmark..."
 )
 
 
-# ============================================================
-# SAFE TRANSACTION
-# ============================================================
-
 """
-CRITICAL:
+CRITICAL DATABASE DESIGN:
 
-Nothing has been deleted yet.
+bookmark.match_id is the PRIMARY KEY.
 
-All matching and validation happened above.
+bet_selection.bookmark_id references:
 
-Now we open ONE transaction.
+    bookmark(match_id)
 
-Inside that transaction:
+Therefore we CANNOT do:
 
-    1. DELETE existing bookmark
-    2. INSERT new bookmark rows
-    3. VERIFY count
+    DELETE FROM bookmark
 
-If anything fails:
+because existing bets may reference those rows.
 
-    PostgreSQL rolls the entire transaction back.
+Instead:
 
-Therefore the old bookmark remains intact.
+    UPDATE existing bookmarks
+    INSERT new bookmarks
+    DELETE stale bookmarks ONLY when unreferenced
+
+Everything happens inside ONE transaction.
+
+If anything fails, PostgreSQL rolls back everything.
 """
+
 
 try:
 
     with engine.begin() as conn:
 
-        # ----------------------------------------------------
-        # Delete only after ALL validation passed.
-        # ----------------------------------------------------
+        # ====================================================
+        # EXISTING BOOKMARK COUNT
+        # ====================================================
 
         old_count = conn.execute(
             text("""
@@ -1432,30 +1434,628 @@ try:
         )
 
 
-        conn.execute(
+        # ====================================================
+        # EXISTING MATCH IDs
+        # ====================================================
+
+        existing_rows = conn.execute(
             text("""
-                DELETE FROM henry_schema.bookmark
+                SELECT match_id
+                FROM henry_schema.bookmark
             """)
+        ).fetchall()
+
+
+        existing_match_ids = {
+            int(row[0])
+            for row in existing_rows
+        }
+
+
+        # ====================================================
+        # NEW MATCH IDs
+        # ====================================================
+
+        new_match_ids = {
+            int(value)
+            for value in df_matched["match_id"]
+        }
+
+
+        update_ids = (
+            existing_match_ids
+            &
+            new_match_ids
         )
 
 
-        # ----------------------------------------------------
-        # Insert new rows using SAME transaction connection.
-        # ----------------------------------------------------
-
-        df_matched.to_sql(
-            "bookmark",
-            con=conn,
-            schema=DB_SCHEMA,
-            if_exists="append",
-            index=False,
-            method="multi"
+        insert_ids = (
+            new_match_ids
+            -
+            existing_match_ids
         )
 
 
-        # ----------------------------------------------------
-        # Verify inside same transaction.
-        # ----------------------------------------------------
+        stale_ids = (
+            existing_match_ids
+            -
+            new_match_ids
+        )
+
+
+        print(
+            f"   Existing matches to update: "
+            f"{len(update_ids)}"
+        )
+
+        print(
+            f"   New matches to insert:       "
+            f"{len(insert_ids)}"
+        )
+
+        print(
+            f"   Potential stale bookmarks:   "
+            f"{len(stale_ids)}"
+        )
+
+
+        # ====================================================
+        # UPDATE EXISTING BOOKMARKS
+        # ====================================================
+
+        update_sql = text("""
+            UPDATE henry_schema.bookmark
+            SET
+                odds_event_id = :odds_event_id,
+                league = :league,
+                home_team = :home_team,
+                away_team = :away_team,
+                match_time = :match_time,
+
+                home_odds = :home_odds,
+                draw_odds = :draw_odds,
+                away_odds = :away_odds,
+
+                over05 = :over05,
+                under05 = :under05,
+
+                over15 = :over15,
+                under15 = :under15,
+
+                over25 = :over25,
+                under25 = :under25,
+
+                over35 = :over35,
+                under35 = :under35,
+
+                gg_odds = :gg_odds,
+                ng_odds = :ng_odds,
+
+                p_home = :p_home,
+                p_draw = :p_draw,
+                p_away = :p_away,
+
+                generated_at = :generated_at,
+
+                "EV_home" = :EV_home,
+                "EV_draw" = :EV_draw,
+                "EV_away" = :EV_away,
+
+                "Best" = :Best,
+                "EV" = :EV
+
+            WHERE match_id = :match_id
+        """)
+
+
+        update_count = 0
+
+
+        if update_ids:
+
+            update_rows = df_matched[
+                df_matched["match_id"].isin(
+                    update_ids
+                )
+            ].copy()
+
+
+            for _, row in update_rows.iterrows():
+
+                params = {
+                    "match_id":
+                        int(row["match_id"]),
+
+                    "odds_event_id":
+                        str(row["odds_event_id"]),
+
+                    "league":
+                        row["league"],
+
+                    "home_team":
+                        row["home_team"],
+
+                    "away_team":
+                        row["away_team"],
+
+                    "match_time":
+                        row["match_time"],
+
+                    "home_odds":
+                        numeric_or_none(
+                            row["home_odds"]
+                        ),
+
+                    "draw_odds":
+                        numeric_or_none(
+                            row["draw_odds"]
+                        ),
+
+                    "away_odds":
+                        numeric_or_none(
+                            row["away_odds"]
+                        ),
+
+                    "over05":
+                        numeric_or_none(
+                            row["over05"]
+                        ),
+
+                    "under05":
+                        numeric_or_none(
+                            row["under05"]
+                        ),
+
+                    "over15":
+                        numeric_or_none(
+                            row["over15"]
+                        ),
+
+                    "under15":
+                        numeric_or_none(
+                            row["under15"]
+                        ),
+
+                    "over25":
+                        numeric_or_none(
+                            row["over25"]
+                        ),
+
+                    "under25":
+                        numeric_or_none(
+                            row["under25"]
+                        ),
+
+                    "over35":
+                        numeric_or_none(
+                            row["over35"]
+                        ),
+
+                    "under35":
+                        numeric_or_none(
+                            row["under35"]
+                        ),
+
+                    "gg_odds":
+                        numeric_or_none(
+                            row["gg_odds"]
+                        ),
+
+                    "ng_odds":
+                        numeric_or_none(
+                            row["ng_odds"]
+                        ),
+
+                    "p_home":
+                        numeric_or_none(
+                            row["p_home"]
+                        ),
+
+                    "p_draw":
+                        numeric_or_none(
+                            row["p_draw"]
+                        ),
+
+                    "p_away":
+                        numeric_or_none(
+                            row["p_away"]
+                        ),
+
+                    "generated_at":
+                        row["generated_at"],
+
+                    "EV_home":
+                        numeric_or_none(
+                            row["EV_home"]
+                        ),
+
+                    "EV_draw":
+                        numeric_or_none(
+                            row["EV_draw"]
+                        ),
+
+                    "EV_away":
+                        numeric_or_none(
+                            row["EV_away"]
+                        ),
+
+                    "Best":
+                        row["Best"],
+
+                    "EV":
+                        numeric_or_none(
+                            row["EV"]
+                        ),
+                }
+
+
+                conn.execute(
+                    update_sql,
+                    params
+                )
+
+                update_count += 1
+
+
+        print(
+            f"   ✅ Existing bookmarks updated: "
+            f"{update_count}"
+        )
+
+
+        # ====================================================
+        # INSERT NEW BOOKMARKS
+        # ====================================================
+
+        insert_sql = text("""
+            INSERT INTO henry_schema.bookmark (
+                match_id,
+                odds_event_id,
+
+                league,
+
+                home_team,
+                away_team,
+
+                match_time,
+
+                home_odds,
+                draw_odds,
+                away_odds,
+
+                over05,
+                under05,
+
+                over15,
+                under15,
+
+                over25,
+                under25,
+
+                over35,
+                under35,
+
+                gg_odds,
+                ng_odds,
+
+                p_home,
+                p_draw,
+                p_away,
+
+                generated_at,
+
+                "EV_home",
+                "EV_draw",
+                "EV_away",
+
+                "Best",
+                "EV"
+            )
+            VALUES (
+                :match_id,
+                :odds_event_id,
+
+                :league,
+
+                :home_team,
+                :away_team,
+
+                :match_time,
+
+                :home_odds,
+                :draw_odds,
+                :away_odds,
+
+                :over05,
+                :under05,
+
+                :over15,
+                :under15,
+
+                :over25,
+                :under25,
+
+                :over35,
+                :under35,
+
+                :gg_odds,
+                :ng_odds,
+
+                :p_home,
+                :p_draw,
+                :p_away,
+
+                :generated_at,
+
+                :EV_home,
+                :EV_draw,
+                :EV_away,
+
+                :Best,
+                :EV
+            )
+        """)
+
+
+        insert_count = 0
+
+
+        if insert_ids:
+
+            insert_rows = df_matched[
+                df_matched["match_id"].isin(
+                    insert_ids
+                )
+            ].copy()
+
+
+            for _, row in insert_rows.iterrows():
+
+                params = {
+                    "match_id":
+                        int(row["match_id"]),
+
+                    "odds_event_id":
+                        str(row["odds_event_id"]),
+
+                    "league":
+                        row["league"],
+
+                    "home_team":
+                        row["home_team"],
+
+                    "away_team":
+                        row["away_team"],
+
+                    "match_time":
+                        row["match_time"],
+
+                    "home_odds":
+                        numeric_or_none(
+                            row["home_odds"]
+                        ),
+
+                    "draw_odds":
+                        numeric_or_none(
+                            row["draw_odds"]
+                        ),
+
+                    "away_odds":
+                        numeric_or_none(
+                            row["away_odds"]
+                        ),
+
+                    "over05":
+                        numeric_or_none(
+                            row["over05"]
+                        ),
+
+                    "under05":
+                        numeric_or_none(
+                            row["under05"]
+                        ),
+
+                    "over15":
+                        numeric_or_none(
+                            row["over15"]
+                        ),
+
+                    "under15":
+                        numeric_or_none(
+                            row["under15"]
+                        ),
+
+                    "over25":
+                        numeric_or_none(
+                            row["over25"]
+                        ),
+
+                    "under25":
+                        numeric_or_none(
+                            row["under25"]
+                        ),
+
+                    "over35":
+                        numeric_or_none(
+                            row["over35"]
+                        ),
+
+                    "under35":
+                        numeric_or_none(
+                            row["under35"]
+                        ),
+
+                    "gg_odds":
+                        numeric_or_none(
+                            row["gg_odds"]
+                        ),
+
+                    "ng_odds":
+                        numeric_or_none(
+                            row["ng_odds"]
+                        ),
+
+                    "p_home":
+                        numeric_or_none(
+                            row["p_home"]
+                        ),
+
+                    "p_draw":
+                        numeric_or_none(
+                            row["p_draw"]
+                        ),
+
+                    "p_away":
+                        numeric_or_none(
+                            row["p_away"]
+                        ),
+
+                    "generated_at":
+                        row["generated_at"],
+
+                    "EV_home":
+                        numeric_or_none(
+                            row["EV_home"]
+                        ),
+
+                    "EV_draw":
+                        numeric_or_none(
+                            row["EV_draw"]
+                        ),
+
+                    "EV_away":
+                        numeric_or_none(
+                            row["EV_away"]
+                        ),
+
+                    "Best":
+                        row["Best"],
+
+                    "EV":
+                        numeric_or_none(
+                            row["EV"]
+                        ),
+                }
+
+
+                conn.execute(
+                    insert_sql,
+                    params
+                )
+
+                insert_count += 1
+
+
+        print(
+            f"   ✅ New bookmarks inserted: "
+            f"{insert_count}"
+        )
+
+
+        # ====================================================
+        # SAFE STALE BOOKMARK CLEANUP
+        # ====================================================
+
+        """
+        A bookmark is stale when it no longer exists in the
+        freshly generated df_matched dataset.
+
+        We may delete it ONLY if no bet_selection references
+        its match_id.
+
+        Referenced stale bookmarks are deliberately preserved.
+        """
+
+        deleted_stale = 0
+        protected_stale = 0
+
+
+        if stale_ids:
+
+            for stale_match_id in stale_ids:
+
+                dependent_count = conn.execute(
+                    text("""
+                        SELECT COUNT(*)
+                        FROM henry_schema.bet_selection
+                        WHERE bookmark_id = :match_id
+                    """),
+                    {
+                        "match_id":
+                            stale_match_id
+                    }
+                ).scalar()
+
+
+                if dependent_count == 0:
+
+                    conn.execute(
+                        text("""
+                            DELETE FROM henry_schema.bookmark
+                            WHERE match_id = :match_id
+                        """),
+                        {
+                            "match_id":
+                                stale_match_id
+                        }
+                    )
+
+                    deleted_stale += 1
+
+                else:
+
+                    protected_stale += 1
+
+                    print(
+                        f"   ⚠️ Preserved referenced stale "
+                        f"bookmark: {stale_match_id} "
+                        f"({dependent_count} bet selection(s))"
+                    )
+
+
+        print(
+            f"   ✅ Stale bookmarks deleted: "
+            f"{deleted_stale}"
+        )
+
+        print(
+            f"   🛡️ Stale bookmarks protected: "
+            f"{protected_stale}"
+        )
+
+
+        # ====================================================
+        # VERIFY NO BROKEN BET REFERENCES
+        # ====================================================
+
+        broken_references = conn.execute(
+            text("""
+                SELECT COUNT(*)
+                FROM henry_schema.bet_selection bs
+                LEFT JOIN henry_schema.bookmark b
+                    ON b.match_id = bs.bookmark_id
+                WHERE b.match_id IS NULL
+            """)
+        ).scalar()
+
+
+        if broken_references != 0:
+
+            raise RuntimeError(
+                "\n❌ BROKEN BET REFERENCES DETECTED.\n"
+                f"Broken references: {broken_references}\n"
+                "Transaction will be rolled back."
+            )
+
+
+        print(
+            "   ✅ All bet_selection bookmark references valid."
+        )
+
+
+        # ====================================================
+        # VERIFY BOOKMARK COUNT
+        # ====================================================
 
         saved_count = conn.execute(
             text("""
@@ -1465,19 +2065,9 @@ try:
         ).scalar()
 
 
-        if saved_count != len(df_matched):
-
-            raise RuntimeError(
-                f"\n❌ TRANSACTION VERIFICATION FAILED.\n"
-                f"Expected: {len(df_matched)}\n"
-                f"Found:    {saved_count}\n"
-                f"The transaction will be rolled back."
-            )
-
-
-        # ----------------------------------------------------
-        # Verify duplicate match IDs in database.
-        # ----------------------------------------------------
+        # ====================================================
+        # VERIFY DUPLICATE MATCH IDs
+        # ====================================================
 
         duplicate_match_count = conn.execute(
             text("""
@@ -1500,9 +2090,9 @@ try:
             )
 
 
-        # ----------------------------------------------------
-        # Verify duplicate odds IDs in database.
-        # ----------------------------------------------------
+        # ====================================================
+        # VERIFY DUPLICATE ODDS EVENT IDs
+        # ====================================================
 
         duplicate_odds_count = conn.execute(
             text("""
@@ -1510,6 +2100,7 @@ try:
                 FROM (
                     SELECT odds_event_id
                     FROM henry_schema.bookmark
+                    WHERE odds_event_id IS NOT NULL
                     GROUP BY odds_event_id
                     HAVING COUNT(*) > 1
                 ) d
@@ -1538,7 +2129,7 @@ except Exception as exc:
     )
 
     print(
-        "❌ BOOKMARK REBUILD FAILED"
+        "❌ BOOKMARK UPDATE FAILED"
     )
 
     print(
@@ -1554,7 +2145,7 @@ except Exception as exc:
     )
 
     print(
-        "⚠️ Existing bookmark was NOT permanently modified."
+        "⚠️ Existing bookmarks were NOT permanently modified."
     )
 
     raise
@@ -1586,6 +2177,18 @@ with engine.connect() as conn:
         text("""
             SELECT COUNT(DISTINCT odds_event_id)
             FROM henry_schema.bookmark
+            WHERE odds_event_id IS NOT NULL
+        """)
+    ).scalar()
+
+
+    final_broken_refs = conn.execute(
+        text("""
+            SELECT COUNT(*)
+            FROM henry_schema.bet_selection bs
+            LEFT JOIN henry_schema.bookmark b
+                ON b.match_id = bs.bookmark_id
+            WHERE b.match_id IS NULL
         """)
     ).scalar()
 
@@ -1607,15 +2210,19 @@ print(
 )
 
 print(
-    f"Unique match_id:         {final_match_ids}"
+    f"Unique match_id:        {final_match_ids}"
 )
 
 print(
-    f"Unique odds_event_id:    {final_odds_ids}"
+    f"Unique odds_event_id:   {final_odds_ids}"
 )
 
 print(
-    f"Season:                  {SEASON}"
+    f"Broken bet references:  {final_broken_refs}"
+)
+
+print(
+    f"Season:                 {SEASON}"
 )
 
 print(
@@ -1628,6 +2235,10 @@ print(
 
 print(
     "\nAll requested odds markets preserved."
+)
+
+print(
+    "\nExisting bet_selection references preserved."
 )
 
 print(

@@ -80,3 +80,4 @@ yarl==1.23.0
 psycopg[binary]==3.2.10
 gevent
 gevent-websocket
+requests

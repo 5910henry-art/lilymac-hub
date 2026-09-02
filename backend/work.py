@@ -42,9 +42,7 @@ KENYA_OFFSET = 3
 SCRIPTS = [
     "update.py",
     "h2h.py",
-    "accumulator.py",
-    "book.py",
-    "dash2.py",
+    "dash.py",
 ]
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))

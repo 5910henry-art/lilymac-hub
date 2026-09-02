@@ -23,8 +23,7 @@ from .scheduler import start_scheduler
 from .wallet import register_wallet_routes
 from .admin import register_admin_routes
 from .bets import bet_bp
-
-
+from .mpesa_routes import register_mpesa_routes
 # -------------------------
 # Flask app setup
 # -------------------------
@@ -67,8 +66,8 @@ app.register_blueprint(auth_bp)
 app.register_blueprint(bet_bp)
 
 register_wallet_routes(app)
+register_mpesa_routes(app)
 register_admin_routes(app)
-
 
 # -------------------------
 # Debug: list all routes

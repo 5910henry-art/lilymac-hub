@@ -331,115 +331,33 @@ def register_wallet_routes(app):
     # ========================================================
     # DEPOSIT
     # ========================================================
+# ========================================================
+# DEPOSIT
+# ========================================================
+#
+# IMPORTANT:
+# Direct wallet crediting has been removed.
+#
+# All real deposits must go through:
+#
+#     POST /mpesa/stkpush
+#
+# The wallet is credited only after the M-PESA callback
+# confirms a successful payment.
+# ========================================================
 
     @app.route(
         "/deposit",
         methods=["POST"],
-    )
+   )
     @jwt_required()
     def deposit():
 
-        try:
-            uid = int(
-                get_jwt_identity()
-            )
-        except (TypeError, ValueError):
-            return _error(
-                "invalid user identity",
-                401,
-            )
-
-        data = request.get_json(
-            silent=True
-        ) or {}
-
-        amount = _parse_amount(
-            data.get("amount")
-        )
-
-        if amount is None:
-            return _error(
-                "invalid deposit amount"
-            )
-
-        if amount < MIN_DEPOSIT:
-            return _error(
-                f"minimum deposit is {MIN_DEPOSIT:.2f}"
-            )
-
-        if amount > MAX_DEPOSIT:
-            return _error(
-                f"maximum deposit is {MAX_DEPOSIT:.2f}"
-            )
-
-        try:
-
-            user = (
-                db.session.query(User)
-                .with_for_update()
-                .filter(
-                    User.id == uid
-                )
-                .first()
-            )
-
-            if not user:
-
-                db.session.rollback()
-
-                return _error(
-                    "user not found",
-                    404,
-                )
-
-            current_balance = _balance(
-                user
-            )
-
-            new_balance = (
-                current_balance
-                + amount
-            )
-
-            user.balance = new_balance
-
-            tx = Transaction(
-                user_id=uid,
-                type="deposit",
-                amount=amount,
-                balance_after=new_balance,
-            )
-
-            db.session.add(tx)
-
-            db.session.commit()
-
-            logger.info(
-                "Deposit successful | user=%s | amount=%s | balance=%s",
-                uid,
-                amount,
-                new_balance,
-            )
-
-            return _success(
-                new_balance
-            )
-
-        except Exception as e:
-
-            db.session.rollback()
-
-            logger.exception(
-                "Deposit failed for user %s: %s",
-                uid,
-                e,
-            )
-
-            return _error(
-                "deposit failed",
-                500,
-            )
-
+     return _error(
+        "Direct wallet deposits are disabled. "
+        "Use M-PESA STK Push.",
+        410,
+    )
 
     # ========================================================
     # WITHDRAW

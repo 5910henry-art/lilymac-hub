@@ -128,26 +128,65 @@ class Bet(db.Model):
     # relationship
     match = db.relationship("Match", backref="bets", lazy="selectin")
 
+# ============================================================
+# Wallet Transaction
+# ============================================================
 
-# -------------------------
-# Transaction
-# -------------------------
 class Transaction(db.Model):
-    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    __tablename__ = "transaction"
+
+    id = db.Column(
+        db.Integer,
+        primary_key=True,
+        autoincrement=True,
+    )
 
     user_id = db.Column(
         db.Integer,
-        db.ForeignKey('user.id'),
+        db.ForeignKey("user.id"),
         nullable=False,
-        index=True
+        index=True,
     )
 
-    type = db.Column(db.String(50), index=True)
-    amount = db.Column(Numeric(14, 2))
-    balance_after = db.Column(Numeric(14, 2))
-    created = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    type = db.Column(
+        db.String(50),
+        index=True,
+    )
 
+    amount = db.Column(
+        Numeric(14, 2),
+        nullable=False,
+    )
 
+    balance_after = db.Column(
+        Numeric(14, 2),
+        nullable=False,
+    )
+
+    # Human-readable transaction information
+    description = db.Column(
+        db.String(255),
+    )
+
+    # External reference, e.g. M-PESA receipt
+    reference = db.Column(
+        db.String(100),
+        index=True,
+    )
+
+    # completed / pending / failed
+    status = db.Column(
+        db.String(30),
+        default="completed",
+        nullable=False,
+        index=True,
+    )
+
+    created = db.Column(
+        db.DateTime,
+        default=datetime.utcnow,
+        index=True,
+    )
 # -------------------------
 # BetSelection (for slips)
 # -------------------------
@@ -227,4 +266,99 @@ class BetSlip(db.Model):
         backref="betslip",
         lazy="selectin",
         cascade="all, delete-orphan"
+    )
+# ============================================================
+# M-PESA Transaction
+# ============================================================
+
+class MpesaTransaction(db.Model):
+    __tablename__ = "mpesa_transaction"
+
+    id = db.Column(
+        db.Integer,
+        primary_key=True,
+        autoincrement=True,
+    )
+
+    user_id = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id"),
+        nullable=False,
+        index=True,
+    )
+
+    # Payment requested
+    amount = db.Column(
+        Numeric(14, 2),
+        nullable=False,
+    )
+
+    phone = db.Column(
+        db.String(20),
+        nullable=False,
+        index=True,
+    )
+
+    # Safaricom identifiers
+    merchant_request_id = db.Column(
+        db.String(100),
+        unique=True,
+        index=True,
+    )
+
+    checkout_request_id = db.Column(
+        db.String(100),
+        unique=True,
+        index=True,
+    )
+
+    mpesa_receipt = db.Column(
+        db.String(100),
+        unique=True,
+        index=True,
+    )
+
+    # Safaricom response
+    result_code = db.Column(
+        db.Integer,
+    )
+
+    result_description = db.Column(
+        db.String(255),
+    )
+
+    # pending / success / failed / cancelled
+    status = db.Column(
+        db.String(30),
+        default="pending",
+        nullable=False,
+        index=True,
+    )
+
+    # Critical idempotency flag
+    credited = db.Column(
+        db.Boolean,
+        default=False,
+        nullable=False,
+        index=True,
+    )
+
+    created = db.Column(
+        db.DateTime,
+        default=datetime.utcnow,
+        index=True,
+    )
+
+    updated = db.Column(
+        db.DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    user = db.relationship(
+        "User",
+        backref=db.backref(
+            "mpesa_transactions",
+            lazy="selectin",
+        ),
     )
