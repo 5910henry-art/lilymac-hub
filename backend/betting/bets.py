@@ -2045,7 +2045,11 @@ def cashout(bet_id):
         with db.session.begin():
 
             # ------------------------------------------------
-            # TRY BETSLIP FIRST
+            # RESOLVE BET / BETSLIP SAFELY
+            #
+            # Bet and BetSlip have independent ID sequences,
+            # so the same numeric ID can exist in both tables.
+            # Always prefer the record owned by the current user.
             # ------------------------------------------------
 
             slip = (
@@ -2055,13 +2059,28 @@ def cashout(bet_id):
                 .first()
             )
 
-            if slip:
+            bet = (
+                db.session.query(Bet)
+                .with_for_update()
+                .filter_by(id=bet_id)
+                .first()
+            )
 
-                if int(slip.user_id) != int(uid):
-                    raise BetRequestError(
-                        "bet not found",
-                        404,
-                    )
+            # If both exist, choose the one belonging to this user.
+            if slip and int(slip.user_id) == int(uid):
+                bet = None
+
+            elif bet and int(bet.user_id) == int(uid):
+                slip = None
+
+            else:
+                # Neither matching record belongs to this user.
+                raise BetRequestError(
+                    "bet not found",
+                    404,
+                )
+
+            if slip:
 
                 status = (
                     slip.status or ""

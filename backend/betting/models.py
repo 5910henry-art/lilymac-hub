@@ -438,3 +438,88 @@ class HouseTransaction(db.Model):
         nullable=False,
         index=True,
     )
+
+# ============================================================
+# HOUSE M-PESA B2C WITHDRAWAL
+# ============================================================
+
+class HouseMpesaWithdrawal(db.Model):
+    __tablename__ = "house_mpesa_withdrawal"
+
+    id = db.Column(
+        db.Integer,
+        primary_key=True,
+        autoincrement=True,
+    )
+
+    amount = db.Column(
+        Numeric(14, 2),
+        nullable=False,
+    )
+
+    phone = db.Column(
+        db.String(20),
+        nullable=False,
+        index=True,
+    )
+
+    status = db.Column(
+        db.String(30),
+        nullable=False,
+        default="pending",
+        index=True,
+    )
+
+    # Safaricom identifiers
+    originator_conversation_id = db.Column(
+        db.String(150),
+        unique=True,
+        index=True,
+    )
+
+    conversation_id = db.Column(
+        db.String(150),
+        unique=True,
+        index=True,
+    )
+
+    mpesa_receipt = db.Column(
+        db.String(100),
+        unique=True,
+        index=True,
+    )
+
+    # Safaricom result
+    result_code = db.Column(
+        db.Integer,
+    )
+
+    result_description = db.Column(
+        db.String(255),
+    )
+
+    # Internal reference / audit
+    reference = db.Column(
+        db.String(100),
+        unique=True,
+        nullable=False,
+        index=True,
+    )
+
+    description = db.Column(
+        db.String(255),
+    )
+
+    created = db.Column(
+        db.DateTime,
+        default=datetime.utcnow,
+        nullable=False,
+        index=True,
+    )
+
+    updated = db.Column(
+        db.DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
+    )

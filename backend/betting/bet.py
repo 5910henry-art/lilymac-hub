@@ -17,7 +17,7 @@ from config2 import SQLALCHEMY_DATABASE_URL, DB_SCHEMA
 # -------------------------
 # Relative imports
 # -------------------------
-from .models import db
+from .models import db, HouseWallet
 from .auth import auth_bp
 from .scheduler import start_scheduler
 from .wallet import register_wallet_routes
@@ -93,6 +93,35 @@ stop_event = threading.Event()
 scheduler_thread = None
 
 
+def ensure_house_wallet():
+    """
+    Ensure the main house wallet row exists.
+
+    This is idempotent: an existing house balance is never reset.
+    """
+    house = (
+        db.session.query(HouseWallet)
+        .filter(HouseWallet.id == 1)
+        .first()
+    )
+
+    if house is None:
+        house = HouseWallet(
+            id=1,
+            balance=0,
+        )
+        db.session.add(house)
+        db.session.commit()
+
+        print(
+            "✅ House wallet initialized | balance=0.00"
+        )
+    else:
+        print(
+            f"✅ House wallet verified | balance={house.balance}"
+        )
+
+
 def init_services():
     global scheduler_thread
 
@@ -108,6 +137,8 @@ def init_services():
         db.session.execute(db.text("SELECT 1"))
 
         db.create_all()
+
+        ensure_house_wallet()
 
         print(
             f"✅ PostgreSQL connected | schema={DB_SCHEMA}"
