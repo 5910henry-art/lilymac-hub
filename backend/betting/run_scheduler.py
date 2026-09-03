@@ -36,9 +36,24 @@ def start_standalone_scheduler():
     Starts the scheduler loop using a dedicated SQLAlchemy session,
     completely independent of Flask.
     """
-    from types import SimpleNamespace
-    fake_app = SimpleNamespace(engine=engine)
-    start_scheduler(fake_app, interval_seconds=60, stop_event=stop_event)
+    from flask import Flask
+
+    fake_app = Flask(__name__)
+    fake_app.config["SQLALCHEMY_DATABASE_URI"] = DATABASE_URL
+    fake_app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
+        "connect_args": {
+            "options": f"-c search_path={DB_SCHEMA},public"
+        }
+    }
+
+    db.init_app(fake_app)
+
+    with fake_app.app_context():
+        start_scheduler(
+            fake_app,
+            interval_seconds=1,
+            stop_event=stop_event,
+        )
 
 scheduler_thread = threading.Thread(target=start_standalone_scheduler, daemon=True)
 scheduler_thread.start()

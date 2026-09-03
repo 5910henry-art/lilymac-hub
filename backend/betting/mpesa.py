@@ -548,6 +548,45 @@ def b2c_payment(
                 )
             )
 
+        # ----------------------------------------------------
+        # VALIDATE DARaja RESPONSE CODE
+        # ----------------------------------------------------
+        #
+        # HTTP 200 alone does not mean the B2C request was
+        # accepted. Daraja also returns ResponseCode.
+        #
+        # ResponseCode == 0 -> request accepted for processing.
+        # Any other value    -> request was not accepted.
+        #
+        response_code = data.get("ResponseCode")
+
+        if response_code is not None:
+            try:
+                response_code = int(response_code)
+            except (TypeError, ValueError):
+                logger.error(
+                    "M-PESA B2C invalid ResponseCode | response=%s",
+                    data,
+                )
+
+                raise RuntimeError(
+                    "M-PESA B2C returned an invalid response code"
+                )
+
+            if response_code != 0:
+                logger.error(
+                    "M-PESA B2C rejected | code=%s | description=%s",
+                    response_code,
+                    data.get("ResponseDescription"),
+                )
+
+                raise RuntimeError(
+                    data.get(
+                        "ResponseDescription",
+                        "M-PESA B2C request was rejected",
+                    )
+                )
+
         logger.info(
             "M-PESA B2C response | phone=%s | amount=%s | response=%s",
             phone,

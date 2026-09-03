@@ -3,7 +3,7 @@
 import logging
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from decimal import Decimal, ROUND_DOWN
 
 from sqlalchemy import or_
@@ -17,6 +17,7 @@ from betting.models import (
     BetSlip,
     Bookmark,
     User,
+    MpesaWithdrawal,
     Transaction,
     HouseWallet,
     HouseTransaction,
@@ -2396,6 +2397,102 @@ def auto_update_live_cashouts(session=None):
     }
 
 
+
+# ============================================================
+# M-PESA WITHDRAWAL MONITOR
+# ============================================================
+
+MPESA_STALE_PENDING_MINUTES = 5
+MPESA_MONITOR_INTERVAL_SECONDS = 60
+
+_mpesa_monitor_last_run = None
+_mpesa_stale_logged = set()
+
+
+def monitor_stale_mpesa_withdrawals(session):
+    """
+    Detect user M-PESA B2C withdrawals that have remained pending
+    for an unusually long time.
+
+    IMPORTANT:
+    - Monitoring only.
+    - NEVER refunds automatically.
+    - NEVER resubmits automatically.
+    - NEVER changes withdrawal status.
+    - NEVER changes user balance.
+
+    A pending withdrawal may mean that Safaricom received the
+    request even if our application did not receive/save the
+    response. Automatic recovery could therefore cause a
+    duplicate payout or an incorrect refund.
+    """
+
+    global _mpesa_monitor_last_run
+
+    now = datetime.utcnow()
+
+    if (
+        _mpesa_monitor_last_run is not None
+        and (
+            now - _mpesa_monitor_last_run
+        ).total_seconds()
+        < MPESA_MONITOR_INTERVAL_SECONDS
+    ):
+        return 0
+
+    _mpesa_monitor_last_run = now
+
+    cutoff = (
+        now
+        - timedelta(
+            minutes=MPESA_STALE_PENDING_MINUTES
+        )
+    )
+
+    stale_withdrawals = (
+        session.query(MpesaWithdrawal)
+        .filter(
+            MpesaWithdrawal.status == "pending",
+            MpesaWithdrawal.created <= cutoff,
+        )
+        .order_by(
+            MpesaWithdrawal.created.asc()
+        )
+        .all()
+    )
+
+    for withdrawal in stale_withdrawals:
+
+        if withdrawal.id in _mpesa_stale_logged:
+            continue
+
+        age_seconds = (
+            now - withdrawal.created
+        ).total_seconds()
+
+        logger.warning(
+            "STALE M-PESA USER WITHDRAWAL | "
+            "withdrawal=%s | user=%s | amount=%s | "
+            "age=%ss | reference=%s | "
+            "NO AUTOMATIC REFUND OR RESUBMISSION",
+            withdrawal.id,
+            withdrawal.user_id,
+            withdrawal.amount,
+            int(age_seconds),
+            withdrawal.reference,
+        )
+
+        _mpesa_stale_logged.add(
+            withdrawal.id
+        )
+
+    # Prevent the in-memory set from growing forever.
+    if len(_mpesa_stale_logged) > 10000:
+        _mpesa_stale_logged.clear()
+
+    return len(stale_withdrawals)
+
+
 # ============================================================
 # SCHEDULER
 # ============================================================
@@ -2474,6 +2571,14 @@ def start_scheduler(
             session = SessionLocal()
 
             try:
+
+                # ============================================
+                # M-PESA MONITOR
+                # ============================================
+
+                monitor_stale_mpesa_withdrawals(
+                    session
+                )
 
                 # ============================================
                 # COUNTS
