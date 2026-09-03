@@ -1,6 +1,7 @@
 # mpesa_routes.py
 
 import logging
+import os
 from decimal import Decimal, InvalidOperation
 from uuid import uuid4
 
@@ -38,6 +39,11 @@ MAX_MPESA_DEPOSIT = Decimal("5000.00")
 
 MIN_MPESA_WITHDRAWAL = Decimal("10.00")
 MAX_MPESA_WITHDRAWAL = Decimal("250000.00")
+
+MPESA_B2C_TEST_PHONE = os.environ.get(
+    "MPESA_B2C_TEST_PHONE",
+    "",
+).strip()
 
 
 # ============================================================
@@ -178,14 +184,27 @@ def register_mpesa_routes(app):
             # ------------------------------------------------
 
             try:
-                phone = normalize_phone(
-                    user.phone
-                )
+                if os.environ.get("MPESA_ENV", "sandbox").strip().lower() == "sandbox":
+                    if not MPESA_B2C_TEST_PHONE:
+                        db.session.rollback()
+                        return _error(
+                            "B2C sandbox test phone is not configured",
+                            500,
+                        )
+
+                    phone = normalize_phone(
+                        MPESA_B2C_TEST_PHONE
+                    )
+                else:
+                    phone = normalize_phone(
+                        user.phone
+                    )
+
             except ValueError:
                 db.session.rollback()
 
                 return _error(
-                    "account has an invalid phone number",
+                    "invalid M-PESA withdrawal phone number",
                     400,
                 )
 
