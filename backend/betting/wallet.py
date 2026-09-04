@@ -1,6 +1,7 @@
 # wallet.py
 
 import logging
+import os
 from decimal import Decimal, InvalidOperation
 
 from flask import request, jsonify
@@ -478,28 +479,62 @@ def register_wallet_routes(app):
                 )
 
             # ------------------------------------------------
-            # Use the registered user's phone number.
-            # Do NOT trust a withdrawal phone supplied by the
-            # frontend.
+            # Determine B2C payout phone.
+            #
+            # SANDBOX:
+            # Use Safaricom's configured B2C test recipient.
+            #
+            # PRODUCTION:
+            # Use the authenticated user's registered phone.
+            #
+            # Never trust a phone supplied by the frontend.
             # ------------------------------------------------
 
-            if not user.phone:
-                db.session.rollback()
+            if os.getenv("MPESA_ENV", "").lower() == "sandbox":
 
-                return _error(
-                    "no M-PESA phone number is registered"
+                test_phone = os.getenv(
+                    "MPESA_B2C_TEST_PHONE"
                 )
 
-            try:
-                phone = normalize_phone(
-                    user.phone
-                )
-            except ValueError as exc:
-                db.session.rollback()
+                if not test_phone:
+                    db.session.rollback()
 
-                return _error(
-                    str(exc)
-                )
+                    return _error(
+                        "M-PESA B2C sandbox test phone is not configured",
+                        500,
+                    )
+
+                try:
+                    phone = normalize_phone(
+                        test_phone
+                    )
+                except ValueError as exc:
+                    db.session.rollback()
+
+                    return _error(
+                        str(exc),
+                        500,
+                    )
+
+            else:
+
+                if not user.phone:
+                    db.session.rollback()
+
+                    return _error(
+                        "no M-PESA phone number is registered"
+                    )
+
+                try:
+                    phone = normalize_phone(
+                        user.phone
+                    )
+                except ValueError as exc:
+                    db.session.rollback()
+
+                    return _error(
+                        str(exc)
+                    )
 
             # ------------------------------------------------
             # Check wallet balance while user row is locked.
