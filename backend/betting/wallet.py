@@ -6,7 +6,19 @@ from decimal import Decimal, InvalidOperation
 from flask import request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 
-from betting.models import db, User, Transaction
+from betting.models import (
+    db,
+    User,
+    Transaction,
+    MpesaWithdrawal,
+)
+
+from betting.mpesa import (
+    normalize_phone,
+    b2c_payment,
+)
+
+from uuid import uuid4
 from betting.utils import to_decimal
 
 
@@ -360,7 +372,7 @@ def register_wallet_routes(app):
     )
 
     # ========================================================
-    # WITHDRAW
+    # M-PESA B2C WITHDRAW
     # ========================================================
 
     @app.route(
@@ -369,6 +381,10 @@ def register_wallet_routes(app):
     )
     @jwt_required()
     def withdraw():
+
+        # ----------------------------------------------------
+        # Identify authenticated user
+        # ----------------------------------------------------
 
         try:
             uid = int(
@@ -379,6 +395,18 @@ def register_wallet_routes(app):
                 "invalid user identity",
                 401,
             )
+
+        # ----------------------------------------------------
+        # Read request
+        #
+        # Frontend only needs:
+        #
+        # {
+        #     "amount": 100
+        # }
+        #
+        # Phone comes from User.phone.
+        # ----------------------------------------------------
 
         data = request.get_json(
             silent=True
@@ -393,10 +421,42 @@ def register_wallet_routes(app):
                 "invalid withdrawal amount"
             )
 
-        if amount < MIN_WITHDRAWAL:
+        # ----------------------------------------------------
+        # B2C requires whole KES.
+        # ----------------------------------------------------
+
+        if amount != amount.to_integral_value():
             return _error(
-                f"minimum withdrawal is {MIN_WITHDRAWAL:.2f}"
+                "withdrawal amount must be a whole KES amount"
             )
+
+        # ----------------------------------------------------
+        # Same limits enforced by b2c_payment()
+        # ----------------------------------------------------
+
+        if amount < Decimal("10.00"):
+            return _error(
+                "minimum withdrawal is KES 10"
+            )
+
+        if amount > Decimal("250000.00"):
+            return _error(
+                "maximum withdrawal is KES 250,000"
+            )
+
+        # ----------------------------------------------------
+        # Reserve user's money FIRST.
+        #
+        # We commit the reservation before contacting
+        # Safaricom so the wallet transaction exists before
+        # the asynchronous B2C callback arrives.
+        # ----------------------------------------------------
+
+        reference = f"mpesa-withdraw-{uuid4().hex}"
+
+        originator_conversation_id = (
+            f"LILYMAC-USER-{uuid4().hex}"
+        )
 
         try:
 
@@ -410,7 +470,6 @@ def register_wallet_routes(app):
             )
 
             if not user:
-
                 db.session.rollback()
 
                 return _error(
@@ -418,17 +477,48 @@ def register_wallet_routes(app):
                     404,
                 )
 
+            # ------------------------------------------------
+            # Use the registered user's phone number.
+            # Do NOT trust a withdrawal phone supplied by the
+            # frontend.
+            # ------------------------------------------------
+
+            if not user.phone:
+                db.session.rollback()
+
+                return _error(
+                    "no M-PESA phone number is registered"
+                )
+
+            try:
+                phone = normalize_phone(
+                    user.phone
+                )
+            except ValueError as exc:
+                db.session.rollback()
+
+                return _error(
+                    str(exc)
+                )
+
+            # ------------------------------------------------
+            # Check wallet balance while user row is locked.
+            # ------------------------------------------------
+
             current_balance = _balance(
                 user
             )
 
             if current_balance < amount:
-
                 db.session.rollback()
 
                 return _error(
                     "insufficient funds"
                 )
+
+            # ------------------------------------------------
+            # Reserve the money.
+            # ------------------------------------------------
 
             new_balance = (
                 current_balance
@@ -437,39 +527,351 @@ def register_wallet_routes(app):
 
             user.balance = new_balance
 
+            # ------------------------------------------------
+            # Wallet transaction.
+            #
+            # IMPORTANT:
+            # Callback searches for this exact:
+            #
+            # user_id
+            # reference
+            # type = "mpesa_withdrawal"
+            # ------------------------------------------------
+
             tx = Transaction(
                 user_id=uid,
-                type="withdraw",
+                type="mpesa_withdrawal",
                 amount=amount,
                 balance_after=new_balance,
+                description="M-PESA withdrawal pending",
+                reference=reference,
+                status="pending",
             )
 
             db.session.add(tx)
 
+            # ------------------------------------------------
+            # B2C withdrawal tracking record.
+            # ------------------------------------------------
+
+            withdrawal = MpesaWithdrawal(
+                user_id=uid,
+                amount=amount,
+                phone=phone,
+                status="pending",
+                originator_conversation_id=(
+                    originator_conversation_id
+                ),
+                reference=reference,
+                description="User M-PESA B2C withdrawal",
+            )
+
+            db.session.add(
+                withdrawal
+            )
+
+            # ------------------------------------------------
+            # COMMIT BEFORE B2C REQUEST
+            # ------------------------------------------------
+
             db.session.commit()
 
-            logger.info(
-                "Withdrawal successful | user=%s | amount=%s | balance=%s",
-                uid,
-                amount,
-                new_balance,
-            )
-
-            return _success(
-                new_balance
-            )
-
-        except Exception as e:
+        except Exception as exc:
 
             db.session.rollback()
 
             logger.exception(
-                "Withdrawal failed for user %s: %s",
+                "Failed to reserve M-PESA withdrawal | "
+                "user=%s | amount=%s | error=%s",
                 uid,
-                e,
+                amount,
+                exc,
             )
 
             return _error(
-                "withdrawal failed",
+                "could not create withdrawal",
                 500,
             )
+
+        # ----------------------------------------------------
+        # Submit B2C request to Safaricom.
+        #
+        # This is asynchronous. A successful response here
+        # means Safaricom accepted the request for processing,
+        # NOT that the user has already received the money.
+        # ----------------------------------------------------
+
+        try:
+
+            response = b2c_payment(
+                phone=phone,
+                amount=amount,
+                originator_conversation_id=(
+                    originator_conversation_id
+                ),
+                remarks="Lilymac user withdrawal",
+                occasion="Lilymac",
+            )
+
+        except Exception as exc:
+
+            logger.exception(
+                "M-PESA B2C submission failed | "
+                "withdrawal=%s | user=%s | error=%s",
+                withdrawal.id,
+                uid,
+                exc,
+            )
+
+            # ------------------------------------------------
+            # Submission failed.
+            #
+            # Lock withdrawal again before refunding.
+            # ------------------------------------------------
+
+            try:
+
+                current = (
+                    db.session.query(
+                        MpesaWithdrawal
+                    )
+                    .with_for_update()
+                    .filter(
+                        MpesaWithdrawal.id
+                        == withdrawal.id
+                    )
+                    .first()
+                )
+
+                if not current:
+                    raise RuntimeError(
+                        "withdrawal record disappeared"
+                    )
+
+                # --------------------------------------------
+                # Do not refund if a callback already finalized
+                # or timed out the transaction.
+                # --------------------------------------------
+
+                if current.status not in (
+                    "success",
+                    "failed",
+                    "timeout",
+                ):
+
+                    locked_user = (
+                        db.session.query(User)
+                        .with_for_update()
+                        .filter(
+                            User.id == uid
+                        )
+                        .first()
+                    )
+
+                    if not locked_user:
+                        raise RuntimeError(
+                            "user for withdrawal refund was not found"
+                        )
+
+                    original_tx = (
+                        db.session.query(
+                            Transaction
+                        )
+                        .with_for_update()
+                        .filter(
+                            Transaction.user_id == uid,
+                            Transaction.reference
+                            == current.reference,
+                            Transaction.type
+                            == "mpesa_withdrawal",
+                        )
+                        .first()
+                    )
+
+                    if not original_tx:
+                        raise RuntimeError(
+                            "original withdrawal transaction "
+                            "was not found"
+                        )
+
+                    refund_amount = _parse_amount(
+                        current.amount
+                    )
+
+                    if refund_amount is None:
+                        raise RuntimeError(
+                            "invalid withdrawal amount during refund"
+                        )
+
+                    # ----------------------------------------
+                    # Refund reserved wallet money.
+                    # ----------------------------------------
+
+                    locked_user.balance = (
+                        _balance(locked_user)
+                        + refund_amount
+                    )
+
+                    original_tx.status = "failed"
+                    original_tx.description = (
+                        "M-PESA withdrawal submission failed"
+                    )
+
+                    db.session.add(
+                        Transaction(
+                            user_id=uid,
+                            type="mpesa_withdrawal_refund",
+                            amount=refund_amount,
+                            balance_after=(
+                                locked_user.balance
+                            ),
+                            reference=current.reference,
+                            description=(
+                                "Refund for failed M-PESA "
+                                "withdrawal submission"
+                            ),
+                            status="completed",
+                        )
+                    )
+
+                    current.status = "failed"
+                    current.result_description = str(
+                        exc
+                    )[:255]
+
+                    db.session.commit()
+
+            except Exception:
+
+                db.session.rollback()
+
+                logger.exception(
+                    "M-PESA withdrawal refund failed | "
+                    "withdrawal=%s | user=%s",
+                    withdrawal.id,
+                    uid,
+                )
+
+            return jsonify({
+                "error": "M-PESA withdrawal request failed",
+                "withdrawal_id": withdrawal.id,
+            }), 502
+
+        # ----------------------------------------------------
+        # Safaricom accepted the B2C submission.
+        #
+        # Save the ConversationID and response details.
+        # ----------------------------------------------------
+
+        try:
+
+            current = (
+                db.session.query(
+                    MpesaWithdrawal
+                )
+                .with_for_update()
+                .filter(
+                    MpesaWithdrawal.id
+                    == withdrawal.id
+                )
+                .first()
+            )
+
+            if not current:
+                raise RuntimeError(
+                    "withdrawal record disappeared"
+                )
+
+            current.status = "submitted"
+
+            conversation_id = (
+                response.get(
+                    "ConversationID"
+                )
+            )
+
+            if conversation_id:
+                current.conversation_id = str(
+                    conversation_id
+                )
+
+            response_code = (
+                response.get(
+                    "ResponseCode"
+                )
+            )
+
+            if response_code is not None:
+                try:
+                    current.result_code = int(
+                        response_code
+                    )
+                except (
+                    TypeError,
+                    ValueError,
+                ):
+                    pass
+
+            current.result_description = str(
+                response.get(
+                    "ResponseDescription",
+                    "B2C request submitted",
+                )
+            )[:255]
+
+            db.session.commit()
+
+        except Exception:
+
+            db.session.rollback()
+
+            logger.exception(
+                "B2C submitted but response could not "
+                "be saved | withdrawal=%s | user=%s",
+                withdrawal.id,
+                uid,
+            )
+
+            return jsonify({
+                "error": (
+                    "B2C request was submitted, "
+                    "but response could not be saved"
+                ),
+                "withdrawal_id": withdrawal.id,
+            }), 500
+
+        # ----------------------------------------------------
+        # DO NOT mark the transaction completed here.
+        #
+        # The asynchronous /mpesa/b2c/result callback does
+        # that after Safaricom gives the actual result.
+        # ----------------------------------------------------
+
+        logger.info(
+            "User M-PESA B2C withdrawal submitted | "
+            "withdrawal=%s | user=%s | phone=%s | "
+            "amount=%s | conversation=%s",
+            current.id,
+            uid,
+            phone,
+            amount,
+            current.conversation_id,
+        )
+
+        return jsonify({
+            "message": "M-PESA withdrawal submitted",
+            "withdrawal_id": current.id,
+            "reference": reference,
+            "phone": phone,
+            "amount": str(amount),
+            "status": current.status,
+            "conversation_id": (
+                current.conversation_id
+            ),
+            "originator_conversation_id": (
+                current.originator_conversation_id
+            ),
+            "balance": str(
+                new_balance
+            ),
+        }), 202
