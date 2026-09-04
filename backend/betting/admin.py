@@ -597,10 +597,9 @@ def register_admin_routes(app):
     # -------------------------
     @app.route("/mpesa/b2c/result", methods=["POST"])
     def house_mpesa_b2c_result():
+        data = request.get_json(silent=True) or {}
 
-        data = request.get_json(
-            silent=True
-        ) or {}
+        logger.info(f"RAW B2C CALLBACK PAYLOAD: {data}") 
 
         result = data.get("Result") or {}
 
