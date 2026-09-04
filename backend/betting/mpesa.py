@@ -497,7 +497,7 @@ def b2c_payment(
         "SecurityCredential": (
             MPESA_B2C_SECURITY_CREDENTIAL
         ),
-        "CommandID": "BusinessPayment",
+        "CommandID": "SalaryPayment",
         "Amount": amount,
         "PartyA": MPESA_B2C_SHORTCODE,
         "PartyB": phone,
