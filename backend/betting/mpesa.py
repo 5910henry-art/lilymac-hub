@@ -484,7 +484,7 @@ def b2c_payment(
 
     url = (
         f"{MPESA_BASE_URL}"
-        "/mpesa/b2c/v3/paymentrequest"
+        "/mpesa/b2c/v1/paymentrequest"
     )
 
     payload = {
