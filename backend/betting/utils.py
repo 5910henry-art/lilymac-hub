@@ -525,15 +525,17 @@ def _calculate_live_probability(
     bookmark=None,
 ):
     """
-    Calculate the current probability of a selection.
+    Calculate current live probability without match-minute data.
 
-    The probability changes according to:
-
+    Uses only:
         - current score
-        - match minute
         - market
-        - original probability
-        - whether the selection is already guaranteed
+        - original/pre-match probability
+        - guaranteed market outcomes
+
+    IMPORTANT:
+        This live system does NOT provide reliable match minutes,
+        so no time-based adjustment is used.
     """
 
     selection = (
@@ -563,13 +565,7 @@ def _calculate_live_probability(
         or 0
     )
 
-    minute = _match_minute(
-        match
-    )
-
-    status = _match_status(
-        match
-    )
+    status = _match_status(match)
 
     # --------------------------------------------------------
     # FINISHED
@@ -586,13 +582,10 @@ def _calculate_live_probability(
         if result is True:
             return Decimal("1.00")
 
-        if result is False:
-            return Decimal("0.00")
-
         return Decimal("0.00")
 
     # --------------------------------------------------------
-    # Already guaranteed
+    # GUARANTEED
     # --------------------------------------------------------
 
     if _selection_is_already_won(
@@ -600,11 +593,10 @@ def _calculate_live_probability(
         away,
         selection,
     ):
-
         return Decimal("1.00")
 
     # --------------------------------------------------------
-    # Starting probability
+    # ORIGINAL / PRE-MATCH PROBABILITY
     # --------------------------------------------------------
 
     probability = _base_selection_probability(
@@ -622,12 +614,8 @@ def _calculate_live_probability(
     )
 
     # ========================================================
-    # MARKET-SPECIFIC LIVE ADJUSTMENTS
-    # ========================================================
-
-    # --------------------------------------------------------
     # 1X2
-    # --------------------------------------------------------
+    # ========================================================
 
     if selection in (
         "home_odds",
@@ -640,80 +628,87 @@ def _calculate_live_probability(
 
         diff = home - away
 
+        # ----------------------------------------------------
         # HOME
+        # ----------------------------------------------------
+
         if selection in (
             "home_odds",
             "home",
         ):
 
-            if diff > 0:
+            if diff == 0:
+                pass
+
+            elif diff == 1:
                 probability += Decimal("0.20")
 
-                # Stronger adjustment later in match
-                if minute >= 60:
-                    probability += Decimal("0.10")
+            elif diff == 2:
+                probability += Decimal("0.35")
 
-            elif diff < 0:
+            elif diff >= 3:
+                probability += Decimal("0.45")
 
+            elif diff == -1:
                 probability *= Decimal("0.35")
 
-                if minute >= 60:
-                    probability *= Decimal("0.60")
+            elif diff == -2:
+                probability *= Decimal("0.15")
 
-            elif diff == 0 and minute >= 70:
+            else:
+                probability *= Decimal("0.07")
 
-                # A home selection in a late-level match
-                # is not as valuable as a lead.
-                probability *= Decimal("0.80")
-
+        # ----------------------------------------------------
         # AWAY
+        # ----------------------------------------------------
+
         elif selection in (
             "away_odds",
             "away",
         ):
 
-            if diff < 0:
+            if diff == 0:
+                pass
+
+            elif diff == -1:
                 probability += Decimal("0.20")
 
-                if minute >= 60:
-                    probability += Decimal("0.10")
+            elif diff == -2:
+                probability += Decimal("0.35")
 
-            elif diff > 0:
+            elif diff <= -3:
+                probability += Decimal("0.45")
 
+            elif diff == 1:
                 probability *= Decimal("0.35")
 
-                if minute >= 60:
-                    probability *= Decimal("0.60")
-
-            elif diff == 0 and minute >= 70:
-
-                probability *= Decimal("0.80")
-
-        # DRAW
-        elif selection in (
-            "draw_odds",
-            "draw",
-        ):
-
-            if diff == 0:
-
-                if minute >= 70:
-                    probability += Decimal("0.20")
-                elif minute >= 50:
-                    probability += Decimal("0.10")
+            elif diff == 2:
+                probability *= Decimal("0.15")
 
             else:
+                probability *= Decimal("0.07")
 
-                # A draw selection becomes less likely when
-                # one team has a lead.
+        # ----------------------------------------------------
+        # DRAW
+        # ----------------------------------------------------
+
+        else:
+
+            if diff == 0:
+                probability += Decimal("0.15")
+
+            elif abs(diff) == 1:
                 probability *= Decimal("0.45")
 
-                if minute >= 70:
-                    probability *= Decimal("0.65")
+            elif abs(diff) == 2:
+                probability *= Decimal("0.20")
 
-    # --------------------------------------------------------
+            else:
+                probability *= Decimal("0.08")
+
+    # ========================================================
     # OVER
-    # --------------------------------------------------------
+    # ========================================================
 
     elif selection.startswith("over"):
 
@@ -723,38 +718,36 @@ def _calculate_live_probability(
 
         if threshold is not None:
 
+            total_goals = home + away
+
             goals_needed = (
                 Decimal(str(threshold))
-                - Decimal(str(home + away))
+                - Decimal(str(total_goals))
             )
 
-            # Already guaranteed was handled above.
+            # Already reached the line.
+            if goals_needed <= 0:
+                return Decimal("1.00")
 
-            if goals_needed <= 1:
+            # One goal needed.
+            elif goals_needed <= 1:
+                probability += Decimal("0.15")
 
-                # One goal needed late in the match:
-                # still possible, but increasingly valuable
-                # if time remains.
-                if minute < 30:
-                    probability += Decimal("0.05")
-                elif minute < 60:
-                    probability += Decimal("0.15")
-                elif minute < 75:
-                    probability += Decimal("0.20")
-                else:
-                    probability += Decimal("0.10")
+            # Two goals needed.
+            elif goals_needed <= 2:
+                probability *= Decimal("0.70")
 
-            elif goals_needed >= 2:
+            # Three goals needed.
+            elif goals_needed <= 3:
+                probability *= Decimal("0.45")
 
-                # Multiple goals still required.
-                if minute >= 70:
-                    probability *= Decimal("0.65")
-                elif minute >= 55:
-                    probability *= Decimal("0.80")
+            # Four or more goals needed.
+            else:
+                probability *= Decimal("0.25")
 
-    # --------------------------------------------------------
+    # ========================================================
     # UNDER
-    # --------------------------------------------------------
+    # ========================================================
 
     elif selection.startswith("under"):
 
@@ -764,100 +757,74 @@ def _calculate_live_probability(
 
         if threshold is not None:
 
+            total_goals = home + away
+
             remaining_goals_allowed = (
                 Decimal(str(threshold))
-                - Decimal(str(home + away))
+                - Decimal(str(total_goals))
             )
 
+            # The line has already been exceeded.
             if remaining_goals_allowed <= 0:
-
-                # The under has already lost.
                 return Decimal("0.01")
 
-            # Under becomes more valuable as time disappears.
-            if minute >= 75:
-                probability += Decimal("0.20")
-            elif minute >= 60:
-                probability += Decimal("0.12")
-            elif minute >= 45:
-                probability += Decimal("0.07")
+            # No remaining goal room.
+            elif remaining_goals_allowed <= 1:
+                probability *= Decimal("0.60")
 
-    # --------------------------------------------------------
+            # One/two goals of room.
+            elif remaining_goals_allowed <= 2:
+                probability += Decimal("0.05")
+
+            # Plenty of room.
+            else:
+                probability += Decimal("0.10")
+
+    # ========================================================
     # BTTS
-    # --------------------------------------------------------
+    # ========================================================
 
     elif selection in (
         "gg_odds",
         "btts",
     ):
 
+        # Both teams have scored.
         if home > 0 and away > 0:
-
             return Decimal("1.00")
 
-        if home > 0 or away > 0:
+        # Neither team has scored.
+        elif home == 0 and away == 0:
+            probability *= Decimal("0.75")
 
-            # One team has scored. BTTS now depends on
-            # the other team scoring.
-            if minute >= 75:
-                probability *= Decimal("0.55")
-            elif minute >= 60:
-                probability *= Decimal("0.75")
-            else:
-                probability += Decimal("0.05")
-
+        # Only one team has scored.
         else:
+            probability *= Decimal("0.60")
 
-            if minute >= 75:
-                probability *= Decimal("0.45")
-            elif minute >= 60:
-                probability *= Decimal("0.65")
-
-    # --------------------------------------------------------
+    # ========================================================
     # NO BTTS
-    # --------------------------------------------------------
+    # ========================================================
 
     elif selection in (
         "ng_odds",
         "no_btts",
     ):
 
+        # Both teams scored -> impossible.
         if home > 0 and away > 0:
-
-            # No BTTS has already lost.
             return Decimal("0.01")
 
-        if minute >= 75:
-            probability += Decimal("0.20")
-        elif minute >= 60:
-            probability += Decimal("0.12")
+        # Still 0-0.
+        elif home == 0 and away == 0:
+            probability += Decimal("0.10")
 
-    # ========================================================
-    # TIME VALUE
-    # ========================================================
+        # One team has scored.
+        else:
+            probability += Decimal("0.05")
 
-    time_factor = min(
-        minute / Decimal("90"),
-        Decimal("1"),
-    )
-
-    # Small general adjustment.
-    #
-    # This is intentionally much smaller than the market-
-    # specific adjustments above.
-    if probability > Decimal("0.50"):
-
-        probability += (
-            time_factor
-            * Decimal("0.08")
-        )
-
-    else:
-
-        probability -= (
-            time_factor
-            * Decimal("0.10")
-        )
+    # --------------------------------------------------------
+    # FINAL SAFETY CLAMP
+    # --------------------------------------------------------
 
     return max(
         Decimal("0.01"),

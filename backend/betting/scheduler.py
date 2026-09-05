@@ -658,13 +658,13 @@ def settle_betslips(
 
     Rules:
 
-        pending  -> remain pending
+        any lost selection -> lost immediately
 
-        voided   -> voided + stake refunded
+        voided              -> voided + stake refunded
 
-        lost     -> lost
+        pending              -> remain pending
 
-        all won  -> won + potential paid
+        all won              -> won + potential paid
     """
 
     settled = 0
@@ -682,6 +682,46 @@ def settle_betslips(
             )
 
             if not selections:
+                continue
+
+            # ------------------------------------------------
+            # LOST
+            # ------------------------------------------------
+
+            if any(
+                s.status == "lost"
+                for s in selections
+            ):
+
+                slip.status = "lost"
+
+                user = session.get(
+                    User,
+                    slip.user_id,
+                )
+
+                if user:
+                    session.add(
+                        Transaction(
+                            user_id=user.id,
+                            type="bet_loss",
+                            amount=Decimal("0.00"),
+                            balance_after=to_decimal(
+                                user.balance
+                            ),
+                        )
+                    )
+
+                session.add(slip)
+
+                settled += 1
+
+                logger.info(
+                    "BetSlip %s LOST | "
+                    "at least one selection lost",
+                    slip.id,
+                )
+
                 continue
 
             # ------------------------------------------------
@@ -762,33 +802,6 @@ def settle_betslips(
                 )
 
                 continue
-
-            # ------------------------------------------------
-            # LOST
-            # ------------------------------------------------
-
-            if any(
-                s.status == "lost"
-                for s in selections
-            ):
-
-                slip.status = "lost"
-
-                session.add(
-                    Transaction(
-                        user_id=user.id,
-                        type="bet_loss",
-                        amount=Decimal("0.00"),
-                        balance_after=to_decimal(
-                            user.balance
-                        ),
-                    )
-                )
-
-                logger.info(
-                    "BetSlip %s LOST",
-                    slip.id,
-                )
 
             # ------------------------------------------------
             # ALL WON
@@ -1228,6 +1241,77 @@ def _leg_probability(
     if match_status == "in_play":
 
         # ----------------------------------------------------
+        # LIVE BASELINE FROM ORIGINAL ODDS
+        # ----------------------------------------------------
+        #
+        # Important:
+        # Live probability starts from the actual selection odds.
+        # Score state then moves that probability up/down.
+        #
+        # This prevents every selection from receiving the same
+        # probability simply because the score is the same.
+        #
+        odds = getattr(sel, "odds", None)
+
+        if odds is None and bookmark:
+
+            try:
+                if selection in ("home_odds", "home"):
+                    odds = bookmark.home_odds
+
+                elif selection in ("draw_odds", "draw"):
+                    odds = bookmark.draw_odds
+
+                elif selection in ("away_odds", "away"):
+                    odds = bookmark.away_odds
+
+                elif selection == "over05":
+                    odds = bookmark.over05
+
+                elif selection == "under05":
+                    odds = bookmark.under05
+
+                elif selection == "over15":
+                    odds = bookmark.over15
+
+                elif selection == "under15":
+                    odds = bookmark.under15
+
+                elif selection == "over25":
+                    odds = bookmark.over25
+
+                elif selection == "under25":
+                    odds = bookmark.under25
+
+                elif selection == "over35":
+                    odds = bookmark.over35
+
+                elif selection == "under35":
+                    odds = bookmark.under35
+
+                elif selection in ("gg_odds", "btts"):
+                    odds = bookmark.gg_odds
+
+                elif selection in ("ng_odds", "no_btts"):
+                    odds = bookmark.ng_odds
+
+            except Exception:
+                pass
+
+        baseline = implied_probability_from_odds(odds)
+
+        if baseline is None:
+            baseline = Decimal("0.50")
+
+        baseline = max(
+            Decimal("0.01"),
+            min(
+                Decimal("0.95"),
+                baseline,
+            ),
+        )
+
+        # ----------------------------------------------------
         # 1X2
         # ----------------------------------------------------
 
@@ -1243,81 +1327,72 @@ def _leg_probability(
             diff = home - away
 
             # HOME WIN
-            if selection in (
-                "home_odds",
-                "home",
-            ):
+            if selection in ("home_odds", "home"):
 
-                if diff > 0:
-
-                    probability = Decimal("0.60")
-
-                    if diff >= 2:
-                        probability = Decimal("0.85")
-
-                    if _match_minute(match) >= 75:
-                        probability += Decimal("0.08")
-
-                elif diff < 0:
-
-                    probability = Decimal("0.20")
-
-                    if diff <= -2:
-                        probability = Decimal("0.05")
-
-                    if _match_minute(match) >= 75:
-                        probability *= Decimal("0.65")
-
+                if diff >= 4:
+                    multiplier = Decimal("1.65")
+                elif diff == 3:
+                    multiplier = Decimal("1.55")
+                elif diff == 2:
+                    multiplier = Decimal("1.45")
+                elif diff == 1:
+                    multiplier = Decimal("1.20")
+                elif diff == 0:
+                    # Level score: a goal has been scored by both sides,
+                    # so a winner selection is less favorable than 0-0.
+                    if home == away and home > 0:
+                        multiplier = Decimal("0.65")
+                    else:
+                        multiplier = Decimal("0.80")
+                elif diff == -1:
+                    multiplier = Decimal("0.45")
+                elif diff == -2:
+                    multiplier = Decimal("0.20")
+                elif diff == -3:
+                    multiplier = Decimal("0.10")
                 else:
-
-                    probability = Decimal("0.35")
+                    multiplier = Decimal("0.05")
 
             # DRAW
-            elif selection in (
-                "draw_odds",
-                "draw",
-            ):
+            elif selection in ("draw_odds", "draw"):
 
                 if diff == 0:
-
-                    probability = Decimal("0.35")
-
-                    if _match_minute(match) >= 75:
-                        probability = Decimal("0.55")
-
+                    multiplier = Decimal("1.15")
+                elif abs(diff) == 1:
+                    multiplier = Decimal("0.55")
+                elif abs(diff) == 2:
+                    multiplier = Decimal("0.20")
                 else:
-
-                    probability = Decimal("0.15")
-
-                    if _match_minute(match) >= 75:
-                        probability = Decimal("0.08")
+                    multiplier = Decimal("0.05")
 
             # AWAY WIN
             else:
 
-                if diff < 0:
-
-                    probability = Decimal("0.60")
-
-                    if diff <= -2:
-                        probability = Decimal("0.85")
-
-                    if _match_minute(match) >= 75:
-                        probability += Decimal("0.08")
-
-                elif diff > 0:
-
-                    probability = Decimal("0.20")
-
-                    if diff >= 2:
-                        probability = Decimal("0.05")
-
-                    if _match_minute(match) >= 75:
-                        probability *= Decimal("0.65")
-
+                if diff <= -4:
+                    multiplier = Decimal("1.65")
+                elif diff == -3:
+                    multiplier = Decimal("1.55")
+                elif diff == -2:
+                    multiplier = Decimal("1.45")
+                elif diff == -1:
+                    multiplier = Decimal("1.20")
+                elif diff == 0:
+                    # Level score: a goal has been scored by both sides,
+                    # so a winner selection is less favorable than 0-0.
+                    if home == away and home > 0:
+                        multiplier = Decimal("0.65")
+                    else:
+                        multiplier = Decimal("0.80")
+                elif diff == 1:
+                    multiplier = Decimal("0.45")
+                elif diff == 2:
+                    multiplier = Decimal("0.20")
+                elif diff == 3:
+                    multiplier = Decimal("0.10")
                 else:
+                    multiplier = Decimal("0.05")
 
-                    probability = Decimal("0.35")
+            probability = baseline * multiplier
 
             return max(
                 Decimal("0.01"),
@@ -1336,77 +1411,76 @@ def _leg_probability(
             or selection.startswith("under")
         ):
 
-            threshold = parse_over_under_threshold(
-                selection
-            )
+            threshold = parse_over_under_threshold(selection)
 
             if threshold is None:
                 return Decimal("0.00")
 
             total = home + away
-            minute = _match_minute(match)
+            threshold_decimal = Decimal(str(threshold))
 
             # OVER
             if selection.startswith("over"):
 
-                if total > threshold:
+                # Already mathematically won.
+                if Decimal(str(total)) > threshold_decimal:
                     return Decimal("1.00")
 
                 goals_needed = (
-                    Decimal(str(threshold))
+                    threshold_decimal
                     - Decimal(str(total))
                 )
 
                 if goals_needed <= 1:
+                    multiplier = Decimal("1.45")
+                elif goals_needed <= 2:
+                    multiplier = Decimal("0.90")
+                elif goals_needed <= 3:
+                    multiplier = Decimal("0.50")
+                else:
+                    multiplier = Decimal("0.20")
 
-                    if minute >= 75:
-                        return Decimal("0.30")
+                probability = baseline * multiplier
 
-                    if minute >= 60:
-                        return Decimal("0.45")
-
-                    return Decimal("0.65")
-
-                if goals_needed <= 2:
-
-                    if minute >= 75:
-                        return Decimal("0.08")
-
-                    if minute >= 60:
-                        return Decimal("0.20")
-
-                    return Decimal("0.40")
-
-                if minute >= 75:
-                    return Decimal("0.02")
-
-                return Decimal("0.15")
+                return max(
+                    Decimal("0.01"),
+                    min(
+                        Decimal("0.99"),
+                        probability,
+                    ),
+                )
 
             # UNDER
             else:
 
-                # Under has definitively lost if the total
-                # has reached/passed the line.
-                if Decimal(str(total)) >= Decimal(
-                    str(threshold)
+                # Already mathematically lost.
+                if (
+                    Decimal(str(total))
+                    >= threshold_decimal
                 ):
                     return Decimal("0.00")
 
                 remaining = (
-                    Decimal(str(threshold))
+                    threshold_decimal
                     - Decimal(str(total))
                 )
 
-                if minute >= 75:
-                    return Decimal("0.85")
+                if remaining >= 3:
+                    multiplier = Decimal("1.35")
+                elif remaining >= 2:
+                    multiplier = Decimal("1.10")
+                else:
+                    multiplier = Decimal("0.75")
 
-                if minute >= 60:
-                    return Decimal("0.70")
+                probability = baseline * multiplier
 
-                if remaining >= 2:
-                    return Decimal("0.65")
-
-                return Decimal("0.45")
+                return max(
+                    Decimal("0.01"),
+                    min(
+                        Decimal("0.99"),
+                        probability,
+                    ),
+                )
 
         # ----------------------------------------------------
         # BTTS
@@ -1417,18 +1491,27 @@ def _leg_probability(
             "btts",
         ):
 
+            # Both teams have scored -> guaranteed.
             if home > 0 and away > 0:
                 return Decimal("1.00")
 
-            minute = _match_minute(match)
+            # 0-0: both teams still need to score.
+            if home == 0 and away == 0:
+                multiplier = Decimal("1.00")
 
-            if minute >= 75:
-                return Decimal("0.20")
+            # Exactly one team has scored.
+            else:
+                multiplier = Decimal("0.90")
 
-            if minute >= 60:
-                return Decimal("0.35")
+            probability = baseline * multiplier
 
-            return Decimal("0.55")
+            return max(
+                Decimal("0.01"),
+                min(
+                    Decimal("0.99"),
+                    probability,
+                ),
+            )
 
         # ----------------------------------------------------
         # NO BTTS
@@ -1439,18 +1522,27 @@ def _leg_probability(
             "no_btts",
         ):
 
+            # Both teams have scored -> impossible.
             if home > 0 and away > 0:
                 return Decimal("0.00")
 
-            minute = _match_minute(match)
+            # 0-0 strongly supports No BTTS.
+            if home == 0 and away == 0:
+                multiplier = Decimal("1.00")
 
-            if minute >= 75:
-                return Decimal("0.85")
+            # Exactly one team has scored.
+            else:
+                multiplier = Decimal("0.90")
 
-            if minute >= 60:
-                return Decimal("0.70")
+            probability = baseline * multiplier
 
-            return Decimal("0.55")
+            return max(
+                Decimal("0.01"),
+                min(
+                    Decimal("0.99"),
+                    probability,
+                ),
+            )
 
         # Unknown live market
         return Decimal("0.00")
