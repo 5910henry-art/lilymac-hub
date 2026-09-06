@@ -592,78 +592,642 @@ def register_admin_routes(app):
             ),
         }), 202
     # -------------------------
-    # M-PESA B2C result
-    # callback
-    # -------------------------
-    @app.route("/mpesa/b2c/result", methods=["POST"])
-    def house_mpesa_b2c_result():
-        data = request.get_json(silent=True) or {}
-        logger.info(f"RAW B2C CALLBACK PAYLOAD: {data}")
+    # ============================================================
+# M-PESA B2C callbacks
+# ============================================================
 
-        result = data.get("Result") or {}
-        originator_id = result.get("OriginatorConversationID")
-        conversation_id = result.get("ConversationID")
-        result_code_raw = result.get("ResultCode")
-        result_description = result.get("ResultDesc")
+def _extract_b2c_transaction_id(result):
+    """
+    Safaricom normally places the final M-PESA transaction ID
+    inside ResultParameters.ResultParameter.
+    """
+    try:
+        parameters = result.get("ResultParameters") or {}
+        items = parameters.get("ResultParameter") or []
 
-        if result_code_raw is None:
-            return jsonify({"ResultCode": 0, "ResultDesc": "Accepted"}), 200
+        for item in items:
+            if item.get("Key") == "TransactionID":
+                value = item.get("Value")
+                if value:
+                    return str(value)
+    except Exception:
+        logger.exception("Failed to extract B2C TransactionID")
 
-        try:
-            result_code = int(result_code_raw)
-        except (TypeError, ValueError):
-            result_code = -1
+    return None
 
-        # 1. Dual-lookup matching logic
-        withdrawal = None
-        if originator_id:
-            withdrawal = db.session.query(MpesaWithdrawal).with_for_update().filter(MpesaWithdrawal.originator_conversation_id == str(originator_id)).first()
-        if not withdrawal and conversation_id:
-            withdrawal = db.session.query(MpesaWithdrawal).with_for_update().filter(MpesaWithdrawal.conversation_id == str(conversation_id)).first()
 
-        if not withdrawal:
-            logger.warning(f"Unknown B2C callback | originator={originator_id} | conversation={conversation_id}")
-            return jsonify({"ResultCode": 0, "ResultDesc": "Accepted"}), 200
+def _find_house_b2c_withdrawal(originator_id, conversation_id):
+    """
+    Find a house payout using Safaricom's callback identifiers.
+    OriginatorConversationID is preferred because we generate it ourselves.
+    """
+    withdrawal = None
 
-        # Idempotency rule
-        if withdrawal.status in ("success", "failed"):
-            return jsonify({"ResultCode": 0, "ResultDesc": "Already processed"}), 200
+    if originator_id:
+        withdrawal = (
+            db.session.query(HouseMpesaWithdrawal)
+            .with_for_update()
+            .filter(
+                HouseMpesaWithdrawal.originator_conversation_id
+                == str(originator_id)
+            )
+            .first()
+        )
 
-        withdrawal.result_code = result_code
-        withdrawal.result_description = str(result_description or "")[:255]
-        if conversation_id:
-            withdrawal.conversation_id = str(conversation_id)
+    if not withdrawal and conversation_id:
+        withdrawal = (
+            db.session.query(HouseMpesaWithdrawal)
+            .with_for_update()
+            .filter(
+                HouseMpesaWithdrawal.conversation_id
+                == str(conversation_id)
+            )
+            .first()
+        )
 
-        # Fetch paired financial wallet log record item
-        transaction = db.session.query(Transaction).with_for_update().filter(
+    return withdrawal
+
+
+def _find_user_b2c_withdrawal(originator_id, conversation_id):
+    """
+    Find a normal user M-PESA withdrawal.
+    """
+    withdrawal = None
+
+    if originator_id:
+        withdrawal = (
+            db.session.query(MpesaWithdrawal)
+            .with_for_update()
+            .filter(
+                MpesaWithdrawal.originator_conversation_id
+                == str(originator_id)
+            )
+            .first()
+        )
+
+    if not withdrawal and conversation_id:
+        withdrawal = (
+            db.session.query(MpesaWithdrawal)
+            .with_for_update()
+            .filter(
+                MpesaWithdrawal.conversation_id
+                == str(conversation_id)
+            )
+            .first()
+        )
+
+    return withdrawal
+
+
+def _refund_house_payout(withdrawal, reason):
+    """
+    Refund the reserved house funds exactly once.
+
+    The withdrawal is locked by the caller.
+    """
+    if withdrawal.status in ("success", "failed", "timeout"):
+        return False
+
+    house_wallet = (
+        db.session.query(HouseWallet)
+        .with_for_update()
+        .first()
+    )
+
+    if not house_wallet:
+        raise RuntimeError("House wallet was not found")
+
+    house_wallet.balance = (
+        house_wallet.balance or 0
+    ) + withdrawal.amount
+
+    db.session.add(
+        HouseTransaction(
+            type="mpesa_payout_refund",
+            amount=withdrawal.amount,
+            balance_after=house_wallet.balance,
+            reference=withdrawal.reference,
+            description=reason,
+        )
+    )
+
+    return True
+
+
+def _refund_user_withdrawal(withdrawal, reason):
+    """
+    Refund a failed/timed-out user withdrawal exactly once.
+    """
+    if withdrawal.status in ("success", "failed", "timeout"):
+        return False
+
+    transaction = (
+        db.session.query(Transaction)
+        .with_for_update()
+        .filter(
             Transaction.user_id == withdrawal.user_id,
             Transaction.reference == withdrawal.reference,
-            Transaction.type == "mpesa_withdrawal"
-        ).first()
+            Transaction.type == "mpesa_withdrawal",
+        )
+        .first()
+    )
 
-        if not transaction:
-            raise RuntimeError("User M-PESA withdrawal transaction was not found")
+    if not transaction:
+        raise RuntimeError(
+            "User M-PESA withdrawal transaction was not found"
+        )
 
-        # Update state criteria based on result return rules
-        if result_code != 0:
-            withdrawal.status = "failed"
-            transaction.status = "failed"
-            user = db.session.query(User).with_for_update().filter(User.id == withdrawal.user_id).first()
-            if user:
-                user.balance = (user.balance or 0) + withdrawal.amount
+    user = (
+        db.session.query(User)
+        .with_for_update()
+        .filter(User.id == withdrawal.user_id)
+        .first()
+    )
+
+    if not user:
+        raise RuntimeError(
+            f"User {withdrawal.user_id} was not found"
+        )
+
+    user.balance = (user.balance or 0) + withdrawal.amount
+    transaction.status = "failed"
+    transaction.balance_after = user.balance
+
+    return True
+
+
+@app.route("/mpesa/b2c/result", methods=["POST"])
+def house_mpesa_b2c_result():
+    """
+    Shared Safaricom B2C result callback.
+
+    Handles:
+      1. HouseMpesaWithdrawal
+      2. Normal MpesaWithdrawal
+
+    The same ResultURL is intentionally shared by both flows.
+    """
+    data = request.get_json(silent=True) or {}
+
+    logger.info("RAW B2C CALLBACK PAYLOAD: %s", data)
+
+    result = data.get("Result") or {}
+
+    originator_id = result.get("OriginatorConversationID")
+    conversation_id = result.get("ConversationID")
+    result_code_raw = result.get("ResultCode")
+    result_description = result.get("ResultDesc")
+
+    # Some probes/empty callbacks contain no ResultCode.
+    # Safaricom expects an HTTP 200 acknowledgement.
+    if result_code_raw is None:
+        logger.warning(
+            "B2C callback received without ResultCode | "
+            "originator=%s | conversation=%s",
+            originator_id,
+            conversation_id,
+        )
+
+        return jsonify({
+            "ResultCode": 0,
+            "ResultDesc": "Accepted",
+        }), 200
+
+    try:
+        result_code = int(result_code_raw)
+    except (TypeError, ValueError):
+        result_code = -1
+
+    transaction_id = _extract_b2c_transaction_id(result)
+
+    logger.info(
+        "B2C CALLBACK | originator=%s | conversation=%s | "
+        "result_code=%s | result_desc=%s | transaction_id=%s",
+        originator_id,
+        conversation_id,
+        result_code,
+        result_description,
+        transaction_id,
+    )
+
+    try:
+        # --------------------------------------------------------
+        # FIRST: HOUSE M-PESA PAYOUT
+        # --------------------------------------------------------
+        house_withdrawal = _find_house_b2c_withdrawal(
+            originator_id,
+            conversation_id,
+        )
+
+        if house_withdrawal:
+            logger.info(
+                "Matched HOUSE B2C payout | id=%s | reference=%s | "
+                "status=%s",
+                house_withdrawal.id,
+                house_withdrawal.reference,
+                house_withdrawal.status,
+            )
+
+            # Idempotency: never process a final payout twice.
+            if house_withdrawal.status in (
+                "success",
+                "failed",
+                "timeout",
+            ):
+                logger.info(
+                    "HOUSE B2C callback already processed | id=%s | status=%s",
+                    house_withdrawal.id,
+                    house_withdrawal.status,
+                )
+
+                return jsonify({
+                    "ResultCode": 0,
+                    "ResultDesc": "Already processed",
+                }), 200
+
+            house_withdrawal.result_code = result_code
+            house_withdrawal.result_description = str(
+                result_description or ""
+            )[:255]
+
+            if conversation_id:
+                house_withdrawal.conversation_id = str(
+                    conversation_id
+                )
+
+            if transaction_id and hasattr(
+                house_withdrawal,
+                "mpesa_receipt",
+            ):
+                house_withdrawal.mpesa_receipt = transaction_id
+
+            if result_code == 0:
+                # ----------------------------------------------
+                # HOUSE PAYOUT SUCCESS
+                # ----------------------------------------------
+                house_withdrawal.status = "success"
+
+                logger.info(
+                    "HOUSE B2C PAYOUT SUCCESS | id=%s | amount=%s | "
+                    "phone=%s | transaction_id=%s",
+                    house_withdrawal.id,
+                    house_withdrawal.amount,
+                    house_withdrawal.phone,
+                    transaction_id,
+                )
+
+            else:
+                # ----------------------------------------------
+                # HOUSE PAYOUT FAILURE
+                # ----------------------------------------------
+                refunded = _refund_house_payout(
+                    house_withdrawal,
+                    reason=(
+                        "Refund for failed M-PESA B2C house payout "
+                        f"(ResultCode={result_code})"
+                    ),
+                )
+
+                house_withdrawal.status = "failed"
+
+                logger.warning(
+                    "HOUSE B2C PAYOUT FAILED | id=%s | amount=%s | "
+                    "result_code=%s | refunded=%s",
+                    house_withdrawal.id,
+                    house_withdrawal.amount,
+                    result_code,
+                    refunded,
+                )
+
+            db.session.commit()
+
+            return jsonify({
+                "ResultCode": 0,
+                "ResultDesc": "Processed successfully",
+            }), 200
+
+        # --------------------------------------------------------
+        # SECOND: NORMAL USER M-PESA WITHDRAWAL
+        # --------------------------------------------------------
+        user_withdrawal = _find_user_b2c_withdrawal(
+            originator_id,
+            conversation_id,
+        )
+
+        if user_withdrawal:
+            logger.info(
+                "Matched USER B2C withdrawal | id=%s | user_id=%s | "
+                "reference=%s | status=%s",
+                user_withdrawal.id,
+                user_withdrawal.user_id,
+                user_withdrawal.reference,
+                user_withdrawal.status,
+            )
+
+            # Idempotency
+            if user_withdrawal.status in (
+                "success",
+                "failed",
+                "timeout",
+            ):
+                logger.info(
+                    "USER B2C callback already processed | id=%s | status=%s",
+                    user_withdrawal.id,
+                    user_withdrawal.status,
+                )
+
+                return jsonify({
+                    "ResultCode": 0,
+                    "ResultDesc": "Already processed",
+                }), 200
+
+            user_withdrawal.result_code = result_code
+            user_withdrawal.result_description = str(
+                result_description or ""
+            )[:255]
+
+            if conversation_id:
+                user_withdrawal.conversation_id = str(
+                    conversation_id
+                )
+
+            if transaction_id and hasattr(
+                user_withdrawal,
+                "mpesa_receipt",
+            ):
+                user_withdrawal.mpesa_receipt = transaction_id
+
+            transaction = (
+                db.session.query(Transaction)
+                .with_for_update()
+                .filter(
+                    Transaction.user_id == user_withdrawal.user_id,
+                    Transaction.reference == user_withdrawal.reference,
+                    Transaction.type == "mpesa_withdrawal",
+                )
+                .first()
+            )
+
+            if not transaction:
+                raise RuntimeError(
+                    "User M-PESA withdrawal transaction was not found"
+                )
+
+            if result_code == 0:
+                # ----------------------------------------------
+                # USER PAYOUT SUCCESS
+                # ----------------------------------------------
+                user_withdrawal.status = "success"
+                transaction.status = "completed"
+
+                if transaction_id:
+                    transaction.reference = transaction_id
+
+                logger.info(
+                    "USER B2C PAYOUT SUCCESS | id=%s | user_id=%s | "
+                    "transaction_id=%s",
+                    user_withdrawal.id,
+                    user_withdrawal.user_id,
+                    transaction_id,
+                )
+
+            else:
+                # ----------------------------------------------
+                # USER PAYOUT FAILURE
+                # ----------------------------------------------
+                user = (
+                    db.session.query(User)
+                    .with_for_update()
+                    .filter(
+                        User.id == user_withdrawal.user_id
+                    )
+                    .first()
+                )
+
+                if not user:
+                    raise RuntimeError(
+                        f"User {user_withdrawal.user_id} was not found"
+                    )
+
+                user.balance = (
+                    user.balance or 0
+                ) + user_withdrawal.amount
+
+                user_withdrawal.status = "failed"
+                transaction.status = "failed"
                 transaction.balance_after = user.balance
-        else:
-            withdrawal.status = "success"
-            transaction.status = "completed"
-            # Extract receipt data tokens if present inside sandbox parameters
-            try:
-                items = result.get("ResultParameters", {}).get("ResultParameter", [])
-                for item in items:
-                    if item.get("Key") == "TransactionID":
-                        withdrawal.mpesa_receipt = str(item.get("Value"))
-                        transaction.reference = withdrawal.mpesa_receipt
-            except Exception:
-                pass
 
-        db.session.commit()
-        return jsonify({"ResultCode": 0, "ResultDesc": "Processed successfully"}), 200
+                logger.warning(
+                    "USER B2C PAYOUT FAILED | id=%s | user_id=%s | "
+                    "result_code=%s | amount_refunded=%s",
+                    user_withdrawal.id,
+                    user_withdrawal.user_id,
+                    result_code,
+                    user_withdrawal.amount,
+                )
+
+            db.session.commit()
+
+            return jsonify({
+                "ResultCode": 0,
+                "ResultDesc": "Processed successfully",
+            }), 200
+
+        # --------------------------------------------------------
+        # UNKNOWN CALLBACK
+        # --------------------------------------------------------
+        logger.warning(
+            "UNKNOWN B2C CALLBACK | originator=%s | conversation=%s | "
+            "result_code=%s | result_desc=%s",
+            originator_id,
+            conversation_id,
+            result_code,
+            result_description,
+        )
+
+        # Always acknowledge Safaricom.
+        return jsonify({
+            "ResultCode": 0,
+            "ResultDesc": "Accepted",
+        }), 200
+
+    except Exception:
+        db.session.rollback()
+
+        logger.exception(
+            "B2C callback processing failed | originator=%s | "
+            "conversation=%s",
+            originator_id,
+            conversation_id,
+        )
+
+        # Safaricom should still receive HTTP 200 so it does not
+        # repeatedly hammer the callback endpoint.
+        return jsonify({
+            "ResultCode": 0,
+            "ResultDesc": "Accepted",
+        }), 200
+
+
+@app.route("/mpesa/b2c/timeout", methods=["POST"])
+def house_mpesa_b2c_timeout():
+    """
+    Shared Safaricom B2C timeout callback.
+
+    A timeout is treated as a non-completed payout and the reserved
+    funds are returned to the appropriate balance.
+    """
+    data = request.get_json(silent=True) or {}
+
+    logger.warning(
+        "RAW B2C TIMEOUT CALLBACK PAYLOAD: %s",
+        data,
+    )
+
+    result = data.get("Result") or {}
+
+    originator_id = result.get("OriginatorConversationID")
+    conversation_id = result.get("ConversationID")
+    result_code_raw = result.get("ResultCode")
+    result_description = result.get("ResultDesc")
+
+    try:
+        result_code = (
+            int(result_code_raw)
+            if result_code_raw is not None
+            else -1
+        )
+    except (TypeError, ValueError):
+        result_code = -1
+
+    try:
+        # --------------------------------------------------------
+        # FIRST: HOUSE PAYOUT
+        # --------------------------------------------------------
+        house_withdrawal = _find_house_b2c_withdrawal(
+            originator_id,
+            conversation_id,
+        )
+
+        if house_withdrawal:
+            if house_withdrawal.status in (
+                "success",
+                "failed",
+                "timeout",
+            ):
+                return jsonify({
+                    "ResultCode": 0,
+                    "ResultDesc": "Already processed",
+                }), 200
+
+            house_withdrawal.status = "timeout"
+            house_withdrawal.result_code = result_code
+            house_withdrawal.result_description = str(
+                result_description
+                or "M-PESA B2C timeout"
+            )[:255]
+
+            if conversation_id:
+                house_withdrawal.conversation_id = str(
+                    conversation_id
+                )
+
+            refunded = _refund_house_payout(
+                house_withdrawal,
+                reason="Refund for M-PESA B2C house payout timeout",
+            )
+
+            db.session.commit()
+
+            logger.warning(
+                "HOUSE B2C PAYOUT TIMEOUT | id=%s | amount=%s | "
+                "refunded=%s",
+                house_withdrawal.id,
+                house_withdrawal.amount,
+                refunded,
+            )
+
+            return jsonify({
+                "ResultCode": 0,
+                "ResultDesc": "Processed successfully",
+            }), 200
+
+        # --------------------------------------------------------
+        # SECOND: USER PAYOUT
+        # --------------------------------------------------------
+        user_withdrawal = _find_user_b2c_withdrawal(
+            originator_id,
+            conversation_id,
+        )
+
+        if user_withdrawal:
+            if user_withdrawal.status in (
+                "success",
+                "failed",
+                "timeout",
+            ):
+                return jsonify({
+                    "ResultCode": 0,
+                    "ResultDesc": "Already processed",
+                }), 200
+
+            user_withdrawal.status = "timeout"
+            user_withdrawal.result_code = result_code
+            user_withdrawal.result_description = str(
+                result_description
+                or "M-PESA B2C timeout"
+            )[:255]
+
+            if conversation_id:
+                user_withdrawal.conversation_id = str(
+                    conversation_id
+                )
+
+            _refund_user_withdrawal(
+                user_withdrawal,
+                reason="Refund for M-PESA B2C user withdrawal timeout",
+            )
+
+            db.session.commit()
+
+            logger.warning(
+                "USER B2C PAYOUT TIMEOUT | id=%s | user_id=%s | "
+                "amount=%s",
+                user_withdrawal.id,
+                user_withdrawal.user_id,
+                user_withdrawal.amount,
+            )
+
+            return jsonify({
+                "ResultCode": 0,
+                "ResultDesc": "Processed successfully",
+            }), 200
+
+        # --------------------------------------------------------
+        # UNKNOWN TIMEOUT
+        # --------------------------------------------------------
+        logger.warning(
+            "UNKNOWN B2C TIMEOUT | originator=%s | conversation=%s",
+            originator_id,
+            conversation_id,
+        )
+
+        return jsonify({
+            "ResultCode": 0,
+            "ResultDesc": "Accepted",
+        }), 200
+
+    except Exception:
+        db.session.rollback()
+
+        logger.exception(
+            "B2C timeout callback processing failed | "
+            "originator=%s | conversation=%s",
+            originator_id,
+            conversation_id,
+        )
+
+        return jsonify({
+            "ResultCode": 0,
+            "ResultDesc": "Accepted",
+        }), 200
