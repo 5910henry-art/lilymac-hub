@@ -5,19 +5,20 @@ import logging
 
 import redis
 
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 from flask_compress import Compress
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from werkzeug.middleware.dispatcher import DispatcherMiddleware
+from socketio import WSGIApp
 
 
 # ============================================================
 # Backend apps
 # ============================================================
 
-from app import app as main_app
+from app import app as main_app, socketio
 from vipadmin import app as vipadmin_app
 from betting.bet import app as bet_app, init_services
 
@@ -194,6 +195,33 @@ def redis_health():
 
 
 # ============================================================
+# REAL FOOTBALL LIVE BRIDGE
+#
+# /live belongs to main_app (app.py), while the gateway itself
+# is the Render production entrypoint.
+#
+# Re-enter main_app's Flask request context so the existing
+# /live route executes exactly as it does when accessed directly.
+# ============================================================
+
+@gateway.route("/live", methods=["GET"])
+def gateway_live():
+    environ = request.environ.copy()
+
+    with main_app.request_context(environ):
+        adapter = main_app.url_map.bind_to_environ(environ)
+
+        endpoint, values = adapter.match(
+            path_info="/live",
+            method=environ.get("REQUEST_METHOD", "GET"),
+        )
+
+        view = main_app.view_functions[endpoint]
+
+        return view(**values)
+
+
+# ============================================================
 # Multi-application dispatcher
 #
 # Gateway serves the main backend applications.
@@ -208,7 +236,7 @@ def redis_health():
 #   /vip       -> VIP admin application
 # ============================================================
 
-application = DispatcherMiddleware(
+http_application = DispatcherMiddleware(
     gateway,
     {
         "/app": main_app,
@@ -216,6 +244,28 @@ application = DispatcherMiddleware(
         "/vipadmin": vipadmin_app,
         "/vip": vipadmin_app,
     },
+)
+
+
+# ============================================================
+# Socket.IO production WSGI entry
+#
+# Socket.IO handles:
+#     /socket.io/*
+#
+# All ordinary HTTP requests fall through to the existing
+# gateway dispatcher:
+#     /app/*
+#     /bet/*
+#     /vipadmin/*
+#     /vip/*
+#     /live
+#     /health
+# ============================================================
+
+application = WSGIApp(
+    socketio.server,
+    http_application,
 )
 
 
