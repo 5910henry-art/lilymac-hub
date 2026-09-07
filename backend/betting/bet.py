@@ -33,9 +33,12 @@ app = Flask(__name__)
 app.config["SQLALCHEMY_DATABASE_URI"] = SQLALCHEMY_DATABASE_URL
 
 app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
+    "pool_pre_ping": True,
+    "pool_recycle": 1800,
+    "pool_timeout": 30,
     "connect_args": {
         "options": f"-csearch_path={DB_SCHEMA},public"
-    }
+    },
 }
 
 app.config["JWT_SECRET_KEY"] = os.environ.get(
