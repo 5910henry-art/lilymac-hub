@@ -136,21 +136,38 @@ limiter = Limiter(
 # ============================================================
 # Betting scheduler
 #
-# The scheduler is started by the gateway so Render does not
-# need a separate scheduler process.
+# Start the scheduler in the background so the gateway can
+# answer Render health checks immediately.
 # ============================================================
 
-try:
-    init_services()
+import threading
 
-    logger.info(
-        "✅ Betting scheduler initialized from gateway"
-    )
 
-except Exception:
-    logger.exception(
-        "❌ Failed to initialize betting scheduler"
-    )
+def start_betting_scheduler():
+    try:
+        init_services()
+
+        logger.info(
+            "✅ Betting scheduler initialized from gateway"
+        )
+
+    except Exception:
+        logger.exception(
+            "❌ Failed to initialize betting scheduler"
+        )
+
+
+scheduler_thread = threading.Thread(
+    target=start_betting_scheduler,
+    name="betting-scheduler-init",
+    daemon=True,
+)
+
+scheduler_thread.start()
+
+logger.info(
+    "🚀 Betting scheduler initialization started in background"
+)
 
 
 # ============================================================
