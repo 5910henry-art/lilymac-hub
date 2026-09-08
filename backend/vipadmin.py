@@ -1,35 +1,52 @@
-# vipadmin.py
 import os
-import jwt
+import re
+import asyncio
+import asyncpg
+import logging
+import traceback
+import functools
 
-from functools import wraps
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.security import check_password_hash
 
 from config2 import (
-    query_db,
-    execute_db,
+    DATABASE_URL,
     UTC,
     KENYA,
     DB_SCHEMA,
+    _convert_named_to_positional,
 )
-
 
 # ============================================================
-# CONFIG / CONSTANTS
+# APP CONFIG
 # ============================================================
 
-JWT_SECRET = os.getenv(
-    "JWT_SECRET",
-    "4195f04c7739136d1c06124761c3fe26826808339c676bec3c8ce3c621b5f87e",
+app = Flask(__name__)
+
+CORS(
+    app,
+    resources={
+        r"/*": {
+            "origins": "*",
+            "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization"],
+        }
+    },
 )
 
-JWT_EXP_HOURS = int(
-    os.getenv("JWT_EXP_HOURS", "12")
-)
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("vipadmin")
+
+JWT_SECRET = os.getenv("VIP_JWT_SECRET", "change-this-secret")
+JWT_EXPIRY_HOURS = int(os.getenv("VIP_JWT_EXPIRY_HOURS", "24"))
+
+# ============================================================
+# VIP PLANS
+# ============================================================
 
 PLAN_ORDER = [
     "daily",
@@ -55,39 +72,83 @@ SUBSCRIPTION_QUOTA = {
     "annual": 10,
 }
 
+# ============================================================
+# JSON LOGGING
+# ============================================================
+
+def log_json(level, **data):
+    message = str(data)
+
+    if level == "error":
+        logger.error(message)
+    elif level == "warning":
+        logger.warning(message)
+    else:
+        logger.info(message)
+
 
 # ============================================================
-# APP INIT
+# POSTGRES HELPERS
+# ============================================================
+#
+# IMPORTANT:
+# We intentionally DO NOT use the global asyncpg pool from
+# config2.py here.
+#
+# Flask async routes can execute on different event loops.
+# Reusing the global asyncpg pool can cause:
+#   - Event loop is closed
+#   - another operation is in progress
+#
+# Therefore every VIP DB operation gets its own fresh connection.
 # ============================================================
 
-app = Flask(__name__)
-CORS(app)
+async def vip_query_db(sql, params=None):
+    sql, params = _convert_named_to_positional(sql, params or {})
+
+    conn = await asyncpg.connect(
+        dsn=DATABASE_URL,
+        command_timeout=60,
+        server_settings={
+            "search_path": f"{DB_SCHEMA},public"
+        },
+    )
+
+    try:
+        records = await conn.fetch(sql, *params)
+        return [dict(row) for row in records]
+    finally:
+        await conn.close()
 
 
-# ============================================================
-# DATABASE WRAPPERS
-# ============================================================
+async def vip_execute_db(sql, params=None):
+    sql, params = _convert_named_to_positional(sql, params or {})
+
+    conn = await asyncpg.connect(
+        dsn=DATABASE_URL,
+        command_timeout=60,
+        server_settings={
+            "search_path": f"{DB_SCHEMA},public"
+        },
+    )
+
+    try:
+        return await conn.execute(sql, *params)
+    finally:
+        await conn.close()
+
 
 async def db_fetch_one(sql, params=None):
-    rows = await query_db(
-        sql,
-        params or {},
-    )
+    rows = await vip_query_db(sql, params)
     return rows[0] if rows else None
 
 
 async def db_fetch_all(sql, params=None):
-    return await query_db(
-        sql,
-        params or {},
-    )
+    return await vip_query_db(sql, params)
 
 
 async def db_execute(sql, params=None):
-    return await execute_db(
-        sql,
-        params or {},
-    )
+    return await vip_execute_db(sql, params)
 
 
 # ============================================================
@@ -95,29 +156,28 @@ async def db_execute(sql, params=None):
 # ============================================================
 
 def create_token(payload):
-    payload = dict(payload)
+    import jwt
 
-    if "exp" not in payload:
-        payload["exp"] = int(
-            (
-                datetime.now(UTC)
-                + timedelta(hours=JWT_EXP_HOURS)
-            ).timestamp()
-        )
+    now = datetime.now(UTC)
 
-    token = jwt.encode(
-        payload,
+    token_payload = dict(payload)
+    token_payload.update(
+        {
+            "iat": now,
+            "exp": now + timedelta(hours=JWT_EXPIRY_HOURS),
+        }
+    )
+
+    return jwt.encode(
+        token_payload,
         JWT_SECRET,
         algorithm="HS256",
     )
 
-    if isinstance(token, bytes):
-        token = token.decode("utf-8")
-
-    return token
-
 
 def decode_token(token):
+    import jwt
+
     return jwt.decode(
         token,
         JWT_SECRET,
@@ -125,261 +185,129 @@ def decode_token(token):
     )
 
 
-# ============================================================
-# DATE HELPERS
-# ============================================================
+def get_bearer_token():
+    auth_header = request.headers.get("Authorization", "")
 
-def today_utc_date():
-    return datetime.now(UTC).date()
-
-
-def today_utc_iso():
-    return today_utc_date().isoformat()
-
-
-def today_kenya_date():
-    return datetime.now(KENYA).date()
-
-
-def today_kenya_iso():
-    return today_kenya_date().isoformat()
-
-
-def get_quota(subscription):
-    return SUBSCRIPTION_QUOTA.get(
-        (subscription or "").lower(),
-        0,
-    )
-
-
-def parse_expiry(value):
-    """
-    Parse VIP subscription expiry.
-
-    Stored VIP expiry is normally YYYY-MM-DD.
-    Supports datetime values as well.
-    """
-
-    if value is None:
+    if not auth_header.startswith("Bearer "):
         return None
 
-    if hasattr(value, "date"):
-        try:
-            return value.date()
-        except Exception:
-            pass
-
-    value = str(value).strip()
-
-    if not value:
-        return None
-
-    # Date only
-    try:
-        return datetime.strptime(
-            value[:10],
-            "%Y-%m-%d",
-        ).date()
-    except Exception:
-        pass
-
-    # ISO datetime
-    try:
-        return datetime.fromisoformat(
-            value.replace("Z", "+00:00")
-        ).date()
-    except Exception:
-        return None
+    return auth_header.split(" ", 1)[1].strip()
 
 
-def is_active_row(row):
-    try:
-        expiry = parse_expiry(
-            row.get("subscription_expiry")
-        )
-
-        approved = row.get("approved")
-
-        if isinstance(approved, bool):
-            approved_ok = approved
-        else:
-            approved_ok = int(approved or 0) == 1
-
-        return (
-            approved_ok
-            and expiry is not None
-            and expiry >= today_kenya_date()
-        )
-
-    except Exception:
-        return False
-
-
-# ============================================================
-# LOGGING
-# ============================================================
-
-def log_admin(username, action, data=None):
-    print(
-        f"[ADMIN LOG] "
-        f"{datetime.now(UTC).isoformat()} | "
-        f"{username} | "
-        f"{action} | "
-        f"{data}"
-    )
-
-
-def log_json(level, **kwargs):
-    print(
-        f"[{level.upper()}] "
-        f"{datetime.now(UTC).isoformat()} | "
-        f"{kwargs}"
-    )
-
-
-# ============================================================
-# AUTH DECORATORS
-# ============================================================
-
-def vip_required(f):
-
-    @wraps(f)
-    async def decorated(*args, **kwargs):
-
-        auth = request.headers.get(
-            "Authorization",
-            "",
-        )
-
-        token = auth.replace(
-            "Bearer ",
-            "",
-        ).strip()
+def vip_required(fn):
+    @functools.wraps(fn)
+    async def wrapper(*args, **kwargs):
+        token = get_bearer_token()
 
         if not token:
             return jsonify({
-                "error": "Token required"
+                "error": "authorization token required"
             }), 401
 
         try:
             payload = decode_token(token)
-
             vip_id = payload.get("vip_id")
 
             if not vip_id:
                 return jsonify({
-                    "error": "Invalid token"
+                    "error": "invalid VIP token"
                 }), 401
 
             vip = await db_fetch_one(
                 """
-                SELECT *
+                SELECT
+                    id,
+                    name,
+                    number,
+                    subscription,
+                    subscription_expiry,
+                    approved
                 FROM vip_users
-                WHERE id = :vip_id
+                WHERE id = :id
                 """,
-                {
-                    "vip_id": vip_id,
-                },
+                {"id": vip_id},
             )
 
             if not vip:
                 return jsonify({
-                    "error": "VIP not found"
-                }), 404
+                    "error": "VIP user not found"
+                }), 401
 
-            request.vip = vip
+            if not vip["approved"]:
+                return jsonify({
+                    "error": "VIP account is not approved"
+                }), 403
 
-        except jwt.ExpiredSignatureError:
-            return jsonify({
-                "error": "Token expired"
-            }), 401
+            request.vip_user = vip
+
+            return await fn(*args, **kwargs)
 
         except Exception as exc:
-            print(
-                f"[VIP AUTH ERROR] {exc}"
+            log_json(
+                "error",
+                event="vip_auth_error",
+                error=str(exc),
             )
 
             return jsonify({
-                "error": "Invalid token"
+                "error": "invalid or expired token"
             }), 401
 
-        return await f(
-            *args,
-            **kwargs,
-        )
-
-    return decorated
+    return wrapper
 
 
-def admin_required(f):
-
-    @wraps(f)
-    async def decorated(*args, **kwargs):
-
-        auth = request.headers.get(
-            "Authorization",
-            "",
-        )
-
-        token = auth.replace(
-            "Bearer ",
-            "",
-        ).strip()
+def admin_required(fn):
+    @functools.wraps(fn)
+    async def wrapper(*args, **kwargs):
+        token = get_bearer_token()
 
         if not token:
             return jsonify({
-                "error": "Token required"
+                "error": "authorization token required"
             }), 401
 
         try:
             payload = decode_token(token)
-
             admin_id = payload.get("admin_id")
 
             if not admin_id:
                 return jsonify({
-                    "error": "Invalid token"
-                }), 403
+                    "error": "invalid admin token"
+                }), 401
 
             admin = await db_fetch_one(
                 """
-                SELECT *
+                SELECT
+                    id,
+                    username,
+                    failed_attempts
                 FROM admins
-                WHERE id = :admin_id
+                WHERE id = :id
                 """,
-                {
-                    "admin_id": admin_id,
-                },
+                {"id": admin_id},
             )
 
             if not admin:
                 return jsonify({
-                    "error": "Admin not found"
-                }), 403
+                    "error": "admin not found"
+                }), 401
 
-            request.admin_id = admin["id"]
-            request.admin_username = admin["username"]
+            request.admin_user = admin
 
-        except jwt.ExpiredSignatureError:
-            return jsonify({
-                "error": "Token expired"
-            }), 401
+            return await fn(*args, **kwargs)
 
         except Exception as exc:
-            print(
-                f"[ADMIN AUTH ERROR] {exc}"
+            log_json(
+                "error",
+                event="admin_auth_error",
+                error=str(exc),
             )
 
             return jsonify({
-                "error": "Invalid token"
+                "error": "invalid or expired token"
             }), 401
 
-        return await f(
-            *args,
-            **kwargs,
-        )
-
-    return decorated
+    return wrapper
 
 
 # ============================================================
@@ -387,12 +315,6 @@ def admin_required(f):
 # ============================================================
 
 async def get_matches_for_next_days(days=3):
-
-    days = max(
-        1,
-        min(int(days), 30),
-    )
-
     rows = await db_fetch_all(
         """
         SELECT
@@ -414,744 +336,333 @@ async def get_matches_for_next_days(days=3):
           )
         ORDER BY m.utcdate ASC
         """,
-        {
-            "days": days,
-        },
+        {"days": days},
     )
 
-    out = []
+    output = []
 
-    for r in rows:
+    for row in rows:
+        utc_dt = row["utc"]
 
-        utc_value = r.get("utc")
-
-        utc_dt = None
-
-        try:
-            if isinstance(
-                utc_value,
-                datetime,
-            ):
-                utc_dt = utc_value
-
-            elif utc_value:
-                utc_dt = datetime.fromisoformat(
-                    str(utc_value).replace(
-                        "Z",
-                        "+00:00",
-                    )
-                )
-
-        except Exception:
-            utc_dt = None
-
-        local = None
-
-        if utc_dt:
-
+        if utc_dt is not None:
             if utc_dt.tzinfo is None:
-                utc_dt = utc_dt.replace(
-                    tzinfo=UTC
-                )
+                utc_dt = utc_dt.replace(tzinfo=UTC)
 
-            local = utc_dt.astimezone(
-                KENYA
-            ).strftime(
-                "%Y-%m-%d %H:%M"
-            )
+            kenya_dt = utc_dt.astimezone(KENYA)
+            kenya_time = kenya_dt.isoformat()
+        else:
+            kenya_time = None
 
-        out.append({
-            "match_id": r["match_id"],
-            "home": r["home"],
-            "away": r["away"],
-            "utc": (
-                utc_value.isoformat()
-                if isinstance(
-                    utc_value,
-                    datetime,
-                )
-                else utc_value
-            ),
-            "local": local,
-        })
+        output.append(
+            {
+                "match_id": row["match_id"],
+                "home": row["home"],
+                "away": row["away"],
+                "utc": utc_dt.isoformat() if utc_dt else None,
+                "match_time": kenya_time,
+            }
+        )
 
-    return out
+    return output
 
 
-async def insert_vip_pick(
-    number,
-    match,
-    pick,
-    odds,
-):
+# ============================================================
+# INITIALIZE TABLES
+# ============================================================
 
-    match_id = match.get("match_id")
-    home = match.get("home")
-    away = match.get("away")
-    utc = match.get("utc")
-
-    if not all([
-        number,
-        match_id,
-        home,
-        away,
-        utc,
-        pick,
-    ]):
-        return False
-
-    exists = await db_fetch_one(
-        """
-        SELECT 1
-        FROM vip_picks
-        WHERE number = :number
-          AND match_id = :match_id
-        LIMIT 1
-        """,
-        {
-            "number": number,
-            "match_id": match_id,
-        },
-    )
-
-    if exists:
-        return False
-
-    created_at = datetime.now(UTC)
+async def init_db_async():
+    print(f"[VIP DB] Initializing PostgreSQL schema: {DB_SCHEMA}")
 
     await db_execute(
         """
-        INSERT INTO vip_picks (
-            number,
-            match_id,
-            home_team,
-            away_team,
-            match_time,
-            pick,
-            odds,
-            created_at
+        CREATE TABLE IF NOT EXISTS admins (
+            id BIGSERIAL PRIMARY KEY,
+            username TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL,
+            failed_attempts INTEGER NOT NULL DEFAULT 0
         )
-        VALUES (
-            :number,
-            :match_id,
-            :home_team,
-            :away_team,
-            :match_time,
-            :pick,
-            :odds,
-            :created_at
-        )
-        """,
-        {
-            "number": number,
-            "match_id": match_id,
-            "home_team": home,
-            "away_team": away,
-            "match_time": utc,
-            "pick": pick,
-            "odds": odds,
-            "created_at": created_at,
-        },
-    )
-
-    return True
-
-
-# ============================================================
-# UPGRADE BUSINESS LOGIC
-# ============================================================
-
-async def handle_upgrade_request(
-    req_id,
-    approve=True,
-):
-
-    req = await db_fetch_one(
         """
-        SELECT *
-        FROM vip_upgrade_requests
-        WHERE id = :req_id
-        """,
-        {
-            "req_id": req_id,
-        },
     )
 
-    if not req or req["status"] != "pending":
-        return (
-            None,
-            "Upgrade request not pending or not found",
+    await db_execute(
+        """
+        CREATE TABLE IF NOT EXISTS vip_users (
+            id BIGSERIAL PRIMARY KEY,
+            name TEXT NOT NULL,
+            number TEXT UNIQUE NOT NULL,
+            subscription TEXT NOT NULL,
+            subscription_expiry TEXT,
+            approved BOOLEAN NOT NULL DEFAULT FALSE
         )
-
-    vip_id = req["vip_id"]
-    requested_plan = req["to_plan"]
-    current_plan = req["from_plan"]
-
-    if approve:
-
-        if (
-            requested_plan not in PLAN_ORDER
-            or current_plan not in PLAN_ORDER
-        ):
-            return (
-                None,
-                "Invalid subscription plan",
-            )
-
-        if (
-            PLAN_ORDER.index(requested_plan)
-            <= PLAN_ORDER.index(current_plan)
-        ):
-            return (
-                None,
-                f"Cannot approve same or lower plan "
-                f"(current: {current_plan})",
-            )
-
-        vip = await db_fetch_one(
-            """
-            SELECT subscription_expiry
-            FROM vip_users
-            WHERE id = :vip_id
-            """,
-            {
-                "vip_id": vip_id,
-            },
-        )
-
-        if not vip:
-            return (
-                None,
-                "VIP not found",
-            )
-
-        today = today_kenya_date()
-
-        current_expiry = parse_expiry(
-            vip.get("subscription_expiry")
-        )
-
-        if current_expiry is None:
-            current_expiry = today
-
-        start_date = max(
-            today,
-            current_expiry,
-        )
-
-        days = PLAN_DAYS.get(
-            requested_plan,
-            0,
-        )
-
-        new_expiry = (
-            start_date
-            + timedelta(days=days)
-        ).strftime("%Y-%m-%d")
-
-        await db_execute(
-            """
-            UPDATE vip_users
-            SET
-                subscription = :subscription,
-                subscription_expiry = :subscription_expiry,
-                approved = TRUE
-            WHERE id = :vip_id
-            """,
-            {
-                "subscription": requested_plan,
-                "subscription_expiry": new_expiry,
-                "vip_id": vip_id,
-            },
-        )
-
-        await db_execute(
-            """
-            UPDATE vip_upgrade_requests
-            SET
-                status = 'approved',
-                approved_at = :approved_at
-            WHERE id = :req_id
-            """,
-            {
-                "approved_at": datetime.now(UTC),
-                "req_id": req_id,
-            },
-        )
-
-        status = "approved"
-
-    else:
-
-        await db_execute(
-            """
-            UPDATE vip_upgrade_requests
-            SET
-                status = 'declined',
-                approved_at = NULL
-            WHERE id = :req_id
-            """,
-            {
-                "req_id": req_id,
-            },
-        )
-
-        status = "declined"
-
-    log_admin(
-        getattr(
-            request,
-            "admin_username",
-            "system",
-        ),
-        f"{status}_upgrade",
-        {
-            "vip_id": vip_id,
-            "from_plan": current_plan,
-            "to_plan": requested_plan,
-        },
+        """
     )
 
-    return {
-        "vip_id": vip_id,
-        "from_plan": current_plan,
-        "to_plan": requested_plan,
-        "status": status,
-    }, None
+    await db_execute(
+        """
+        CREATE TABLE IF NOT EXISTS vip_picks (
+            id BIGSERIAL PRIMARY KEY,
+            number TEXT NOT NULL,
+            match_id BIGINT NOT NULL,
+            home_team TEXT NOT NULL,
+            away_team TEXT NOT NULL,
+            match_time TIMESTAMPTZ,
+            pick TEXT NOT NULL,
+            odds DOUBLE PRECISION,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+
+    await db_execute(
+        """
+        CREATE TABLE IF NOT EXISTS vip_upgrade_requests (
+            id BIGSERIAL PRIMARY KEY,
+            vip_id BIGINT NOT NULL,
+            from_plan TEXT NOT NULL,
+            to_plan TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            approved_at TIMESTAMPTZ
+        )
+        """
+    )
+
+    await db_execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_vip_users_number
+        ON vip_users(number)
+        """
+    )
+
+    await db_execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_vip_picks_number
+        ON vip_picks(number)
+        """
+    )
+
+    await db_execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_vip_picks_match_id
+        ON vip_picks(match_id)
+        """
+    )
+
+    print("[VIP DB] PostgreSQL initialization complete.")
+
+
+# ============================================================
+# HEALTH CHECK
+# ============================================================
+
+@app.get("/health")
+async def health():
+    try:
+        row = await db_fetch_one(
+            """
+            SELECT
+                current_database() AS database,
+                current_schema() AS schema
+            """
+        )
+
+        return jsonify({
+            "status": "ok",
+            "database": row["database"] if row else None,
+            "schema": row["schema"] if row else None,
+        })
+
+    except Exception as exc:
+        log_json(
+            "error",
+            event="health_check_failed",
+            error=str(exc),
+        )
+
+        return jsonify({
+            "status": "error"
+        }), 500
 
 
 # ============================================================
 # VIP REGISTRATION
 # ============================================================
 
-@app.route(
-    "/vip/register",
-    methods=["POST"],
-)
+@app.post("/vip/register")
 async def vip_register():
+    data = request.get_json(silent=True) or {}
 
-    data = request.get_json() or {}
-
-    name = str(
-        data.get("name")
-        or data.get("full_name")
-        or ""
-    ).strip()
-
-    number = (
-        data.get("number")
-        or data.get("phone")
-        or ""
-    )
-
-    if isinstance(number, dict):
-        number = str(
-            number.get("value")
-            or number.get("number")
-            or ""
-        )
-
-    number = str(number).strip()
-
+    name = str(data.get("name", "")).strip()
+    number = str(data.get("number", "")).strip()
     subscription = str(
-        data.get("subscription")
-        or data.get("plan")
-        or ""
-    ).lower()
+        data.get("subscription", "")
+    ).strip().lower()
 
-    if (
-        not name
-        or not number
-        or subscription not in PLAN_ORDER
-    ):
+    if not name:
         return jsonify({
-            "error": "Invalid registration data"
+            "error": "name is required"
         }), 400
 
-    existing = await db_fetch_one(
-        """
-        SELECT id
-        FROM vip_users
-        WHERE number = :number
-        """,
-        {
-            "number": number,
-        },
-    )
-
-    if existing:
+    if not number:
         return jsonify({
-            "error": "Phone number already registered"
+            "error": "number is required"
         }), 400
 
-    await db_execute(
-        """
-        INSERT INTO vip_users (
-            name,
-            number,
-            subscription,
-            approved
-        )
-        VALUES (
-            :name,
-            :number,
-            :subscription,
-            FALSE
-        )
-        """,
-        {
-            "name": name,
-            "number": number,
-            "subscription": subscription,
-        },
-    )
+    if subscription not in PLAN_ORDER:
+        return jsonify({
+            "error": "invalid subscription plan",
+            "plans": PLAN_ORDER,
+        }), 400
 
-    return jsonify({
-        "success": True,
-        "message": (
-            "Account created successfully. "
-            "Waiting for admin approval."
-        ),
-    })
+    try:
+        existing = await db_fetch_one(
+            """
+            SELECT
+                id,
+                name,
+                number,
+                subscription,
+                approved
+            FROM vip_users
+            WHERE number = :number
+            """,
+            {"number": number},
+        )
+
+        if existing:
+            return jsonify({
+                "error": "phone number already registered"
+            }), 409
+
+        expiry = (
+            datetime.now(UTC)
+            + timedelta(days=PLAN_DAYS[subscription])
+        ).isoformat()
+
+        row = await db_fetch_one(
+            """
+            INSERT INTO vip_users (
+                name,
+                number,
+                subscription,
+                subscription_expiry,
+                approved
+            )
+            VALUES (
+                :name,
+                :number,
+                :subscription,
+                :expiry,
+                FALSE
+            )
+            RETURNING
+                id,
+                name,
+                number,
+                subscription,
+                subscription_expiry,
+                approved
+            """,
+            {
+                "name": name,
+                "number": number,
+                "subscription": subscription,
+                "expiry": expiry,
+            },
+        )
+
+        return jsonify({
+            "message": "registration successful. waiting for admin approval.",
+            "user": row,
+        }), 201
+
+    except Exception as exc:
+        log_json(
+            "error",
+            event="vip_register_failed",
+            error=str(exc),
+        )
+
+        return jsonify({
+            "error": "internal server error"
+        }), 500
 
 
 # ============================================================
 # VIP LOGIN
 # ============================================================
 
-@app.route(
-    "/vip/login",
-    methods=["POST"],
-)
+@app.post("/vip/login")
 async def vip_login():
+    data = request.get_json(silent=True) or {}
 
-    data = request.get_json() or {}
-
-    number = (
-        data.get("number")
-        or data.get("phone")
-        or ""
-    )
-
-    if isinstance(number, dict):
-        number = str(
-            number.get("value")
-            or number.get("number")
-            or ""
-        )
-
-    number = str(number).strip()
+    number = str(data.get("number", "")).strip()
 
     if not number:
         return jsonify({
-            "error": "Phone number required"
+            "error": "number is required"
         }), 400
 
-    vip = await db_fetch_one(
-        """
-        SELECT *
-        FROM vip_users
-        WHERE number = :number
-        """,
-        {
-            "number": number,
-        },
-    )
-
-    if not vip:
-        return jsonify({
-            "error": "User not found"
-        }), 404
-
-    approved = vip.get("approved")
-
-    if not (
-        approved is True
-        or approved == 1
-        or str(approved).lower() == "true"
-    ):
-        return jsonify({
-            "error": "Account pending admin approval"
-        }), 403
-
-    subscription_expiry = (
-        vip.get("subscription_expiry")
-    )
-
-    expiry_date = parse_expiry(
-        subscription_expiry
-    )
-
-    expired = (
-        expiry_date is not None
-        and expiry_date < today_kenya_date()
-    )
-
-    token = create_token({
-        "vip_id": vip["id"],
-        "number": vip["number"],
-    })
-
-    return jsonify({
-        "success": True,
-        "message": "Login successful",
-        "token": token,
-        "expired": expired,
-        "user": {
-            "id": vip["id"],
-            "name": vip["name"],
-            "number": vip["number"],
-            "subscription": vip["subscription"],
-            "approved": vip["approved"],
-            "subscription_expiry": subscription_expiry,
-        },
-    })
-
-
-# ============================================================
-# VIP DEREGISTER
-# ============================================================
-
-@app.route(
-    "/vip/deregister",
-    methods=["POST"],
-)
-async def vip_deregister():
-
-    data = request.get_json() or {}
-
-    number = (
-        data.get("number")
-        or data.get("phone")
-        or ""
-    )
-
-    if isinstance(number, dict):
-        number = str(
-            number.get("value")
-            or number.get("number")
-            or ""
+    try:
+        user = await db_fetch_one(
+            """
+            SELECT
+                id,
+                name,
+                number,
+                subscription,
+                subscription_expiry,
+                approved
+            FROM vip_users
+            WHERE number = :number
+            """,
+            {"number": number},
         )
 
-    number = str(number).strip()
+        if not user:
+            return jsonify({
+                "error": "VIP account not found"
+            }), 404
 
-    if not number:
+        if not user["approved"]:
+            return jsonify({
+                "error": "VIP account is pending admin approval"
+            }), 403
+
+        token = create_token(
+            {
+                "vip_id": user["id"],
+                "number": user["number"],
+            }
+        )
+
         return jsonify({
-            "error": "Phone number required"
-        }), 400
+            "message": "login successful",
+            "token": token,
+            "user": user,
+        })
 
-    vip = await db_fetch_one(
-        """
-        SELECT *
-        FROM vip_users
-        WHERE number = :number
-        """,
-        {
-            "number": number,
-        },
-    )
+    except Exception as exc:
+        log_json(
+            "error",
+            event="vip_login_failed",
+            error=str(exc),
+        )
 
-    if not vip:
         return jsonify({
-            "error": "User not found"
-        }), 404
-
-    await db_execute(
-        """
-        DELETE FROM vip_users
-        WHERE number = :number
-        """,
-        {
-            "number": number,
-        },
-    )
-
-    return jsonify({
-        "success": True,
-        "message": (
-            "VIP account deregistered successfully"
-        ),
-    })
+            "error": "internal server error"
+        }), 500
 
 
 # ============================================================
 # VIP PROFILE
 # ============================================================
 
-@app.route(
-    "/vip/me",
-    methods=["GET"],
-)
+@app.get("/vip/me")
 @vip_required
 async def vip_me():
-
-    vip = request.vip
-
-    pending = await db_fetch_one(
-        """
-        SELECT to_plan
-        FROM vip_upgrade_requests
-        WHERE vip_id = :vip_id
-          AND status = 'pending'
-        ORDER BY id DESC
-        LIMIT 1
-        """,
-        {
-            "vip_id": vip["id"],
-        },
-    )
-
-    pending_plan = (
-        pending["to_plan"]
-        if pending
-        else None
-    )
-
-    try:
-        current_index = PLAN_ORDER.index(
-            vip["subscription"]
-        )
-    except Exception:
-        current_index = -1
-
-    available_plans = [
-        p
-        for p in PLAN_ORDER
-        if PLAN_ORDER.index(p) > current_index
-    ]
-
-    today = today_kenya_iso()
-
-    used_row = await db_fetch_one(
-        """
-        SELECT COUNT(*) AS c
-        FROM vip_picks
-        WHERE number = :number
-          AND (created_at AT TIME ZONE 'Africa/Nairobi')::date = :today::date
-        """,
-        {
-            "number": vip["number"],
-            "today": today,
-        },
-    )
-
-    used = int(
-        used_row["c"]
-        if used_row
-        else 0
-    )
-
-    quota = get_quota(
-        vip["subscription"]
-    )
-
-    remaining = max(
-        0,
-        quota - used,
-    )
-
     return jsonify({
-        "id": vip["id"],
-        "name": vip["name"],
-        "number": vip["number"],
-        "subscription": vip["subscription"],
-        "subscription_expiry": vip["subscription_expiry"],
-        "is_active": is_active_row(vip),
-        "daily_quota": quota,
-        "used_today": used,
-        "remaining_today": remaining,
-        "pending_upgrade": pending_plan,
-        "available_plans": available_plans,
-    })
-
-
-# ============================================================
-# VIP UPGRADE
-# ============================================================
-
-@app.route(
-    "/vip/upgrade",
-    methods=["POST"],
-)
-@vip_required
-async def vip_upgrade():
-
-    vip = request.vip
-
-    data = request.get_json() or {}
-
-    new_plan = str(
-        data.get("plan")
-        or ""
-    ).lower()
-
-    if new_plan not in PLAN_ORDER:
-        return jsonify({
-            "error": "Invalid plan"
-        }), 400
-
-    if (
-        PLAN_ORDER.index(new_plan)
-        <= PLAN_ORDER.index(vip["subscription"])
-    ):
-        return jsonify({
-            "error": (
-                "Upgrade must be higher "
-                "than current plan"
-            )
-        }), 400
-
-    existing_pending = await db_fetch_one(
-        """
-        SELECT 1
-        FROM vip_upgrade_requests
-        WHERE vip_id = :vip_id
-          AND status = 'pending'
-        LIMIT 1
-        """,
-        {
-            "vip_id": vip["id"],
-        },
-    )
-
-    if existing_pending:
-        return jsonify({
-            "error": (
-                "Upgrade already pending approval"
-            )
-        }), 409
-
-    await db_execute(
-        """
-        INSERT INTO vip_upgrade_requests (
-            vip_id,
-            from_plan,
-            to_plan,
-            status,
-            created_at
-        )
-        VALUES (
-            :vip_id,
-            :from_plan,
-            :to_plan,
-            'pending',
-            :created_at
-        )
-        """,
-        {
-            "vip_id": vip["id"],
-            "from_plan": vip["subscription"],
-            "to_plan": new_plan,
-            "created_at": datetime.now(UTC),
-        },
-    )
-
-    return jsonify({
-        "success": True,
-        "message": (
-            "Upgrade request sent. "
-            "Awaiting admin approval."
-        ),
+        "user": request.vip_user
     })
 
 
@@ -1159,20 +670,16 @@ async def vip_upgrade():
 # VIP PICKS
 # ============================================================
 
-@app.route(
-    "/vip/picks",
-    methods=["GET"],
-)
+@app.get("/vip/picks")
 @vip_required
 async def vip_picks():
+    vip = request.vip_user
 
-    vip = request.vip
-
-    today = today_kenya_iso()
-
-    picks = await db_fetch_all(
+    rows = await db_fetch_all(
         """
         SELECT
+            id,
+            number,
             match_id,
             home_team,
             away_team,
@@ -1182,66 +689,173 @@ async def vip_picks():
             created_at
         FROM vip_picks
         WHERE number = :number
-          AND (created_at AT TIME ZONE 'Africa/Nairobi')::date = :today::date
-        ORDER BY match_time ASC
+        ORDER BY created_at DESC
         """,
         {
-            "number": vip["number"],
-            "today": today,
+            "number": vip["number"]
         },
     )
 
-    return jsonify([
-        dict(p)
-        for p in picks
-    ])
+    return jsonify({
+        "picks": rows
+    })
 
 
 # ============================================================
 # VIP QUOTA
 # ============================================================
 
-@app.route(
-    "/vip/quota",
-    methods=["GET"],
-)
+@app.get("/vip/quota")
 @vip_required
 async def vip_quota():
+    vip = request.vip_user
 
-    vip = request.vip
+    plan = vip["subscription"]
+    quota = SUBSCRIPTION_QUOTA.get(plan, 0)
 
-    today = today_kenya_iso()
-
-    used_row = await db_fetch_one(
+    row = await db_fetch_one(
         """
-        SELECT COUNT(*) AS c
+        SELECT COUNT(*) AS count
         FROM vip_picks
         WHERE number = :number
-          AND (created_at AT TIME ZONE 'Africa/Nairobi')::date = :today::date
+          AND created_at >= CURRENT_DATE
         """,
         {
-            "number": vip["number"],
-            "today": today,
+            "number": vip["number"]
         },
     )
 
-    used = int(
-        used_row["c"]
-        if used_row
-        else 0
+    used = int(row["count"]) if row else 0
+
+    return jsonify({
+        "plan": plan,
+        "quota": quota,
+        "used": used,
+        "remaining": max(quota - used, 0),
+    })
+
+
+# ============================================================
+# VIP UPGRADE REQUEST
+# ============================================================
+
+@app.post("/vip/upgrade")
+@vip_required
+async def vip_upgrade():
+    data = request.get_json(silent=True) or {}
+
+    to_plan = str(
+        data.get("subscription", "")
+    ).strip().lower()
+
+    if to_plan not in PLAN_ORDER:
+        return jsonify({
+            "error": "invalid subscription plan"
+        }), 400
+
+    vip = request.vip_user
+
+    current_plan = vip["subscription"]
+
+    if PLAN_ORDER.index(to_plan) <= PLAN_ORDER.index(current_plan):
+        return jsonify({
+            "error": "upgrade plan must be higher than current plan"
+        }), 400
+
+    existing = await db_fetch_one(
+        """
+        SELECT id
+        FROM vip_upgrade_requests
+        WHERE vip_id = :vip_id
+          AND status = 'pending'
+        LIMIT 1
+        """,
+        {
+            "vip_id": vip["id"]
+        },
     )
 
-    quota = get_quota(
-        vip["subscription"]
+    if existing:
+        return jsonify({
+            "error": "you already have a pending upgrade request"
+        }), 409
+
+    row = await db_fetch_one(
+        """
+        INSERT INTO vip_upgrade_requests (
+            vip_id,
+            from_plan,
+            to_plan,
+            status
+        )
+        VALUES (
+            :vip_id,
+            :from_plan,
+            :to_plan,
+            'pending'
+        )
+        RETURNING
+            id,
+            vip_id,
+            from_plan,
+            to_plan,
+            status,
+            created_at
+        """,
+        {
+            "vip_id": vip["id"],
+            "from_plan": current_plan,
+            "to_plan": to_plan,
+        },
     )
 
     return jsonify({
-        "daily_quota": quota,
-        "used_today": used,
-        "remaining_today": max(
-            0,
-            quota - used,
-        ),
+        "message": "upgrade request submitted",
+        "request": row,
+    }), 201
+
+
+# ============================================================
+# VIP DEREGISTER
+# ============================================================
+
+@app.post("/vip/deregister")
+@vip_required
+async def vip_deregister():
+    vip = request.vip_user
+
+    await db_execute(
+        """
+        DELETE FROM vip_picks
+        WHERE number = :number
+        """,
+        {
+            "number": vip["number"]
+        },
+    )
+
+    await db_execute(
+        """
+        DELETE FROM vip_upgrade_requests
+        WHERE vip_id = :vip_id
+        """,
+        {
+            "vip_id": vip["id"]
+        },
+    )
+
+    await db_execute(
+        """
+        DELETE FROM vip_users
+        WHERE id = :id
+        """,
+        {
+            "id": vip["id"]
+        },
+    )
+
+    return jsonify({
+        "message": "VIP account deleted successfully"
     })
 
 
@@ -1249,199 +863,111 @@ async def vip_quota():
 # ADMIN LOGIN
 # ============================================================
 
-@app.route(
-    "/admin/login",
-    methods=["POST"],
-)
+@app.post("/admin/login")
 async def admin_login():
+    data = request.get_json(silent=True) or {}
 
-    data = request.get_json() or {}
-
-    username = (
-        data.get("username")
-        or ""
+    username = str(
+        data.get("username", "")
     ).strip()
 
-    password = data.get("password")
+    password = str(
+        data.get("password", "")
+    )
 
     if not username or not password:
         return jsonify({
-            "error": (
-                "Username and password required"
-            )
+            "error": "username and password are required"
         }), 400
 
-    admin = await db_fetch_one(
-        """
-        SELECT
-            id,
-            username,
-            password
-        FROM admins
-        WHERE username = :username
-        """,
-        {
-            "username": username,
-        },
-    )
-
-    if not admin:
-        return jsonify({
-            "error": "Invalid credentials"
-        }), 401
-
     try:
-        ok = check_password_hash(
+        admin = await db_fetch_one(
+            """
+            SELECT
+                id,
+                username,
+                password,
+                failed_attempts
+            FROM admins
+            WHERE username = :username
+            """,
+            {
+                "username": username
+            },
+        )
+
+        if not admin:
+            return jsonify({
+                "error": "invalid username or password"
+            }), 401
+
+        password_valid = check_password_hash(
             admin["password"],
             password,
         )
-    except Exception:
-        ok = (
-            admin["password"]
-            == password
-        )
 
-    if not ok:
+        if not password_valid:
+            await db_execute(
+                """
+                UPDATE admins
+                SET failed_attempts = COALESCE(failed_attempts, 0) + 1
+                WHERE id = :id
+                """,
+                {
+                    "id": admin["id"]
+                },
+            )
+
+            return jsonify({
+                "error": "invalid username or password"
+            }), 401
 
         await db_execute(
             """
             UPDATE admins
-            SET failed_attempts =
-                COALESCE(failed_attempts, 0) + 1
-            WHERE username = :username
+            SET failed_attempts = 0
+            WHERE id = :id
             """,
             {
-                "username": username,
+                "id": admin["id"]
             },
         )
 
+        token = create_token(
+            {
+                "admin_id": admin["id"],
+                "username": admin["username"],
+            }
+        )
+
         return jsonify({
-            "error": "Invalid credentials"
-        }), 401
+            "message": "login successful",
+            "token": token,
+            "admin": {
+                "id": admin["id"],
+                "username": admin["username"],
+            },
+        })
 
-    await db_execute(
-        """
-        UPDATE admins
-        SET failed_attempts = 0
-        WHERE username = :username
-        """,
-        {
-            "username": username,
-        },
-    )
+    except Exception as exc:
+        log_json(
+            "error",
+            event="admin_login_failed",
+            error=str(exc),
+        )
 
-    payload = {
-        "admin_id": admin["id"],
-        "username": admin["username"],
-        "exp": int(
-            (
-                datetime.now(UTC)
-                + timedelta(
-                    hours=JWT_EXP_HOURS
-                )
-            ).timestamp()
-        ),
-    }
-
-    token = jwt.encode(
-        payload,
-        JWT_SECRET,
-        algorithm="HS256",
-    )
-
-    if isinstance(token, bytes):
-        token = token.decode("utf-8")
-
-    log_admin(
-        admin["username"],
-        "login",
-    )
-
-    return jsonify({
-        "message": "Login successful",
-        "token": token,
-        "admin": {
-            "username": admin["username"],
-        },
-    })
-
-
-# ============================================================
-# ADMIN VIP APPROVAL
-# ============================================================
-
-async def approve_vip_user(vip_id):
-
-    vip = await db_fetch_one(
-        """
-        SELECT subscription
-        FROM vip_users
-        WHERE id = :vip_id
-        """,
-        {
-            "vip_id": vip_id,
-        },
-    )
-
-    if not vip:
-        return None
-
-    days = PLAN_DAYS.get(
-        (
-            vip["subscription"]
-            or ""
-        ).lower(),
-        0,
-    )
-
-    expiry = (
-        today_kenya_date()
-        + timedelta(days=days)
-    ).strftime("%Y-%m-%d")
-
-    await db_execute(
-        """
-        UPDATE vip_users
-        SET
-            approved = TRUE,
-            subscription_expiry = :expiry
-        WHERE id = :vip_id
-        """,
-        {
-            "expiry": expiry,
-            "vip_id": vip_id,
-        },
-    )
-
-    return expiry
-
-
-async def decline_vip_user(vip_id):
-
-    await db_execute(
-        """
-        DELETE FROM vip_users
-        WHERE id = :vip_id
-        """,
-        {
-            "vip_id": vip_id,
-        },
-    )
-
-    return True
+        return jsonify({
+            "error": "internal server error"
+        }), 500
 
 
 # ============================================================
 # ADMIN VIP LIST
 # ============================================================
 
-@app.route(
-    "/admin/vips",
-    methods=["GET"],
-)
+@app.get("/admin/vips")
 @admin_required
-async def list_vips():
-
+async def admin_vips():
     rows = await db_fetch_all(
         """
         SELECT
@@ -1449,698 +975,564 @@ async def list_vips():
             name,
             number,
             subscription,
-            approved,
-            subscription_expiry
+            subscription_expiry,
+            approved
         FROM vip_users
         ORDER BY id DESC
         """
     )
 
-    log_admin(
-        request.admin_username,
-        "list_vips",
-        len(rows),
-    )
-
-    return jsonify([
-        dict(r)
-        for r in rows
-    ])
+    return jsonify({
+        "vips": rows
+    })
 
 
-@app.route(
-    "/admin/vips/pending",
-    methods=["GET"],
-)
+# ============================================================
+# ADMIN PENDING VIPS
+# ============================================================
+
+@app.get("/admin/vips/pending")
 @admin_required
-async def list_pending():
-
+async def admin_pending_vips():
     rows = await db_fetch_all(
         """
         SELECT
             id,
             name,
             number,
-            subscription
+            subscription,
+            subscription_expiry,
+            approved
         FROM vip_users
         WHERE approved = FALSE
         ORDER BY id DESC
         """
     )
 
-    log_admin(
-        request.admin_username,
-        "list_pending",
-        len(rows),
-    )
-
-    return jsonify([
-        dict(r)
-        for r in rows
-    ])
+    return jsonify({
+        "vips": rows
+    })
 
 
-@app.route(
-    "/admin/vips/approve/<int:vip_id>",
-    methods=["POST"],
-)
+# ============================================================
+# ADMIN APPROVE VIP
+# ============================================================
+
+@app.post("/admin/vips/<int:vip_id>/approve")
 @admin_required
-async def approve(vip_id):
-
-    expiry = await approve_vip_user(
-        vip_id
+async def admin_approve_vip(vip_id):
+    vip = await db_fetch_one(
+        """
+        SELECT
+            id,
+            name,
+            number,
+            subscription,
+            subscription_expiry,
+            approved
+        FROM vip_users
+        WHERE id = :id
+        """,
+        {
+            "id": vip_id
+        },
     )
 
-    if not expiry:
+    if not vip:
         return jsonify({
-            "error": "VIP not found"
+            "error": "VIP user not found"
         }), 404
 
-    log_admin(
-        request.admin_username,
-        "approve_vip",
-        vip_id,
+    await db_execute(
+        """
+        UPDATE vip_users
+        SET approved = TRUE
+        WHERE id = :id
+        """,
+        {
+            "id": vip_id
+        },
     )
 
     return jsonify({
-        "message": "VIP approved",
-        "expiry": expiry,
-    })
-
-
-@app.route(
-    "/admin/vips/decline/<int:vip_id>",
-    methods=["POST"],
-)
-@admin_required
-async def decline(vip_id):
-
-    await decline_vip_user(
-        vip_id
-    )
-
-    log_admin(
-        request.admin_username,
-        "decline_vip",
-        vip_id,
-    )
-
-    return jsonify({
-        "message": "VIP declined"
+        "message": "VIP approved successfully"
     })
 
 
 # ============================================================
-# ADMIN VIP UPGRADES
+# ADMIN DECLINE VIP
 # ============================================================
 
-@app.route(
-    "/admin/vip-upgrades",
-    methods=["GET"],
-)
+@app.post("/admin/vips/<int:vip_id>/decline")
 @admin_required
-async def list_upgrade_requests_vs_style():
+async def admin_decline_vip(vip_id):
+    vip = await db_fetch_one(
+        """
+        SELECT id
+        FROM vip_users
+        WHERE id = :id
+        """,
+        {
+            "id": vip_id
+        },
+    )
 
+    if not vip:
+        return jsonify({
+            "error": "VIP user not found"
+        }), 404
+
+    await db_execute(
+        """
+        DELETE FROM vip_picks
+        WHERE number = (
+            SELECT number
+            FROM vip_users
+            WHERE id = :id
+        )
+        """,
+        {
+            "id": vip_id
+        },
+    )
+
+    await db_execute(
+        """
+        DELETE FROM vip_upgrade_requests
+        WHERE vip_id = :id
+        """,
+        {
+            "id": vip_id
+        },
+    )
+
+    await db_execute(
+        """
+        DELETE FROM vip_users
+        WHERE id = :id
+        """,
+        {
+            "id": vip_id
+        },
+    )
+
+    return jsonify({
+        "message": "VIP registration declined"
+    })
+
+
+# ============================================================
+# ADMIN UPGRADE REQUESTS
+# ============================================================
+
+@app.get("/admin/upgrade-requests")
+@admin_required
+async def admin_upgrade_requests():
     rows = await db_fetch_all(
+        """
+        SELECT
+            ur.id,
+            ur.vip_id,
+            ur.from_plan,
+            ur.to_plan,
+            ur.status,
+            ur.created_at,
+            ur.approved_at,
+            vu.name,
+            vu.number
+        FROM vip_upgrade_requests ur
+        LEFT JOIN vip_users vu
+            ON vu.id = ur.vip_id
+        ORDER BY ur.created_at DESC
+        """
+    )
+
+    return jsonify({
+        "requests": rows
+    })
+
+
+# ============================================================
+# ADMIN APPROVE UPGRADE
+# ============================================================
+
+@app.post("/admin/upgrade-requests/<int:request_id>/approve")
+@admin_required
+async def admin_approve_upgrade(request_id):
+    req = await db_fetch_one(
         """
         SELECT
             id,
             vip_id,
             from_plan,
             to_plan,
-            status,
-            created_at
+            status
         FROM vip_upgrade_requests
-        WHERE status = 'pending'
-        ORDER BY created_at ASC
-        """
-    )
-
-    return jsonify([
-        dict(r)
-        for r in rows
-    ])
-
-
-@app.route(
-    "/admin/vip-upgrades/pending",
-    methods=["GET"],
-)
-@admin_required
-async def list_upgrade_requests_vip_style():
-
-    rows = await db_fetch_all(
-        """
-        SELECT
-            r.id,
-            r.vip_id,
-            u.name,
-            u.number,
-            r.to_plan AS new_plan,
-            r.from_plan,
-            r.status,
-            r.created_at
-        FROM vip_upgrade_requests r
-        JOIN vip_users u
-          ON u.id = r.vip_id
-        WHERE r.status = 'pending'
-        ORDER BY r.created_at DESC
-        """
-    )
-
-    return jsonify([
-        dict(r)
-        for r in rows
-    ])
-
-
-@app.route(
-    "/admin/vip-upgrades/approve/<int:req_id>",
-    methods=["POST"],
-)
-@admin_required
-async def approve_upgrade(req_id):
-
-    result, error = await handle_upgrade_request(
-        req_id,
-        approve=True,
-    )
-
-    if error:
-        return jsonify({
-            "error": error
-        }), 400
-
-    return jsonify({
-        "success": True,
-        **result,
-    })
-
-
-@app.route(
-    "/admin/vip-upgrades/decline/<int:req_id>",
-    methods=["POST"],
-)
-@admin_required
-async def decline_upgrade(req_id):
-
-    result, error = await handle_upgrade_request(
-        req_id,
-        approve=False,
-    )
-
-    if error:
-        return jsonify({
-            "error": error
-        }), 400
-
-    return jsonify({
-        "success": True,
-        **result,
-    })
-
-
-# ============================================================
-# ADMIN VIP PICK PREVIEW
-# ============================================================
-
-@app.route(
-    "/admin/vip-picks/preview",
-    methods=["GET"],
-)
-@admin_required
-async def preview_matches():
-
-    try:
-        days = int(
-            request.args.get(
-                "days",
-                3,
-            )
-        )
-    except Exception:
-        days = 3
-
-    matches = await get_matches_for_next_days(
-        days
-    )
-
-    return jsonify(matches)
-
-
-# ============================================================
-# ADMIN VIP PICK DISTRIBUTION
-# ============================================================
-
-@app.route(
-    "/admin/vip-picks/distribute",
-    methods=["POST"],
-)
-@admin_required
-async def distribute_picks():
-
-    data = request.get_json() or {}
-
-    vip_numbers = data.get(
-        "vip_numbers",
-        [],
-    )
-
-    matches = data.get(
-        "matches",
-        [],
-    )
-
-    if not vip_numbers or not matches:
-        return jsonify({
-            "error": (
-                "vip_numbers and matches required"
-            )
-        }), 400
-
-    today = today_kenya_iso()
-
-    summary = []
-    received_vips = []
-    skipped_vips = []
-
-    # --------------------------------------------------------
-    # Find VIPs with available quota
-    # --------------------------------------------------------
-
-    eligible_vips = []
-
-    for number in vip_numbers:
-
-        vip = await db_fetch_one(
-            """
-            SELECT
-                subscription,
-                subscription_expiry
-            FROM vip_users
-            WHERE number = :number
-              AND approved = TRUE
-            """,
-            {
-                "number": number,
-            },
-        )
-
-        if not vip:
-            continue
-
-        expiry = parse_expiry(
-            vip.get("subscription_expiry")
-        )
-
-        if (
-            expiry is not None
-            and expiry < today_kenya_date()
-        ):
-            continue
-
-        quota = get_quota(
-            vip["subscription"]
-        )
-
-        used_row = await db_fetch_one(
-            """
-            SELECT COUNT(*) AS c
-            FROM vip_picks
-            WHERE number = :number
-              AND (created_at AT TIME ZONE 'Africa/Nairobi')::date = :today::date
-            """,
-            {
-                "number": number,
-                "today": today,
-            },
-        )
-
-        used = int(
-            used_row["c"]
-            if used_row
-            else 0
-        )
-
-        remaining = max(
-            0,
-            quota - used,
-        )
-
-        if remaining > 0:
-            eligible_vips.append(
-                number
-            )
-
-    if not eligible_vips:
-
-        return jsonify({
-            "error": (
-                "No VIPs with available "
-                "quota today. "
-                "Distribution aborted."
-            )
-        }), 400
-
-    # --------------------------------------------------------
-    # Distribute picks
-    # --------------------------------------------------------
-
-    for number in vip_numbers:
-
-        vip = await db_fetch_one(
-            """
-            SELECT
-                subscription,
-                subscription_expiry
-            FROM vip_users
-            WHERE number = :number
-              AND approved = TRUE
-            """,
-            {
-                "number": number,
-            },
-        )
-
-        vip_summary = {
-            "vip_number": number,
-            "added": 0,
-            "received_matches": [],
-            "skipped_matches": [],
-            "status": "",
-        }
-
-        if not vip:
-
-            vip_summary["status"] = (
-                "Skipped: Expired/Not approved"
-            )
-
-            skipped_vips.append(number)
-            summary.append(vip_summary)
-
-            continue
-
-        expiry = parse_expiry(
-            vip.get("subscription_expiry")
-        )
-
-        if (
-            expiry is not None
-            and expiry < today_kenya_date()
-        ):
-
-            vip_summary["status"] = (
-                "Skipped: Expired/Not approved"
-            )
-
-            skipped_vips.append(number)
-            summary.append(vip_summary)
-
-            continue
-
-        quota = get_quota(
-            vip["subscription"]
-        )
-
-        used_row = await db_fetch_one(
-            """
-            SELECT COUNT(*) AS c
-            FROM vip_picks
-            WHERE number = :number
-              AND (created_at AT TIME ZONE 'Africa/Nairobi')::date = :today::date
-            """,
-            {
-                "number": number,
-                "today": today,
-            },
-        )
-
-        used = int(
-            used_row["c"]
-            if used_row
-            else 0
-        )
-
-        remaining = max(
-            0,
-            quota - used,
-        )
-
-        added = 0
-
-        for m in matches:
-
-            if added >= remaining:
-
-                vip_summary[
-                    "skipped_matches"
-                ].append({
-                    "match_id": m.get(
-                        "match_id"
-                    ),
-                    "reason": "Quota full",
-                })
-
-                break
-
-            if "match_id" not in m:
-
-                vip_summary[
-                    "skipped_matches"
-                ].append({
-                    "match_id": None,
-                    "reason": (
-                        "Missing match_id"
-                    ),
-                })
-
-                continue
-
-            match_id = m["match_id"]
-
-            exists = await db_fetch_one(
-                """
-                SELECT 1
-                FROM vip_picks
-                WHERE number = :number
-                  AND match_id = :match_id
-                LIMIT 1
-                """,
-                {
-                    "number": number,
-                    "match_id": match_id,
-                },
-            )
-
-            if exists:
-
-                vip_summary[
-                    "skipped_matches"
-                ].append({
-                    "match_id": match_id,
-                    "reason": "Already picked",
-                })
-
-                continue
-
-            match = await db_fetch_one(
-                """
-                SELECT
-                    id AS match_id,
-                    home_team_name AS home,
-                    away_team_name AS away,
-                    utcdate AS utc
-                FROM matches
-                WHERE id = :match_id
-                """,
-                {
-                    "match_id": match_id,
-                },
-            )
-
-            if not match:
-
-                vip_summary[
-                    "skipped_matches"
-                ].append({
-                    "match_id": match_id,
-                    "reason": (
-                        "Match not found"
-                    ),
-                })
-
-                continue
-
-            try:
-                odds = float(
-                    m.get(
-                        "odds",
-                        1.5,
-                    )
-                )
-            except Exception:
-                odds = 1.5
-
-            pick = str(
-                m.get(
-                    "pick",
-                    "1X2",
-                )
-            )
-
-            if await insert_vip_pick(
-                number,
-                dict(match),
-                pick,
-                odds,
-            ):
-
-                added += 1
-
-                vip_summary[
-                    "received_matches"
-                ].append(
-                    match["match_id"]
-                )
-
-        vip_summary["added"] = added
-
-        vip_summary["status"] = (
-            "Received"
-            if added > 0
-            else "Skipped: Quota full or invalid"
-        )
-
-        if added > 0:
-            received_vips.append(number)
-        else:
-            skipped_vips.append(number)
-
-        summary.append(vip_summary)
-
-    log_admin(
-        request.admin_username,
-        "distribute_picks",
+        WHERE id = :id
+        """,
         {
-            "vip_count": len(vip_numbers),
-            "match_count": len(matches),
-            "received_vips": received_vips,
-            "skipped_vips": skipped_vips,
+            "id": request_id
         },
     )
 
-    return jsonify({
-        "summary": summary,
-        "received_vips": received_vips,
-        "skipped_vips": skipped_vips,
-    })
+    if not req:
+        return jsonify({
+            "error": "upgrade request not found"
+        }), 404
 
+    if req["status"] != "pending":
+        return jsonify({
+            "error": "upgrade request is not pending"
+        }), 400
 
-# ============================================================
-# ADMIN CLEAR ALL VIP PICKS
-# ============================================================
+    expiry = (
+        datetime.now(UTC)
+        + timedelta(days=PLAN_DAYS[req["to_plan"]])
+    ).isoformat()
 
-@app.route(
-    "/admin/vip-picks/clear",
-    methods=["POST"],
-)
-@admin_required
-async def clear_all_vip_picks():
-
-    row = await db_fetch_one(
+    await db_execute(
         """
-        SELECT COUNT(*) AS c
-        FROM vip_picks
-        """
-    )
-
-    count = int(
-        row["c"]
-        if row
-        else 0
+        UPDATE vip_users
+        SET
+            subscription = :subscription,
+            subscription_expiry = :expiry
+        WHERE id = :vip_id
+        """,
+        {
+            "subscription": req["to_plan"],
+            "expiry": expiry,
+            "vip_id": req["vip_id"],
+        },
     )
 
     await db_execute(
         """
-        DELETE FROM vip_picks
-        """
-    )
-
-    log_admin(
-        request.admin_username,
-        "clear_vip_picks",
-        count,
+        UPDATE vip_upgrade_requests
+        SET
+            status = 'approved',
+            approved_at = CURRENT_TIMESTAMP
+        WHERE id = :id
+        """,
+        {
+            "id": request_id
+        },
     )
 
     return jsonify({
-        "success": True,
-        "message": "All VIP picks cleared",
-        "deleted_rows": count,
+        "message": "upgrade approved successfully"
     })
 
 
 # ============================================================
-# ADMIN CLEAR VIP PICKS FOR NUMBER
+# ADMIN DECLINE UPGRADE
 # ============================================================
 
-@app.route(
-    "/admin/vip-picks/clear/<string:number>",
-    methods=["POST"],
-)
+@app.post("/admin/upgrade-requests/<int:request_id>/decline")
 @admin_required
-async def clear_vip_picks_for_number(
-    number
-):
-
-    row = await db_fetch_one(
+async def admin_decline_upgrade(request_id):
+    req = await db_fetch_one(
         """
-        SELECT COUNT(*) AS c
-        FROM vip_picks
-        WHERE number = :number
+        SELECT id, status
+        FROM vip_upgrade_requests
+        WHERE id = :id
         """,
         {
-            "number": number,
+            "id": request_id
         },
     )
 
-    count = int(
-        row["c"]
-        if row
-        else 0
-    )
-
-    if count == 0:
+    if not req:
         return jsonify({
-            "success": False,
-            "message": (
-                "No picks found for this VIP"
-            ),
+            "error": "upgrade request not found"
         }), 404
 
     await db_execute(
         """
-        DELETE FROM vip_picks
-        WHERE number = :number
+        UPDATE vip_upgrade_requests
+        SET status = 'declined'
+        WHERE id = :id
         """,
         {
-            "number": number,
-        },
-    )
-
-    log_admin(
-        request.admin_username,
-        "clear_vip_picks_for_vip",
-        {
-            "vip_number": number,
-            "deleted": count,
+            "id": request_id
         },
     )
 
     return jsonify({
-        "success": True,
-        "vip_number": number,
-        "deleted_rows": count,
+        "message": "upgrade request declined"
+    })
+
+
+# ============================================================
+# ADMIN VIP PICKS PREVIEW
+# ============================================================
+
+@app.get("/admin/vip-picks/preview")
+@admin_required
+async def admin_vip_picks_preview():
+    days = request.args.get(
+        "days",
+        default=3,
+        type=int,
+    )
+
+    days = max(1, min(days, 30))
+
+    try:
+        matches = await get_matches_for_next_days(days)
+
+        return jsonify({
+            "days": days,
+            "matches": matches,
+            "count": len(matches),
+        })
+
+    except Exception as exc:
+        log_json(
+            "error",
+            event="vip_preview_failed",
+            error=str(exc),
+        )
+
+        return jsonify({
+            "error": "internal server error"
+        }), 500
+
+
+# ============================================================
+# ADMIN DISTRIBUTE VIP PICKS
+# ============================================================
+#
+# Expected payload:
+#
+# {
+#   "number": "0700000001",
+#   "picks": [
+#       {
+#           "match_id": 123,
+#           "pick": "HOME",
+#           "odds": 1.80
+#       }
+#   ]
+# }
+#
+# ============================================================
+
+@app.post("/admin/vip-picks/distribute")
+@admin_required
+async def admin_distribute_vip_picks():
+    data = request.get_json(silent=True) or {}
+
+    number = str(
+        data.get("number", "")
+    ).strip()
+
+    picks = data.get("picks", [])
+
+    if not number:
+        return jsonify({
+            "error": "number is required"
+        }), 400
+
+    if not isinstance(picks, list):
+        return jsonify({
+            "error": "picks must be a list"
+        }), 400
+
+    vip = await db_fetch_one(
+        """
+        SELECT
+            id,
+            name,
+            number,
+            subscription,
+            approved
+        FROM vip_users
+        WHERE number = :number
+        """,
+        {
+            "number": number
+        },
+    )
+
+    if not vip:
+        return jsonify({
+            "error": "VIP user not found"
+        }), 404
+
+    if not vip["approved"]:
+        return jsonify({
+            "error": "VIP user is not approved"
+        }), 403
+
+    quota = SUBSCRIPTION_QUOTA.get(
+        vip["subscription"],
+        0,
+    )
+
+    existing = await db_fetch_one(
+        """
+        SELECT COUNT(*) AS count
+        FROM vip_picks
+        WHERE number = :number
+          AND created_at >= CURRENT_DATE
+        """,
+        {
+            "number": number
+        },
+    )
+
+    used = int(existing["count"]) if existing else 0
+
+    remaining = max(quota - used, 0)
+
+    if len(picks) > remaining:
+        return jsonify({
+            "error": "VIP quota exceeded",
+            "quota": quota,
+            "used": used,
+            "remaining": remaining,
+        }), 400
+
+    created = []
+
+    for item in picks:
+        match_id = item.get("match_id")
+        pick = str(
+            item.get("pick", "")
+        ).strip().upper()
+
+        odds = item.get("odds")
+
+        if not match_id or not pick:
+            continue
+
+        match = await db_fetch_one(
+            """
+            SELECT
+                id,
+                home_team_name,
+                away_team_name,
+                utcdate,
+                status
+            FROM matches
+            WHERE id = :id
+            """,
+            {
+                "id": match_id
+            },
+        )
+
+        if not match:
+            continue
+
+        existing_pick = await db_fetch_one(
+            """
+            SELECT id
+            FROM vip_picks
+            WHERE number = :number
+              AND match_id = :match_id
+            LIMIT 1
+            """,
+            {
+                "number": number,
+                "match_id": match_id,
+            },
+        )
+
+        if existing_pick:
+            continue
+
+        row = await db_fetch_one(
+            """
+            INSERT INTO vip_picks (
+                number,
+                match_id,
+                home_team,
+                away_team,
+                match_time,
+                pick,
+                odds
+            )
+            VALUES (
+                :number,
+                :match_id,
+                :home_team,
+                :away_team,
+                :match_time,
+                :pick,
+                :odds
+            )
+            RETURNING
+                id,
+                number,
+                match_id,
+                home_team,
+                away_team,
+                match_time,
+                pick,
+                odds,
+                created_at
+            """,
+            {
+                "number": number,
+                "match_id": match_id,
+                "home_team": match["home_team_name"],
+                "away_team": match["away_team_name"],
+                "match_time": match["utcdate"],
+                "pick": pick,
+                "odds": odds,
+            },
+        )
+
+        created.append(row)
+
+    return jsonify({
+        "message": "VIP picks distributed successfully",
+        "count": len(created),
+        "picks": created,
+    })
+
+
+# ============================================================
+# CLEAR ALL VIP PICKS
+# ============================================================
+
+@app.delete("/admin/vip-picks/clear-all")
+@admin_required
+async def admin_clear_all_vip_picks():
+    result = await db_execute(
+        """
+        DELETE FROM vip_picks
+        """
+    )
+
+    return jsonify({
+        "message": "all VIP picks cleared",
+        "result": result,
+    })
+
+
+# ============================================================
+# CLEAR VIP PICKS BY NUMBER
+# ============================================================
+
+@app.delete("/admin/vip-picks/<number>")
+@admin_required
+async def admin_clear_vip_picks(number):
+    result = await db_execute(
+        """
+        DELETE FROM vip_picks
+        WHERE number = :number
+        """,
+        {
+            "number": number
+        },
+    )
+
+    return jsonify({
+        "message": "VIP picks cleared",
+        "number": number,
+        "result": result,
     })
 
 
@@ -2149,20 +1541,25 @@ async def clear_vip_picks_for_number(
 # ============================================================
 
 @app.errorhandler(404)
-def not_found(e):
-
+def not_found(error):
     return jsonify({
         "error": "endpoint not found"
     }), 404
 
 
-@app.errorhandler(500)
-def internal_error(e):
+@app.errorhandler(405)
+def method_not_allowed(error):
+    return jsonify({
+        "error": "method not allowed"
+    }), 405
 
+
+@app.errorhandler(500)
+def internal_error(error):
     log_json(
         "error",
         event="internal_server_error",
-        error=str(e),
+        error=str(error),
     )
 
     return jsonify({
@@ -2171,153 +1568,26 @@ def internal_error(e):
 
 
 # ============================================================
-# POSTGRESQL DB INIT
-# ============================================================
-
-async def init_db_async():
-
-    print(
-        f"[VIP DB] Initializing PostgreSQL "
-        f"schema: {DB_SCHEMA}"
-    )
-
-    # --------------------------------------------------------
-    # VIP USERS
-    # --------------------------------------------------------
-
-    await db_execute(
-        """
-        CREATE TABLE IF NOT EXISTS vip_users (
-            id BIGSERIAL PRIMARY KEY,
-            name TEXT,
-            number TEXT UNIQUE,
-            subscription TEXT,
-            subscription_expiry TEXT,
-            approved BOOLEAN DEFAULT FALSE
-        )
-        """
-    )
-
-    # --------------------------------------------------------
-    # VIP PICKS
-    # --------------------------------------------------------
-
-    await db_execute(
-        """
-        CREATE TABLE IF NOT EXISTS vip_picks (
-            id BIGSERIAL PRIMARY KEY,
-            number TEXT NOT NULL,
-            match_id BIGINT NOT NULL,
-            home_team TEXT,
-            away_team TEXT,
-            match_time TIMESTAMPTZ,
-            pick TEXT,
-            odds DOUBLE PRECISION,
-            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-        )
-        """
-    )
-
-    # --------------------------------------------------------
-    # ADMINS
-    # --------------------------------------------------------
-
-    await db_execute(
-        """
-        CREATE TABLE IF NOT EXISTS admins (
-            id BIGSERIAL PRIMARY KEY,
-            username TEXT UNIQUE,
-            password TEXT,
-            failed_attempts INTEGER DEFAULT 0
-        )
-        """
-    )
-
-    # --------------------------------------------------------
-    # VIP UPGRADE REQUESTS
-    # --------------------------------------------------------
-
-    await db_execute(
-        """
-        CREATE TABLE IF NOT EXISTS vip_upgrade_requests (
-            id BIGSERIAL PRIMARY KEY,
-            vip_id BIGINT,
-            from_plan TEXT,
-            to_plan TEXT,
-            status TEXT,
-            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-            approved_at TIMESTAMPTZ
-        )
-        """
-    )
-
-    # --------------------------------------------------------
-    # INDEXES
-    # --------------------------------------------------------
-
-    await db_execute(
-        """
-        CREATE INDEX IF NOT EXISTS
-        idx_vip_picks_number_created
-        ON vip_picks(number, created_at)
-        """
-    )
-
-    await db_execute(
-        """
-        CREATE INDEX IF NOT EXISTS
-        idx_vip_picks_match_id
-        ON vip_picks(match_id)
-        """
-    )
-
-    await db_execute(
-        """
-        CREATE INDEX IF NOT EXISTS
-        idx_vip_upgrade_status
-        ON vip_upgrade_requests(status)
-        """
-    )
-
-    print(
-        "[VIP DB] PostgreSQL initialization complete."
-    )
-
-
-# ============================================================
-# APP RUNNER
+# STARTUP
 # ============================================================
 
 if __name__ == "__main__":
-
-    import asyncio
-
-    asyncio.run(
-        init_db_async()
-    )
-
-    port = int(
-        os.environ.get(
-            "PORT",
-            5004,
-        )
-    )
+    try:
+        asyncio.run(init_db_async())
+    except Exception as exc:
+        print("[VIP DB] Initialization failed:")
+        traceback.print_exc()
+        raise
 
     log_json(
         "info",
         event="api_start",
-        port=port,
+        port=5004,
         schema=DB_SCHEMA,
     )
 
     app.run(
         host="0.0.0.0",
-        port=port,
-        debug=(
-            os.getenv(
-                "FLASK_DEBUG",
-                "0",
-            )
-            == "1"
-        ),
+        port=5004,
+        debug=False,
     )
