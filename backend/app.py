@@ -3336,9 +3336,7 @@ def tips_daily():
             m.away_team_name,
 
             m.home_score,
-            m.away_score,
-
-            m.venue
+            m.away_score
 
         FROM predictions p
 
@@ -3476,10 +3474,6 @@ def tips_daily():
                         ),
                 },
 
-                "venue":
-                    row.get(
-                        "venue"
-                    ),
             })
 
         return jsonify({
