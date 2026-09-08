@@ -90,19 +90,6 @@ def log_json(level, **data):
 # ============================================================
 # POSTGRES HELPERS
 # ============================================================
-#
-# IMPORTANT:
-# We intentionally DO NOT use the global asyncpg pool from
-# config2.py here.
-#
-# Flask async routes can execute on different event loops.
-# Reusing the global asyncpg pool can cause:
-#   - Event loop is closed
-#   - another operation is in progress
-#
-# Therefore every VIP DB operation gets its own fresh connection.
-# ============================================================
-
 async def vip_query_db(sql, params=None):
     sql, params = _convert_named_to_positional(sql, params or {})
 
@@ -1301,21 +1288,6 @@ async def admin_vip_picks_preview():
 # ============================================================
 # ADMIN DISTRIBUTE VIP PICKS
 # ============================================================
-#
-# Expected payload:
-#
-# {
-#   "number": "0700000001",
-#   "picks": [
-#       {
-#           "match_id": 123,
-#           "pick": "HOME",
-#           "odds": 1.80
-#       }
-#   ]
-# }
-#
-# ============================================================
 
 @app.post("/admin/vip-picks/distribute")
 @admin_required
@@ -1553,19 +1525,21 @@ def method_not_allowed(error):
         "error": "method not allowed"
     }), 405
 
-
 @app.errorhandler(500)
 def internal_error(error):
+    traceback.print_exc()
+
     log_json(
         "error",
         event="internal_server_error",
         error=str(error),
+        traceback=traceback.format_exc(),
     )
 
     return jsonify({
-        "error": "internal server error"
+        "error": "internal server error",
+        "detail": str(error),
     }), 500
-
 
 # ============================================================
 # STARTUP
