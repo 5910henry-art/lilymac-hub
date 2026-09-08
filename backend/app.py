@@ -1406,6 +1406,8 @@ def dashboard():
         )
     )
 
+    date_filter = request.args.get("date")
+
     page = max(
         request.args.get(
             "page",
@@ -1625,6 +1627,16 @@ def dashboard():
 
         params["threshold"] = (
             threshold_filter
+        )
+
+    if date_filter:
+
+        conditions.append(
+            "DATE(match_time AT TIME ZONE 'Africa/Nairobi') = :date"
+        )
+
+        params["date"] = (
+            date_filter
         )
 
     where_sql = ""
