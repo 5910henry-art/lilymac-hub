@@ -1109,6 +1109,67 @@ async def admin_decline_vip(vip_id):
 
 
 # ============================================================
+# ADMIN DELETE VIP
+# ============================================================
+@app.post("/admin/vips/<int:vip_id>/delete")
+@admin_required
+async def admin_delete_vip(vip_id):
+    vip = await db_fetch_one(
+        """
+        SELECT id, number
+        FROM vip_users
+        WHERE id = :id
+        """,
+        {
+            "id": vip_id
+        },
+    )
+
+    if not vip:
+        return jsonify({
+            "error": "VIP user not found"
+        }), 404
+
+    # Delete all VIP picks first
+    await db_execute(
+        """
+        DELETE FROM vip_picks
+        WHERE number = :number
+        """,
+        {
+            "number": vip["number"]
+        },
+    )
+
+    # Delete pending/historical upgrade requests
+    await db_execute(
+        """
+        DELETE FROM vip_upgrade_requests
+        WHERE vip_id = :id
+        """,
+        {
+            "id": vip_id
+        },
+    )
+
+    # Finally delete the VIP account
+    await db_execute(
+        """
+        DELETE FROM vip_users
+        WHERE id = :id
+        """,
+        {
+            "id": vip_id
+        },
+    )
+
+    return jsonify({
+        "success": True,
+        "message": "VIP account deleted successfully"
+    })
+
+
+# ============================================================
 # ADMIN UPGRADE REQUESTS
 # ============================================================
 
@@ -1527,20 +1588,15 @@ def method_not_allowed(error):
 
 @app.errorhandler(500)
 def internal_error(error):
-    traceback.print_exc()
-
     log_json(
         "error",
         event="internal_server_error",
         error=str(error),
-        traceback=traceback.format_exc(),
     )
 
     return jsonify({
-        "error": "internal server error",
-        "detail": str(error),
+        "error": "internal server error"
     }), 500
-
 # ============================================================
 # STARTUP
 # ============================================================
