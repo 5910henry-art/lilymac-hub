@@ -1,1 +1,1 @@
-web: gunicorn gateway:app --bind 0.0.0.0:$PORT
+web: gunicorn -w 1 --threads 50 gateway:app --bind 0.0.0.0:$PORT
