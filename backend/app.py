@@ -4663,8 +4663,13 @@ def live_matches():
                     local_date,
 
                 "updated_at":
-                    row.get(
-                        "generated_at"
+                    (
+                        row.get("generated_at").isoformat()
+                        if isinstance(
+                            row.get("generated_at"),
+                            datetime
+                        )
+                        else row.get("generated_at")
                     ),
             })
 
@@ -4889,8 +4894,13 @@ def build_live_snapshot():
                     local_date,
 
                 "updated_at":
-                    row.get(
-                        "generated_at"
+                    (
+                        row.get("generated_at").isoformat()
+                        if isinstance(
+                            row.get("generated_at"),
+                            datetime
+                        )
+                        else row.get("generated_at")
                     ),
             })
 
@@ -4943,7 +4953,7 @@ def build_live_snapshot():
 
 
 @socketio.on("connect")
-def live_socket_connect():
+def live_socket_connect(auth=None):
 
     log_json(
         "info",
