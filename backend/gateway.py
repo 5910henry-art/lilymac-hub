@@ -11,8 +11,6 @@ from flask_compress import Compress
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from werkzeug.middleware.dispatcher import DispatcherMiddleware
-from socketio import WSGIApp
-
 
 # ============================================================
 # Backend apps
@@ -213,12 +211,6 @@ def redis_health():
 
 # ============================================================
 # REAL FOOTBALL LIVE BRIDGE
-#
-# /live belongs to main_app (app.py), while the gateway itself
-# is the Render production entrypoint.
-#
-# Re-enter main_app's Flask request context so the existing
-# /live route executes exactly as it does when accessed directly.
 # ============================================================
 
 @gateway.route("/live", methods=["GET"])
@@ -240,17 +232,6 @@ def gateway_live():
 
 # ============================================================
 # Multi-application dispatcher
-#
-# Gateway serves the main backend applications.
-#
-# Virtual is intentionally NOT mounted here.
-# Virtual runs as a separate Render service.
-#
-# Routes:
-#   /app       -> main application
-#   /bet       -> betting application
-#   /vipadmin  -> VIP admin application
-#   /vip       -> VIP admin application
 # ============================================================
 
 http_application = DispatcherMiddleware(
@@ -264,35 +245,13 @@ http_application = DispatcherMiddleware(
 )
 
 
-# ============================================================
-# Socket.IO production WSGI entry
-#
-# Socket.IO handles:
-#     /socket.io/*
-#
-# All ordinary HTTP requests fall through to the existing
-# gateway dispatcher:
-#     /app/*
-#     /bet/*
-#     /vipadmin/*
-#     /vip/*
-#     /live
-#     /health
-# ============================================================
-
-application = WSGIApp(
-    socketio.server,
-    http_application,
-)
-
 
 # ============================================================
-# Production WSGI entry
-# ============================================================
+socketio_wsgi = socketio.sockio_mw
 
-app = application
+socketio_wsgi.wsgi_app = http_application
 
-
+app = socketio_wsgi
 # ============================================================
 # Local development
 # ============================================================
