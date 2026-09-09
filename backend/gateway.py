@@ -234,21 +234,29 @@ def gateway_live():
 # Multi-application dispatcher
 # ============================================================
 
+# ============================================================
+# Multi-application dispatcher
+# ============================================================
+
+# Flask-SocketIO has already attached its Socket.IO middleware
+# to main_app. Save the original Flask WSGI application before
+# reusing the Socket.IO middleware at the gateway level.
+socketio_wsgi = socketio.sockio_mw
+main_app_wsgi = socketio_wsgi.wsgi_app
+
 http_application = DispatcherMiddleware(
     gateway,
     {
-        "/app": main_app,
+        "/app": main_app_wsgi,
         "/bet": bet_app,
         "/vipadmin": vipadmin_app,
         "/vip": vipadmin_app,
     },
 )
 
-
-
-# ============================================================
-socketio_wsgi = socketio.sockio_mw
-
+# Gateway-level Socket.IO middleware:
+# - handles /socket.io/
+# - sends normal HTTP requests to DispatcherMiddleware
 socketio_wsgi.wsgi_app = http_application
 
 app = socketio_wsgi
