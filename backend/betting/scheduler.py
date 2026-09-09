@@ -2442,46 +2442,93 @@ def auto_update_live_cashouts(session=None):
     # ========================================================
     # 9. BETSLIP CASHOUT
     #
-    # IMPORTANT:
-    #
-    # Every pending slip is evaluated, even if there are no
-    # normal Bet rows.
+    # Only recalculate slips when at least one selection is
+    # due/live/finished. Slips containing only future matches
+    # are left untouched until their first match becomes due.
     # ========================================================
 
-    last_id = 0
+    # Determine which pending slips actually need a cashout
+    # recalculation in this cycle.
+    slips_needing_cashout = set()
 
-    while True:
+    for sel in pending_slip_selections:
 
-        slips = (
-            session.query(BetSlip)
-            .enable_eagerloads(False)
-            .filter(
-                BetSlip.status == "pending",
-                BetSlip.id > last_id,
-            )
-            .order_by(BetSlip.id)
-            .limit(BATCH_SIZE)
-            .all()
+        match_id = getattr(sel, "bookmark_id", None)
+
+        if not match_id:
+            # Keep legacy/malformed selections eligible so the
+            # existing cashout function can handle them.
+            slips_needing_cashout.add(sel.betslip_id)
+            continue
+
+        match = matches_map.get(match_id)
+
+        if match is None:
+            # If the match could not be loaded, leave it eligible.
+            slips_needing_cashout.add(sel.betslip_id)
+            continue
+
+        status = (
+            getattr(match, "status", None) or ""
+        ).upper()
+
+        utcdate = getattr(match, "utcdate", None)
+
+        match_is_due = (
+            utcdate is None
+            or utcdate <= now
         )
 
-        if not slips:
-            break
+        match_is_active_or_finished = status in {
+            "IN_PLAY",
+            "LIVE",
+            "FINISHED",
+        }
 
-        for slip in slips:
+        if match_is_due or match_is_active_or_finished:
+            slips_needing_cashout.add(
+                sel.betslip_id
+            )
 
-            if update_betslip_cashout(
-                session,
-                slip,
-                matches_map,
-                bookmarks_map,
-                now,
-            ):
+    if slips_needing_cashout:
 
-                total_slips += 1
+        last_id = 0
 
-        last_id = slips[-1].id
+        while True:
 
-        session.flush()
+            slips = (
+                session.query(BetSlip)
+                .enable_eagerloads(False)
+                .filter(
+                    BetSlip.status == "pending",
+                    BetSlip.id > last_id,
+                    BetSlip.id.in_(
+                        list(slips_needing_cashout)
+                    ),
+                )
+                .order_by(BetSlip.id)
+                .limit(BATCH_SIZE)
+                .all()
+            )
+
+            if not slips:
+                break
+
+            for slip in slips:
+
+                if update_betslip_cashout(
+                    session,
+                    slip,
+                    matches_map,
+                    bookmarks_map,
+                    now,
+                ):
+
+                    total_slips += 1
+
+            last_id = slips[-1].id
+
+            session.flush()
 
     return {
         "bets_updated": total_bets,
