@@ -2,6 +2,7 @@
 
 import logging
 import os
+import time
 
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import (
@@ -27,7 +28,6 @@ from betting.models import (
 # ============================================================
 
 auth_bp = Blueprint("auth", __name__)
-
 logger = logging.getLogger(__name__)
 
 
@@ -218,19 +218,57 @@ def login():
             "error": "phone and password required",
         }), 400
 
-    user = (
-        db.session
-        .query(User)
-        .filter_by(phone=phone)
-        .first()
+    # --------------------------------------------------------
+    # Database lookup diagnostics
+    # --------------------------------------------------------
+
+    query_start = time.monotonic()
+
+    logger.info(
+        "LOGIN_DB_QUERY_START | phone=%s",
+        phone,
     )
 
+    try:
+        user = (
+            db.session
+            .query(User)
+            .filter_by(phone=phone)
+            .first()
+        )
+
+        logger.info(
+            "LOGIN_DB_QUERY_DONE | elapsed=%.3fs | found=%s",
+            time.monotonic() - query_start,
+            user is not None,
+        )
+
+    except Exception:
+        logger.exception(
+            "LOGIN_DB_QUERY_ERROR | elapsed=%.3fs",
+            time.monotonic() - query_start,
+        )
+
+        db.session.rollback()
+
+        return jsonify({
+            "success": False,
+            "error": "database error",
+        }), 500
+
+    # --------------------------------------------------------
     # Do not reveal whether a phone number exists.
+    # --------------------------------------------------------
+
     if not user:
         return jsonify({
             "success": False,
             "error": "invalid credentials",
         }), 401
+
+    # --------------------------------------------------------
+    # Verify password
+    # --------------------------------------------------------
 
     try:
         password_valid = pbkdf2_sha256.verify(
@@ -449,13 +487,8 @@ def change_password():
 # RESET PASSWORD
 # ============================================================
 #
-# IMPORTANT:
-#
-# The old implementation allowed anyone who knew a phone
-# number to reset that user's password.
-#
-# Until a proper OTP / SMS / email reset-token system exists,
-# this endpoint requires the ADMIN_SECRET.
+# The endpoint requires ADMIN_SECRET until a proper OTP / SMS /
+# email reset-token system exists.
 #
 # Required JSON:
 #
