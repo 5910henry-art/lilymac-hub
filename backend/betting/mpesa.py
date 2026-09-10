@@ -530,6 +530,12 @@ def b2c_payment(
         "/mpesa/b2c/v3/paymentrequest"
     )
 
+    logger.info(
+        "B2C CALLBACK URLS | result=%s | timeout=%s",
+        MPESA_B2C_RESULT_URL,
+        MPESA_B2C_TIMEOUT_URL,
+    )
+
     payload = {
         "OriginatorConversationID": (
             originator_conversation_id
