@@ -739,46 +739,51 @@ def register_admin_routes(app):
 
     def _extract_b2c_transaction_id(result):
         """
-        Safaricom normally places TransactionID inside:
+        Extract the final M-PESA B2C transaction/receipt ID.
 
-            ResultParameters.ResultParameter[]
+        Safaricom may provide TransactionID directly under Result,
+        or inside ResultParameters.ResultParameter[].
         """
-
         try:
+            if not isinstance(result, dict):
+                return None
 
-            parameters = (
-                result.get("ResultParameters")
-                or {}
-            )
+            # Preferred format: TransactionID directly under Result.
+            transaction_id = result.get("TransactionID")
 
-            items = (
-                parameters.get("ResultParameter")
-                or []
-            )
+            if transaction_id is not None:
+                transaction_id = str(transaction_id).strip()
+                if transaction_id:
+                    return transaction_id
+
+            # Fallback: inspect ResultParameters.ResultParameter[].
+            parameters = result.get("ResultParameters") or {}
+            items = parameters.get("ResultParameter") or []
 
             if isinstance(items, dict):
                 items = [items]
 
-            for item in items:
+            if not isinstance(items, list):
+                return None
 
+            for item in items:
                 if not isinstance(item, dict):
                     continue
 
-                if item.get("Key") == "TransactionID":
+                key = item.get("Key")
+                value = item.get("Value")
 
-                    value = item.get("Value")
+                if key in ("TransactionID", "TransactionReceipt"):
+                    if value is not None:
+                        value = str(value).strip()
+                        if value:
+                            return value
 
-                    if value:
-                        return str(value)
+            return None
 
         except Exception:
-
-            logger.exception(
-                "Failed to extract B2C TransactionID"
-            )
-
-        return None
-
+            logger.exception("Failed to extract B2C TransactionID")
+            return None
 
     def _find_house_b2c_withdrawal(
         originator_id,
