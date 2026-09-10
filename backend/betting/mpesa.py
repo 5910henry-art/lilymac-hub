@@ -13,6 +13,21 @@ import requests
 logger = logging.getLogger(__name__)
 
 
+class B2CSubmissionError(RuntimeError):
+    """
+    Raised when a B2C submission fails.
+
+    ambiguous=True means the request may have reached Safaricom,
+    but the client cannot determine whether Safaricom accepted it.
+    In that case the withdrawal must remain reserved.
+    """
+
+    def __init__(self, message, ambiguous=False):
+        super().__init__(message)
+        self.ambiguous = bool(ambiguous)
+
+
+
 # ============================================================
 # CONFIGURATION
 # ============================================================
@@ -412,9 +427,16 @@ def b2c_payment(
     """
     Send a Safaricom B2C payment request.
 
-    This only submits the payout request to Safaricom.
-    The actual result is received asynchronously through
-    MPESA_B2C_RESULT_URL.
+    ResponseCode == 0:
+        Safaricom accepted the request for asynchronous processing.
+
+    Explicit HTTP/Daraja rejection:
+        The request definitely was not accepted, so the caller may
+        safely refund the reserved wallet amount.
+
+    Network/transport failure:
+        The result is ambiguous because the request may have reached
+        Safaricom. The caller must NOT refund automatically.
     """
 
     missing = []
@@ -435,9 +457,10 @@ def b2c_payment(
         missing.append("MPESA_B2C_TIMEOUT_URL")
 
     if missing:
-        raise RuntimeError(
+        raise B2CSubmissionError(
             "Missing M-PESA B2C environment variables: "
-            + ", ".join(missing)
+            + ", ".join(missing),
+            ambiguous=False,
         )
 
     phone = normalize_phone(phone)
@@ -445,23 +468,29 @@ def b2c_payment(
     try:
         amount_decimal = Decimal(str(amount))
     except (InvalidOperation, TypeError, ValueError):
-        raise ValueError("invalid B2C amount")
+        raise B2CSubmissionError(
+            "invalid B2C amount",
+            ambiguous=False,
+        )
 
     if amount_decimal != amount_decimal.to_integral_value():
-        raise ValueError(
-            "B2C amount must be a whole KES amount"
+        raise B2CSubmissionError(
+            "B2C amount must be a whole KES amount",
+            ambiguous=False,
         )
 
     amount = int(amount_decimal)
 
     if amount < 10:
-        raise ValueError(
-            "B2C amount must be at least KES 10"
+        raise B2CSubmissionError(
+            "B2C amount must be at least KES 10",
+            ambiguous=False,
         )
 
     if amount > 250000:
-        raise ValueError(
-            "B2C amount exceeds KES 250,000 limit"
+        raise B2CSubmissionError(
+            "B2C amount exceeds KES 250,000 limit",
+            ambiguous=False,
         )
 
     originator_conversation_id = str(
@@ -469,18 +498,32 @@ def b2c_payment(
     ).strip()
 
     if not originator_conversation_id:
-        raise ValueError(
-            "originator conversation ID is required"
+        raise B2CSubmissionError(
+            "originator conversation ID is required",
+            ambiguous=False,
         )
 
     remarks = str(remarks).strip()
 
     if not 2 <= len(remarks) <= 100:
-        raise ValueError(
-            "remarks must be between 2 and 100 characters"
+        raise B2CSubmissionError(
+            "remarks must be between 2 and 100 characters",
+            ambiguous=False,
         )
 
-    token = get_b2c_access_token()
+    try:
+        token = get_b2c_access_token()
+    except Exception as exc:
+        logger.exception(
+            "M-PESA B2C authentication failed: %s",
+            exc,
+        )
+
+        raise B2CSubmissionError(
+            "M-PESA B2C authentication failed; "
+            "submission did not occur",
+            ambiguous=False,
+        ) from exc
 
     url = (
         f"{MPESA_BASE_URL}"
@@ -531,64 +574,86 @@ def b2c_payment(
                 "error": response.text
             }
 
+        # ----------------------------------------------------
+        # HTTP-LEVEL REJECTION
+        # ----------------------------------------------------
+        #
+        # Safaricom responded to us. Therefore this is not an
+        # unknown transport state.
+        #
         if response.status_code >= 400:
             logger.error(
-                "M-PESA B2C HTTP error | status=%s | response=%s",
+                "M-PESA B2C HTTP rejection | status=%s | response=%s",
                 response.status_code,
                 data,
             )
 
-            raise RuntimeError(
+            raise B2CSubmissionError(
                 data.get(
                     "errorMessage",
                     data.get(
                         "ResponseDescription",
-                        "M-PESA B2C request failed",
+                        "M-PESA B2C request was rejected",
                     ),
-                )
+                ),
+                ambiguous=False,
             )
 
         # ----------------------------------------------------
-        # VALIDATE DARaja RESPONSE CODE
+        # DARaja RESPONSE CODE
         # ----------------------------------------------------
         #
-        # HTTP 200 alone does not mean the B2C request was
-        # accepted. Daraja also returns ResponseCode.
+        # ResponseCode 0:
+        #     Request accepted for asynchronous processing.
         #
-        # ResponseCode == 0 -> request accepted for processing.
-        # Any other value    -> request was not accepted.
+        # Any other ResponseCode:
+        #     Safaricom explicitly rejected the submission.
         #
         response_code = data.get("ResponseCode")
 
-        if response_code is not None:
-            try:
-                response_code = int(response_code)
-            except (TypeError, ValueError):
-                logger.error(
-                    "M-PESA B2C invalid ResponseCode | response=%s",
-                    data,
-                )
+        if response_code is None:
+            logger.error(
+                "M-PESA B2C missing ResponseCode | response=%s",
+                data,
+            )
 
-                raise RuntimeError(
-                    "M-PESA B2C returned an invalid response code"
-                )
+            raise B2CSubmissionError(
+                "M-PESA B2C response did not contain ResponseCode",
+                ambiguous=True,
+            )
 
-            if response_code != 0:
-                logger.error(
-                    "M-PESA B2C rejected | code=%s | description=%s",
-                    response_code,
-                    data.get("ResponseDescription"),
-                )
+        try:
+            response_code = int(response_code)
+        except (TypeError, ValueError) as exc:
+            logger.error(
+                "M-PESA B2C invalid ResponseCode | response=%s",
+                data,
+            )
 
-                raise RuntimeError(
-                    data.get(
-                        "ResponseDescription",
-                        "M-PESA B2C request was rejected",
-                    )
-                )
+            raise B2CSubmissionError(
+                "M-PESA B2C returned an invalid ResponseCode",
+                ambiguous=True,
+            ) from exc
+
+        if response_code != 0:
+            description = data.get(
+                "ResponseDescription",
+                "M-PESA B2C request was rejected",
+            )
+
+            logger.error(
+                "M-PESA B2C rejected | code=%s | description=%s",
+                response_code,
+                description,
+            )
+
+            raise B2CSubmissionError(
+                str(description),
+                ambiguous=False,
+            )
 
         logger.info(
-            "M-PESA B2C response | phone=%s | amount=%s | response=%s",
+            "M-PESA B2C accepted | phone=%s | amount=%s | response=%s",
             phone,
             amount,
             data,
@@ -596,12 +661,16 @@ def b2c_payment(
 
         return data
 
+    except B2CSubmissionError:
+        raise
+
     except requests.RequestException as exc:
         logger.exception(
-            "M-PESA B2C request failed: %s",
+            "M-PESA B2C transport failure: %s",
             exc,
         )
 
-        raise RuntimeError(
-            "M-PESA B2C request could not be sent"
+        raise B2CSubmissionError(
+            "M-PESA B2C submission status is unknown",
+            ambiguous=True,
         ) from exc
