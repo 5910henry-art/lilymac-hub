@@ -1059,7 +1059,7 @@ def register_admin_routes(app):
     # ========================================================
 
     @app.route(
-        "/mpesa/b2c/result",
+        "/b2c/result",
         methods=["POST"],
     )
     def house_mpesa_b2c_result():
@@ -1513,7 +1513,7 @@ def register_admin_routes(app):
     # ========================================================
 
     @app.route(
-        "/mpesa/b2c/timeout",
+        "/b2c/timeout",
         methods=["POST"],
     )
     def house_mpesa_b2c_timeout():
