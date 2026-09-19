@@ -96,9 +96,9 @@ async def vip_query_db(sql, params=None):
     conn = await asyncpg.connect(
         dsn=DATABASE_URL,
         command_timeout=60,
-        server_settings={
-            "search_path": f"{DB_SCHEMA},public"
-        },
+    )
+    await conn.execute(
+        f'SET search_path TO "{DB_SCHEMA}", public'
     )
 
     try:
@@ -114,9 +114,9 @@ async def vip_execute_db(sql, params=None):
     conn = await asyncpg.connect(
         dsn=DATABASE_URL,
         command_timeout=60,
-        server_settings={
-            "search_path": f"{DB_SCHEMA},public"
-        },
+    )
+    await conn.execute(
+        f'SET search_path TO "{DB_SCHEMA}", public'
     )
 
     try:
