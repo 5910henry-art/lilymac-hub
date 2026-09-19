@@ -142,7 +142,6 @@ def _convert_named_to_positional(sql: str, params):
 # ============================================================
 # CONNECTION POOL
 # ============================================================
-
 async def get_pool():
     """
     Return the shared PostgreSQL connection pool.
@@ -155,19 +154,22 @@ async def get_pool():
     global _pool
 
     if _pool is None:
+
+        async def _init_connection(conn):
+            await conn.execute(
+                "SELECT set_config('search_path', $1, false)",
+                f"{DB_SCHEMA},public",
+            )
+
         _pool = await asyncpg.create_pool(
             dsn=DATABASE_URL,
             min_size=1,
             max_size=MAX_CONCURRENT,
             command_timeout=60,
-            server_settings={
-                "search_path": f"{DB_SCHEMA},public"
-            },
+            setup=_init_connection,
         )
 
     return _pool
-
-
 # ============================================================
 # DATABASE HELPERS
 # ============================================================
