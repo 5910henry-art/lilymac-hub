@@ -3035,6 +3035,21 @@ def tips_value():
             "tips": [],
         })
 
+    # Optional date filter: /tips/value?date=YYYY-MM-DD
+    date_arg = request.args.get("date")
+
+    if date_arg:
+        try:
+            datetime.strptime(
+                date_arg,
+                "%Y-%m-%d"
+            )
+        except ValueError:
+            return jsonify({
+                "success": False,
+                "error": "Invalid date. Use YYYY-MM-DD.",
+            }), 400
+
     try:
 
         placeholders = ",".join(
@@ -3051,6 +3066,9 @@ def tips_value():
                 len(statuses)
             )
         }
+
+        if date_arg:
+            status_params["date"] = date_arg
 
         tips = db_query_list(
             f"""
@@ -3074,6 +3092,8 @@ def tips_value():
                 WHERE m.status IN (
                     {placeholders}
                 )
+
+                {"AND DATE(m.utcDate) = :date" if date_arg else ""}
 
                 ORDER BY
                     m.utcDate ASC
