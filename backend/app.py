@@ -3556,24 +3556,21 @@ def accumulator_endpoint():
         request.args.get(
             "by_market",
             "false"
-        ).lower()
-        == "true"
+        ).lower() == "true"
     )
 
     by_date = (
         request.args.get(
             "by_date",
             "false"
-        ).lower()
-        == "true"
+        ).lower() == "true"
     )
 
     folds = (
         request.args.get(
             "folds",
             "false"
-        ).lower()
-        == "true"
+        ).lower() == "true"
     )
 
     max_games = request.args.get(
@@ -3595,73 +3592,78 @@ def accumulator_endpoint():
         query_sql = """
             SELECT
                 a.*,
-
-                m.home_team_name
-                    AS home_team,
-
-                m.away_team_name
-                    AS away_team
-
+                m.home_team_name AS home_team,
+                m.away_team_name AS away_team
             FROM accumulator a
-
             JOIN matches m
-              ON m.id = a.match_id
-
-            ORDER BY
-                a.probability DESC
+                ON m.id = a.match_id
+            WHERE m.utcdate IS NOT NULL
+              AND m.utcdate >= CURRENT_TIMESTAMP
+              AND m.status IN ('TIMED', 'SCHEDULED')
+            ORDER BY a.probability DESC
         """
 
         rows = await fetch_rows(
             query_sql
         )
 
+        def date_key(value):
+
+            if value is None:
+                return ""
+
+            if hasattr(
+                value,
+                "isoformat"
+            ):
+                value = value.isoformat()
+
+            return str(value)[:10]
+
+        def serialize_match_time(value):
+
+            if value is None:
+                return None
+
+            if hasattr(
+                value,
+                "isoformat"
+            ):
+                return value.isoformat()
+
+            return str(value)
+
         def item(row):
 
             return {
-
-                "home_team":
-                    row.get(
-                        "home_team"
-                    ),
-
-                "away_team":
-                    row.get(
-                        "away_team"
-                    ),
-
-                "market":
-                    row.get(
-                        "market"
-                    ),
-
-                "selection":
-                    row.get(
-                        "selection"
-                    ),
-
-                "probability":
-                    row.get(
-                        "probability"
-                    ),
-
-                "match_time":
+                "home_team": row.get(
+                    "home_team"
+                ),
+                "away_team": row.get(
+                    "away_team"
+                ),
+                "market": row.get(
+                    "market"
+                ),
+                "selection": row.get(
+                    "selection"
+                ),
+                "probability": row.get(
+                    "probability"
+                ),
+                "match_time": serialize_match_time(
                     row.get(
                         "match_time"
-                    ),
+                    )
+                ),
             }
 
         if folds:
 
             result = {
-
-                "fold_1":
-                    defaultdict(list),
-
-                "fold_2":
-                    defaultdict(list),
-
-                "fold_3":
-                    defaultdict(list),
+                "fold_1": defaultdict(list),
+                "fold_2": defaultdict(list),
+                "fold_3": defaultdict(list),
             }
 
             for row in rows:
@@ -3677,9 +3679,7 @@ def accumulator_endpoint():
 
                 if probability > 0.75:
 
-                    fold_name = (
-                        "fold_1"
-                    )
+                    fold_name = "fold_1"
 
                 elif (
                     0.60
@@ -3687,9 +3687,7 @@ def accumulator_endpoint():
                     < 0.75
                 ):
 
-                    fold_name = (
-                        "fold_2"
-                    )
+                    fold_name = "fold_2"
 
                 elif (
                     0.54
@@ -3697,9 +3695,7 @@ def accumulator_endpoint():
                     < 0.60
                 ):
 
-                    fold_name = (
-                        "fold_3"
-                    )
+                    fold_name = "fold_3"
 
                 if fold_name is None:
                     continue
@@ -3707,25 +3703,16 @@ def accumulator_endpoint():
                 if by_date and by_market:
 
                     key = (
-                        f"{(
-                            row.get(
-                                'match_time'
-                            )
-                            or ''
-                        )[:10]}"
-                        f"_"
+                        f"{date_key(row.get('match_time'))}_"
                         f"{row.get('market')}"
                     )
 
                 elif by_date:
 
-                    key = (
-                        (
-                            row.get(
-                                "match_time"
-                            )
-                            or ""
-                        )[:10]
+                    key = date_key(
+                        row.get(
+                            "match_time"
+                        )
                     )
 
                 elif by_market:
@@ -3755,7 +3742,10 @@ def accumulator_endpoint():
 
             return result
 
-        if not by_market and not by_date:
+        if (
+            not by_market
+            and not by_date
+        ):
 
             return [
                 item(row)
@@ -3764,22 +3754,16 @@ def accumulator_endpoint():
 
         if by_date and by_market:
 
-            result = (
-                defaultdict(
-                    lambda:
-                        defaultdict(list)
-                )
+            result = defaultdict(
+                lambda: defaultdict(list)
             )
 
             for row in rows:
 
-                date_key = (
-                    (
-                        row.get(
-                            "match_time"
-                        )
-                        or ""
-                    )[:10]
+                date = date_key(
+                    row.get(
+                        "match_time"
+                    )
                 )
 
                 market = row.get(
@@ -3789,14 +3773,14 @@ def accumulator_endpoint():
                 if (
                     len(
                         result[
-                            date_key
+                            date
                         ][market]
                     )
                     < max_games
                 ):
 
                     result[
-                        date_key
+                        date
                     ][market].append(
                         item(row)
                     )
@@ -3811,26 +3795,23 @@ def accumulator_endpoint():
 
             for row in rows:
 
-                date_key = (
-                    (
-                        row.get(
-                            "match_time"
-                        )
-                        or ""
-                    )[:10]
+                date = date_key(
+                    row.get(
+                        "match_time"
+                    )
                 )
 
                 if (
                     len(
                         result[
-                            date_key
+                            date
                         ]
                     )
                     < max_games
                 ):
 
                     result[
-                        date_key
+                        date
                     ].append(
                         item(row)
                     )
