@@ -3550,311 +3550,502 @@ def tips_daily():
 # =========================================================
 
 @app.get("/accumulator")
+@app.get("/accumulator")
 def accumulator_endpoint():
+    """
+    Return future accumulator selections.
 
-    by_market = (
-        request.args.get(
-            "by_market",
-            "false"
-        ).lower() == "true"
-    )
+    matches.utcdate is the authoritative fixture time.
+    accumulator.match_id is the authoritative fixture ID.
+    bookmark contains bookmaker odds.
+    Odds are never generated from probability.
+    Missing bookmaker odds are returned as null.
+    """
 
-    by_date = (
-        request.args.get(
-            "by_date",
-            "false"
-        ).lower() == "true"
-    )
+    by_market = request.args.get("by_market", "false").lower() == "true"
+    by_date = request.args.get("by_date", "false").lower() == "true"
+    folds = request.args.get("folds", "false").lower() == "true"
 
-    folds = (
-        request.args.get(
-            "folds",
-            "false"
-        ).lower() == "true"
-    )
+    try:
+        max_games = int(request.args.get("max_games", "100"))
+    except (TypeError, ValueError):
+        max_games = 100
 
-    max_games = request.args.get(
-        "max_games",
-        default=10,
-        type=int
-    )
-
-    max_games = max(
-        1,
-        min(
-            max_games,
-            100
-        )
-    )
+    max_games = max(1, min(max_games, 500))
 
     async def _fetch():
-
         query_sql = """
             SELECT
-                a.*,
+                a.match_id,
+                a.market,
+                a.selection,
+                a.probability,
+
                 m.home_team_name AS home_team,
                 m.away_team_name AS away_team,
-                m.utcdate AS fixture_time
-            FROM accumulator a
-            JOIN matches m
+                m.utcdate AS fixture_time,
+                m.status,
+                m.competition,
+                m.season,
+
+                b.home_odds,
+                b.draw_odds,
+                b.away_odds,
+
+                b.over05,
+                b.under05,
+                b.over15,
+                b.under15,
+                b.over25,
+                b.under25,
+                b.over35,
+                b.under35,
+
+                b.gg_odds,
+                b.ng_odds
+
+            FROM henry_schema.accumulator a
+
+            JOIN henry_schema.matches m
                 ON m.id = a.match_id
+
+            LEFT JOIN henry_schema.bookmark b
+                ON b.match_id = a.match_id
+
             WHERE m.utcdate IS NOT NULL
               AND m.utcdate >= CURRENT_TIMESTAMP
               AND m.status IN ('TIMED', 'SCHEDULED')
-            ORDER BY a.probability DESC
+
+            ORDER BY
+                m.utcdate ASC,
+                a.probability DESC NULLS LAST,
+                a.match_id ASC
         """
 
-        rows = await fetch_rows(
-            query_sql
-        )
+        rows = await fetch_rows(query_sql)
 
-        def date_key(value):
-
-            if value is None:
-                return ""
-
-            if hasattr(
-                value,
-                "isoformat"
-            ):
-                value = value.isoformat()
-
-            return str(value)[:10]
-
-        def serialize_match_time(value):
-
+        def to_float(value):
             if value is None:
                 return None
 
-            if hasattr(
-                value,
-                "isoformat"
-            ):
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return None
+
+        def serialize_match_time(value):
+            if value is None:
+                return None
+
+            if hasattr(value, "isoformat"):
                 return value.isoformat()
 
             return str(value)
 
+        def get_selection_odds(row):
+            market = str(
+                row.get("market") or ""
+            ).strip().upper()
+
+            selection = str(
+                row.get("selection") or ""
+            ).strip().upper()
+
+            # 3-way / 1X2
+            if market in {"3-WAY", "3WAY", "1X2"}:
+
+                if selection == "HOME":
+                    return to_float(
+                        row.get("home_odds")
+                    )
+
+                if selection == "DRAW":
+                    return to_float(
+                        row.get("draw_odds")
+                    )
+
+                if selection == "AWAY":
+                    return to_float(
+                        row.get("away_odds")
+                    )
+
+                return None
+
+            # Both Teams To Score
+            if market == "BTTS":
+
+                if selection == "YES":
+                    return to_float(
+                        row.get("gg_odds")
+                    )
+
+                if selection == "NO":
+                    return to_float(
+                        row.get("ng_odds")
+                    )
+
+                return None
+
+            # Goal markets.
+            #
+            # O4.5 intentionally returns None because the
+            # bookmark table currently has no over45/under45
+            # columns.
+
+            goal_columns = {
+                "O0.5": {
+                    "OVER": "over05",
+                    "UNDER": "under05",
+                },
+                "O1.5": {
+                    "OVER": "over15",
+                    "UNDER": "under15",
+                },
+                "O2.5": {
+                    "OVER": "over25",
+                    "UNDER": "under25",
+                },
+                "O3.5": {
+                    "OVER": "over35",
+                    "UNDER": "under35",
+                },
+                "O4.5": {
+                    "OVER": None,
+                    "UNDER": None,
+                },
+            }
+
+            columns = goal_columns.get(market)
+
+            if columns is None:
+                return None
+
+            column = columns.get(selection)
+
+            if not column:
+                return None
+
+            return to_float(
+                row.get(column)
+            )
+
+        def human_market(market, selection):
+            market = str(
+                market or ""
+            ).strip().upper()
+
+            selection = str(
+                selection or ""
+            ).strip().upper()
+
+            if market in {
+                "3-WAY",
+                "3WAY",
+                "1X2",
+            }:
+
+                labels = {
+                    "HOME": "Home",
+                    "DRAW": "Draw",
+                    "AWAY": "Away",
+                }
+
+                return labels.get(
+                    selection,
+                    selection.title(),
+                )
+
+            if market == "BTTS":
+
+                labels = {
+                    "YES": "BTTS — Yes",
+                    "NO": "BTTS — No",
+                }
+
+                return labels.get(
+                    selection,
+                    f"BTTS — {selection.title()}",
+                )
+
+            if market.startswith("O") and "." in market:
+
+                line = market[1:]
+
+                if selection == "OVER":
+                    return f"Over {line}"
+
+                if selection == "UNDER":
+                    return f"Under {line}"
+
+            return (
+                f"{market} — {selection}"
+            ).strip(" —")
+
         def item(row):
 
+            try:
+                match_id = int(
+                    row.get("match_id")
+                )
+            except (TypeError, ValueError):
+                return None
+
+            market = row.get("market")
+            selection = row.get("selection")
+
             return {
+                "match_id": match_id,
+
                 "home_team": row.get(
                     "home_team"
                 ),
+
                 "away_team": row.get(
                     "away_team"
                 ),
-                "market": row.get(
-                    "market"
+
+                "market": market,
+
+                "selection": selection,
+
+                "market_label": human_market(
+                    market,
+                    selection,
                 ),
-                "selection": row.get(
-                    "selection"
+
+                "probability": to_float(
+                    row.get("probability")
                 ),
-                "probability": row.get(
-                    "probability"
-                ),
+
                 "match_time": serialize_match_time(
-                    row.get(
-                        "fixture_time"
-                    )
+                    row.get("fixture_time")
+                ),
+
+                "status": row.get(
+                    "status"
+                ),
+
+                "competition": row.get(
+                    "competition"
+                ),
+
+                "season": row.get(
+                    "season"
+                ),
+
+                # Real bookmark odds only.
+                "odds": get_selection_odds(
+                    row
                 ),
             }
 
-        if folds:
+        items = []
 
-            result = {
-                "fold_1": defaultdict(list),
-                "fold_2": defaultdict(list),
-                "fold_3": defaultdict(list),
-            }
+        for row in rows:
 
-            for row in rows:
+            data = item(row)
 
-                probability = (
-                    row.get(
-                        "probability"
-                    )
+            if data is not None:
+                items.append(data)
+
+        # Group by market.
+
+        grouped_market = {}
+
+        for data in items:
+
+            market = (
+                data.get("market")
+                or "Unknown"
+            )
+
+            grouped_market.setdefault(
+                market,
+                []
+            ).append(data)
+
+        # Group by fixture date.
+
+        grouped_date = {}
+
+        for data in items:
+
+            match_time = data.get(
+                "match_time"
+            )
+
+            if match_time:
+                date_key = str(
+                    match_time
+                )[:10]
+            else:
+                date_key = "Unknown"
+
+            grouped_date.setdefault(
+                date_key,
+                []
+            ).append(data)
+
+        # Rank predictions by probability.
+
+        ranked = sorted(
+            items,
+            key=lambda x: (
+                -(
+                    x.get("probability")
                     or 0
-                )
+                ),
 
-                fold_name = None
+                x.get("match_time")
+                or "",
 
-                if probability > 0.75:
+                x.get("match_id")
+                or 0,
+            ),
+        )
 
-                    fold_name = "fold_1"
+        def is_goal_or_btts(data):
 
-                elif (
-                    0.60
-                    < probability
-                    < 0.75
-                ):
+            market = str(
+                data.get("market")
+                or ""
+            ).strip().upper()
 
-                    fold_name = "fold_2"
+            return (
+                market == "BTTS"
+                or market.startswith("O")
+            )
 
-                elif (
-                    0.54
-                    < probability
-                    < 0.60
-                ):
+        # Best Tips Accumulator.
+        #
+        # Never place two selections from
+        # the same match into one fold.
 
-                    fold_name = "fold_3"
+        best_tips = []
+        used_matches = set()
 
-                if fold_name is None:
-                    continue
+        for data in ranked:
 
-                if by_date and by_market:
-
-                    key = (
-                        f"{date_key(row.get('match_time'))}_"
-                        f"{row.get('market')}"
-                    )
-
-                elif by_date:
-
-                    key = date_key(
-                        row.get(
-                            "fixture_time"
-                        )
-                    )
-
-                elif by_market:
-
-                    key = row.get(
-                        "market"
-                    )
-
-                else:
-
-                    key = "ALL"
-
-                if (
-                    len(
-                        result[
-                            fold_name
-                        ][key]
-                    )
-                    < max_games
-                ):
-
-                    result[
-                        fold_name
-                    ][key].append(
-                        item(row)
-                    )
-
-            return result
-
-        if (
-            not by_market
-            and not by_date
-        ):
-
-            return [
-                item(row)
-                for row in rows
+            match_id = data[
+                "match_id"
             ]
 
-        if by_date and by_market:
+            if match_id in used_matches:
+                continue
 
-            result = defaultdict(
-                lambda: defaultdict(list)
+            best_tips.append(data)
+
+            used_matches.add(
+                match_id
             )
 
-            for row in rows:
+            if len(best_tips) >= min(
+                max_games,
+                10,
+            ):
+                break
 
-                date = date_key(
-                    row.get(
-                        "fixture_time"
-                    )
-                )
+        # Goals & BTTS Accumulator.
 
-                market = row.get(
-                    "market"
-                )
+        goals_btts = []
+        used_matches = set()
 
-                if (
-                    len(
-                        result[
-                            date
-                        ][market]
-                    )
-                    < max_games
-                ):
+        for data in ranked:
 
-                    result[
-                        date
-                    ][market].append(
-                        item(row)
-                    )
+            if not is_goal_or_btts(
+                data
+            ):
+                continue
 
-            return result
+            match_id = data[
+                "match_id"
+            ]
 
-        if by_date:
+            if match_id in used_matches:
+                continue
 
-            result = defaultdict(
-                list
+            goals_btts.append(data)
+
+            used_matches.add(
+                match_id
             )
 
-            for row in rows:
+            if len(goals_btts) >= min(
+                max_games,
+                8,
+            ):
+                break
 
-                date = date_key(
-                    row.get(
-                        "fixture_time"
-                    )
-                )
-
-                if (
-                    len(
-                        result[
-                            date
-                        ]
-                    )
-                    < max_games
-                ):
-
-                    result[
-                        date
-                    ].append(
-                        item(row)
-                    )
-
-            return result
+        response = {
+            "count": len(items),
+            "items": items[
+                :max_games
+            ],
+        }
 
         if by_market:
+            response[
+                "by_market"
+            ] = grouped_market
 
-            result = defaultdict(
-                list
-            )
+        if by_date:
+            response[
+                "by_date"
+            ] = grouped_date
 
-            for row in rows:
+        if folds:
+            response["folds"] = [
 
-                market = row.get(
-                    "market"
-                )
+                {
+                    "name":
+                        "Best Tips Accumulator",
 
-                if (
-                    len(
-                        result[
-                            market
-                        ]
-                    )
-                    < max_games
-                ):
+                    "type":
+                        "best",
 
-                    result[
-                        market
-                    ].append(
-                        item(row)
-                    )
+                    "items":
+                        best_tips,
 
-            return result
+                    "count":
+                        len(best_tips),
+                },
 
-        return []
+                {
+                    "name":
+                        "Goals & BTTS Accumulator",
 
-    data = _run_sync_or_async(
-        _fetch()
-    )
+                    "type":
+                        "goals_btts",
 
-    return jsonify(data)
+                    "items":
+                        goals_btts,
+
+                    "count":
+                        len(goals_btts),
+                },
+            ]
+
+        return response
+
+    try:
+        return asyncio.run(
+            _fetch()
+        )
+
+    except Exception as exc:
+
+        app.logger.exception(
+            "Accumulator endpoint failed"
+        )
+
+        return jsonify({
+            "error":
+                "Failed to load accumulator",
+
+            "details":
+                str(exc),
+        }), 500
+
 
 
 # =========================================================
