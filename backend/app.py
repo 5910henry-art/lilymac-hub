@@ -119,7 +119,18 @@ socketio = SocketIO(
     ping_timeout=60,
 )
 
+# =========================================================
+# COMPETITION → STANDINGS LEAGUE CODE
+# =========================================================
 
+COMPETITION_TO_LEAGUE_CODE = {
+    "Premier League": "PL",
+    "Bundesliga": "BL1",
+    "Ligue 1": "FL1",
+    "Primera Division": "PD",
+    "Serie A": "SA",
+    "UEFA Champions League": "CL",
+}
 # =========================================================
 # DATE NORMALIZATION
 # =========================================================
@@ -4117,7 +4128,6 @@ def matches_recent():
             rows,
     })
 
-
 # =========================================================
 # UPCOMING MATCHES
 # =========================================================
@@ -4137,6 +4147,10 @@ def matches_upcoming():
         max_limit=MAX_LIMIT,
     )
 
+    # -----------------------------------------------------
+    # GET UPCOMING MATCHES
+    # -----------------------------------------------------
+
     rows = db_query_list(
         """
             SELECT
@@ -4151,6 +4165,8 @@ def matches_upcoming():
 
                 home_team_name,
                 away_team_name,
+
+                season,
 
                 generated_at
 
@@ -4172,6 +4188,10 @@ def matches_upcoming():
                 limit
         }
     )
+
+    # -----------------------------------------------------
+    # FORMAT MATCH DATES
+    # -----------------------------------------------------
 
     out = []
 
@@ -4211,6 +4231,322 @@ def matches_upcoming():
             record
         )
 
+    # -----------------------------------------------------
+    # FIND REQUIRED LEAGUES / SEASONS
+    #
+    # IMPORTANT:
+    # Season comes from each match.
+    # Nothing is hardcoded here.
+    # -----------------------------------------------------
+
+    league_season_pairs = set()
+
+    for match in out:
+
+        competition = (
+            match.get(
+                "competition"
+            )
+        )
+
+        season = (
+            match.get(
+                "season"
+            )
+        )
+
+        league_code = (
+            COMPETITION_TO_LEAGUE_CODE.get(
+                competition
+            )
+        )
+
+        if (
+            league_code
+            and season is not None
+        ):
+
+            league_season_pairs.add(
+                (
+                    league_code,
+                    int(season)
+                )
+            )
+
+    # -----------------------------------------------------
+    # FETCH ALL STANDINGS IN ONE QUERY
+    # -----------------------------------------------------
+
+    standings_rows = []
+
+    if league_season_pairs:
+
+        conditions = []
+        params = {}
+
+        for index, (
+            league_code,
+            season
+        ) in enumerate(
+            sorted(
+                league_season_pairs
+            )
+        ):
+
+            league_param = (
+                f"league_code_{index}"
+            )
+
+            season_param = (
+                f"season_{index}"
+            )
+
+            conditions.append(
+                f"""
+                    (
+                        s.league_code =
+                        :{league_param}
+
+                        AND
+
+                        s.season =
+                        :{season_param}
+                    )
+                """
+            )
+
+            params[
+                league_param
+            ] = league_code
+
+            params[
+                season_param
+            ] = season
+
+        standings_rows = db_query_list(
+            f"""
+                SELECT
+                    s.league_code,
+                    s.season,
+
+                    s.team_id,
+
+                    s.rank,
+                    s.points,
+
+                    s.win,
+                    s.draw,
+                    s.lose,
+
+                    (
+                        COALESCE(s.win, 0)
+                        +
+                        COALESCE(s.draw, 0)
+                        +
+                        COALESCE(s.lose, 0)
+                    ) AS played,
+
+                    s.goals_for,
+                    s.goals_against,
+                    s.goal_diff,
+
+                    s.last_updated,
+
+                    t.name AS team_name,
+                    t.short_name AS team_short_name,
+                    t.tla AS team_tla,
+                    t.crest AS team_crest,
+                    t.venue AS team_venue
+
+                FROM standings s
+
+                LEFT JOIN teams t
+                    ON t.id = s.team_id
+
+                WHERE
+                    {" OR ".join(conditions)}
+
+                ORDER BY
+                    s.league_code,
+                    s.season,
+                    s.rank NULLS LAST,
+                    s.team_id
+            """,
+            params
+        )
+
+    # -----------------------------------------------------
+    # BUILD STANDINGS LOOKUPS
+    # -----------------------------------------------------
+
+    standings_by_team = {}
+
+    standings_by_league = {}
+
+    for standing in standings_rows:
+
+        league_code = (
+            standing.get(
+                "league_code"
+            )
+        )
+
+        season = (
+            standing.get(
+                "season"
+            )
+        )
+
+        team_id = (
+            standing.get(
+                "team_id"
+            )
+        )
+
+        league_key = (
+            league_code,
+            season
+        )
+
+        team_key = (
+            league_code,
+            season,
+            team_id
+        )
+
+        standings_by_team[
+            team_key
+        ] = standing
+
+        standings_by_league.setdefault(
+            league_key,
+            []
+        ).append(
+            standing
+        )
+
+    # -----------------------------------------------------
+    # ATTACH HOME / AWAY STANDINGS TO EACH MATCH
+    # -----------------------------------------------------
+
+    for match in out:
+
+        competition = (
+            match.get(
+                "competition"
+            )
+        )
+
+        season = (
+            match.get(
+                "season"
+            )
+        )
+
+        league_code = (
+            COMPETITION_TO_LEAGUE_CODE.get(
+                competition
+            )
+        )
+
+        match["league_code"] = (
+            league_code
+        )
+
+        match["home_standing"] = None
+        match["away_standing"] = None
+
+        if (
+            league_code
+            and season is not None
+        ):
+
+            try:
+                season_int = int(
+                    season
+                )
+            except (
+                TypeError,
+                ValueError
+            ):
+                season_int = None
+
+            if season_int is not None:
+
+                home_key = (
+                    league_code,
+                    season_int,
+                    match.get(
+                        "home_team_id"
+                    )
+                )
+
+                away_key = (
+                    league_code,
+                    season_int,
+                    match.get(
+                        "away_team_id"
+                    )
+                )
+
+                match[
+                    "home_standing"
+                ] = standings_by_team.get(
+                    home_key
+                )
+
+                match[
+                    "away_standing"
+                ] = standings_by_team.get(
+                    away_key
+                )
+
+    # -----------------------------------------------------
+    # BUILD FULL STANDINGS RESPONSE
+    # -----------------------------------------------------
+
+    competition_standings = []
+
+    for (
+        league_code,
+        season
+    ), table in sorted(
+        standings_by_league.items()
+    ):
+
+        competition_name = None
+
+        for name, code in (
+            COMPETITION_TO_LEAGUE_CODE.items()
+        ):
+
+            if code == league_code:
+
+                competition_name = name
+                break
+
+        competition_standings.append({
+
+            "competition":
+                competition_name,
+
+            "league_code":
+                league_code,
+
+            "season":
+                season,
+
+            "count":
+                len(table),
+
+            "table":
+                table,
+        })
+
+    # -----------------------------------------------------
+    # RESPONSE
+    # -----------------------------------------------------
+
     return jsonify({
 
         "success":
@@ -4221,9 +4557,13 @@ def matches_upcoming():
 
         "matches":
             out,
+
+        # Complete league tables for every
+        # competition/season represented
+        # in the upcoming matches.
+        "standings":
+            competition_standings,
     })
-
-
 # =========================================================
 # LATEST PREDICTIONS
 # =========================================================
