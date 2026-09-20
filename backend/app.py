@@ -3593,7 +3593,8 @@ def accumulator_endpoint():
             SELECT
                 a.*,
                 m.home_team_name AS home_team,
-                m.away_team_name AS away_team
+                m.away_team_name AS away_team,
+                m.utcdate AS fixture_time
             FROM accumulator a
             JOIN matches m
                 ON m.id = a.match_id
@@ -3653,7 +3654,7 @@ def accumulator_endpoint():
                 ),
                 "match_time": serialize_match_time(
                     row.get(
-                        "match_time"
+                        "fixture_time"
                     )
                 ),
             }
@@ -3711,7 +3712,7 @@ def accumulator_endpoint():
 
                     key = date_key(
                         row.get(
-                            "match_time"
+                            "fixture_time"
                         )
                     )
 
@@ -3762,7 +3763,7 @@ def accumulator_endpoint():
 
                 date = date_key(
                     row.get(
-                        "match_time"
+                        "fixture_time"
                     )
                 )
 
@@ -3797,7 +3798,7 @@ def accumulator_endpoint():
 
                 date = date_key(
                     row.get(
-                        "match_time"
+                        "fixture_time"
                     )
                 )
 
