@@ -11,11 +11,16 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 if DATABASE_URL:
-    # Normalize all PostgreSQL URLs to the standard:
-    # postgresql://
-    #
-    # This removes SQLAlchemy-specific driver suffixes such as
-    # +psycopg, +psycopg2 and +asyncpg.
+    from urllib.parse import urlparse
+
+    _db_url = urlparse(DATABASE_URL)
+
+    print("VIRTUAL DB DEBUG")
+    print("  scheme:", _db_url.scheme)
+    print("  host:", _db_url.hostname)
+    print("  port:", _db_url.port)
+    print("  database:", _db_url.path.lstrip("/"))
+
     DATABASE_URL = (
         DATABASE_URL
         .replace("postgresql+psycopg://", "postgresql://", 1)
