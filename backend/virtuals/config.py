@@ -10,16 +10,23 @@ import redis
 
 import virtuals.config_settings as settings
 
+
 # ---------------- LOGGING ----------------
 logging.basicConfig(
-    level=getattr(logging, settings.LOG_LEVEL, logging.INFO),
+    level=getattr(settings, "LOG_LEVEL", logging.INFO),
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
+
 logger = logging.getLogger("virtual-engine")
-logger.info(f"Starting in {settings.ENV} mode, log level {settings.LOG_LEVEL}")
+
+logger.info(
+    "Starting in %s mode, log level %s",
+    settings.ENV,
+    settings.LOG_LEVEL,
+)
+
 
 # ---------------- REDIS ----------------
-
 REDIS_URL = settings.REDIS_URL
 
 if REDIS_URL:
@@ -27,18 +34,40 @@ if REDIS_URL:
 else:
     redis_client = None
     logger.warning("Redis disabled: REDIS_URL not set")
+
+
 # ---------------- FLASK APP ----------------
 app = Flask(__name__)
+
 app.config["SQLALCHEMY_DATABASE_URI"] = settings.DATABASE_URL
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
-app.config["JWT_SECRET_KEY"] = settings.JWT_SECRET_KEY
-app.config["JWT_ACCESS_TOKEN_EXPIRES"] = settings.JWT_ACCESS_TOKEN_EXPIRES
 
+app.config["JWT_SECRET_KEY"] = settings.JWT_SECRET_KEY
+app.config["JWT_ACCESS_TOKEN_EXPIRES"] = (
+    settings.JWT_ACCESS_TOKEN_EXPIRES
+)
+
+
+# ---------------- DATABASE ENGINE ----------------
 if settings.DATABASE_URL.startswith("sqlite:"):
+
     app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
-        "connect_args": {"check_same_thread": False}
+        "connect_args": {
+            "check_same_thread": False
+        }
     }
+
 else:
+
+    # PostgreSQL
+    #
+    # DATABASE_URL is normalized by config_settings.py to:
+    #
+    # postgresql://...
+    #
+    # Explicitly set PostgreSQL search_path so all virtual
+    # tables are resolved from henry_schema first.
+
     app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
         "pool_size": 20,
         "max_overflow": 30,
@@ -46,24 +75,35 @@ else:
         "pool_pre_ping": True,
         "pool_recycle": 1800,
         "connect_args": {
-            "options": f"-csearch_path={settings.DB_SCHEMA},public"
+            "options": (
+                f"-csearch_path="
+                f"{settings.DB_SCHEMA},public"
+            )
         },
     }
+
+
 # ---------------- EXTENSIONS ----------------
 db = SQLAlchemy()
 jwt = JWTManager()
 
-socketio = SocketIO(async_mode="gevent")
+# Use threading for compatibility across local and Render
+# environments. The production server can still handle
+# Socket.IO through the configured Gunicorn worker.
+socketio = SocketIO(async_mode="threading")
+
 
 def init_app():
     """Initialize Flask app, extensions, and database."""
+
     db.init_app(app)
     jwt.init_app(app)
 
     socketio.init_app(
-    app,
-    cors_allowed_origins="*",
-)
+        app,
+        cors_allowed_origins="*",
+    )
+
     # Import models so SQLAlchemy registers them
     import model  # noqa: F401
 
@@ -71,6 +111,7 @@ def init_app():
 
         # ---------------- CREATE POSTGRES SCHEMA ----------------
         if not settings.DATABASE_URL.startswith("sqlite:"):
+
             from sqlalchemy import text
 
             try:
@@ -78,33 +119,41 @@ def init_app():
 
                 if schema:
                     db.session.execute(
-                        text(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')
+                        text(
+                            f'CREATE SCHEMA IF NOT EXISTS "{schema}"'
+                        )
                     )
+
                     db.session.commit()
 
                     logger.info(
                         "PostgreSQL schema ready: %s",
-                        schema
+                        schema,
                     )
 
             except Exception:
                 db.session.rollback()
+
                 logger.exception(
                     "Failed to create PostgreSQL schema"
                 )
+
                 raise
 
         # ---------------- SQLITE SETUP ----------------
         if settings.DATABASE_URL.startswith("sqlite:"):
+
             from sqlalchemy import text
 
             try:
                 db.session.execute(
                     text("PRAGMA journal_mode=WAL;")
                 )
+
                 db.session.execute(
                     text("PRAGMA foreign_keys=ON;")
                 )
+
                 db.session.commit()
 
                 logger.info(
@@ -112,10 +161,14 @@ def init_app():
                 )
 
             except Exception:
+
                 db.session.rollback()
+
                 logger.exception(
                     "SQLite pragma setup failed"
                 )
+
+                raise
 
         # ---------------- CREATE TABLES ----------------
         db.create_all()
@@ -126,6 +179,8 @@ def init_app():
 
     return app
 
+
+# ---------------- TEAM RATINGS ----------------
 TEAM_RATINGS = {
     "Barcelona": 95.8,
     "Atletico Madrid": 89.5,
