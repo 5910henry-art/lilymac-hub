@@ -45,8 +45,10 @@ else:
         "pool_timeout": 30,
         "pool_pre_ping": True,
         "pool_recycle": 1800,
+        "connect_args": {
+            "options": f"-csearch_path={settings.DB_SCHEMA},public"
+        },
     }
-
 # ---------------- EXTENSIONS ----------------
 db = SQLAlchemy()
 jwt = JWTManager()

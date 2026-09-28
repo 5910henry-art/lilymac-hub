@@ -32,7 +32,7 @@ if DATABASE_URL:
 
 REDIS_URL = os.getenv("REDIS_URL")
 
-DB_SCHEMA = os.getenv("DB_SCHEMA", "public")
+DB_SCHEMA = os.getenv("DB_SCHEMA", "henry_schema")
 
 USE_SQLITE_FALLBACK = not DATABASE_URL
 
