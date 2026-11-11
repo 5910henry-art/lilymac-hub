@@ -89,7 +89,7 @@ _pool: asyncpg.Pool | None = None
 # ============================================================
 
 _named_param_pattern = re.compile(
-    r":([A-Za-z_][A-Za-z0-9_]*)"
+    r"(?<!:):([A-Za-z_][A-Za-z0-9_]*)"
 )
 
 
