@@ -120,6 +120,19 @@ export const vipUpgrade = (token, plan) =>
   });
 
 // ============================================================
+// VIP RENEWAL
+// ============================================================
+
+export const vipRenew = (token, plan) =>
+  vipRequest("/vip/renew", {
+    method: "POST",
+    body: {
+      subscription: plan,
+    },
+    token,
+  });
+
+// ============================================================
 // VIP PICKS
 // ============================================================
 
@@ -344,5 +357,23 @@ export const adminSendVipPushTest = (
 ) =>
   vipRequest(`/admin/vips/${vip_id}/push-test`, {
     method: "POST",
+    token,
+  });
+
+// ============================================================
+// ADMIN DEVICE PUSH SUBSCRIPTION
+// ============================================================
+
+export const adminPushSubscribe = (token, subscription) =>
+  vipRequest("/admin/push/subscribe", {
+    method: "POST",
+    body: { subscription },
+    token,
+  });
+
+export const adminPushUnsubscribe = (token, endpoint) =>
+  vipRequest("/admin/push/unsubscribe", {
+    method: "POST",
+    body: { endpoint },
     token,
   });

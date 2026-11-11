@@ -832,6 +832,16 @@ export default function VIPPortal() {
     setPendingUpgrade,
   ] = useState(null);
 
+  const [
+    renewalLoading,
+    setRenewalLoading,
+  ] = useState({});
+
+  const [
+    pendingRenewal,
+    setPendingRenewal,
+  ] = useState(null);
+
   const { toasts, push } =
     useToast();
 
@@ -1534,6 +1544,85 @@ export default function VIPPortal() {
         );
       }
     };
+
+  /* ==========================================================
+     VIP SUBSCRIPTION RENEWAL
+  ========================================================== */
+
+  const handleRenewal = async (planName) => {
+    if (!me) {
+      push("Please log in first", "error");
+      return;
+    }
+
+    if (!isSubscriptionExpired(me.subscription_expiry)) {
+      push("Your subscription is still active.", "error");
+      return;
+    }
+
+    const requestedPlan = getPlanInfo(planName);
+
+    if (!requestedPlan) {
+      push("Invalid renewal plan", "error");
+      return;
+    }
+
+    setRenewalLoading((current) => ({
+      ...current,
+      [requestedPlan.key]: true,
+    }));
+
+    try {
+      const token = localStorage.getItem("vip_token");
+
+      if (!token) {
+        throw new Error(
+          "VIP session expired. Please log in again."
+        );
+      }
+
+      const res = await api.vipRenew(
+        token,
+        requestedPlan.key
+      );
+
+      if (res?.success) {
+        setPendingRenewal({
+          to_plan: requestedPlan.key,
+          requested_at: new Date().toISOString(),
+        });
+
+        push(
+          `Renewal request for ${requestedPlan.name} sent to admin.`,
+          "success",
+          6000
+        );
+
+        await fetchVipDataOnce(token);
+      } else {
+        push(
+          typeof res?.error === "string"
+            ? res.error
+            : "Renewal request failed",
+          "error"
+        );
+      }
+    } catch (err) {
+      console.error("handleRenewal error:", err);
+
+      push(
+        typeof err?.message === "string"
+          ? err.message
+          : "Renewal request failed",
+        "error"
+      );
+    } finally {
+      setRenewalLoading((current) => ({
+        ...current,
+        [requestedPlan.key]: false,
+      }));
+    }
+  };
 
   /* ==========================================================
      DEREGISTER
@@ -2426,6 +2515,65 @@ export default function VIPPortal() {
                     deregister
                   }
                 />
+
+                {isSubscriptionExpired(me.subscription_expiry) && (
+                  <GlassCard className="border-amber-500/20 bg-amber-500/5 p-5">
+                    <SectionTitle
+                      icon="🔄"
+                      title="Renew Your VIP Subscription"
+                      subtitle="Your subscription has expired. Choose a plan to request renewal."
+                    />
+
+                    {pendingRenewal ? (
+                      <div className="mt-4 rounded-2xl border border-blue-500/20 bg-blue-500/5 p-4">
+                        <p className="text-sm font-bold text-blue-700">
+                          Renewal request pending
+                        </p>
+                        <p className="mt-1 text-xs text-slate-600">
+                          Your request for{" "}
+                          <strong>
+                            {getPlanInfo(pendingRenewal.to_plan)?.name ||
+                              pendingRenewal.to_plan}
+                          </strong>{" "}
+                          is waiting for admin approval.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="mt-4 space-y-3">
+                        {PLANS.map((plan) => (
+                          <div
+                            key={plan.key}
+                            className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3"
+                          >
+                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-600/10 text-xl">
+                              {plan.icon}
+                            </div>
+
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-bold text-slate-900">
+                                {plan.name}
+                              </p>
+                              <p className="text-xs text-slate-500">
+                                {plan.display} · {plan.quota} picks/day · {plan.days} days
+                              </p>
+                            </div>
+
+                            <button
+                              type="button"
+                              disabled={Boolean(renewalLoading[plan.key])}
+                              onClick={() => handleRenewal(plan.key)}
+                              className="rounded-xl bg-blue-600 px-3 py-2 text-xs font-bold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {renewalLoading[plan.key]
+                                ? "Sending..."
+                                : "Renew"}
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </GlassCard>
+                )}
 
                 {quota && (
                   <VipQuotaCard

@@ -143,6 +143,81 @@ async def db_execute(sql, params=None):
     return await vip_execute_db(sql, params)
 
 
+
+async def db_approve_vip_request(request_id, expiry):
+    conn = await asyncpg.connect(
+        dsn=DATABASE_URL,
+        command_timeout=60,
+    )
+
+    try:
+        await conn.execute(
+            f'SET search_path TO "{DB_SCHEMA}", public'
+        )
+
+        async with conn.transaction():
+            sql, params = _convert_named_to_positional(
+                """
+                SELECT id, vip_id, to_plan
+                FROM vip_upgrade_requests
+                WHERE id = :id
+                  AND status = 'pending'
+                FOR UPDATE
+                """,
+                {"id": request_id},
+            )
+
+            req = await conn.fetchrow(sql, *params)
+
+            if not req:
+                return None
+
+            sql, params = _convert_named_to_positional(
+                """
+                UPDATE vip_users
+                SET
+                    subscription = :subscription,
+                    subscription_expiry = :expiry
+                WHERE id = :vip_id
+                """,
+                {
+                    "subscription": req["to_plan"],
+                    "expiry": expiry,
+                    "vip_id": req["vip_id"],
+                },
+            )
+
+            result = await conn.execute(sql, *params)
+
+            if result != "UPDATE 1":
+                raise RuntimeError(
+                    f"VIP account update failed: {result}"
+                )
+
+            sql, params = _convert_named_to_positional(
+                """
+                UPDATE vip_upgrade_requests
+                SET
+                    status = 'approved',
+                    approved_at = CURRENT_TIMESTAMP
+                WHERE id = :id
+                  AND status = 'pending'
+                """,
+                {"id": request_id},
+            )
+
+            result = await conn.execute(sql, *params)
+
+            if result != "UPDATE 1":
+                raise RuntimeError(
+                    f"Request approval failed: {result}"
+                )
+
+            return dict(req)
+    finally:
+        await conn.close()
+
+
 # ============================================================
 # JWT HELPERS
 # ============================================================
@@ -414,6 +489,208 @@ async def send_vip_push(number, title, message, link="/vip"):
     return sent
 
 
+async def send_admin_push(title, message, link="/admin"):
+    if not all((
+        VAPID_PUBLIC_KEY,
+        VAPID_PRIVATE_KEY,
+        VAPID_SUBJECT,
+    )):
+        logger.warning("Admin push skipped: VAPID configuration missing")
+        return 0
+
+    try:
+        import json
+        from pywebpush import webpush, WebPushException
+    except ImportError:
+        logger.exception("pywebpush is not installed")
+        return 0
+
+    subscriptions = await db_fetch_all(
+        """
+        SELECT endpoint, p256dh, auth
+        FROM admin_push_subscriptions
+        """
+    )
+
+    sent = 0
+
+    for item in subscriptions:
+        subscription_info = {
+            "endpoint": item["endpoint"],
+            "keys": {
+                "p256dh": item["p256dh"],
+                "auth": item["auth"],
+            },
+        }
+
+        try:
+            await asyncio.to_thread(
+                webpush,
+                subscription_info=subscription_info,
+                data=json.dumps({
+                    "title": title,
+                    "body": message,
+                    "url": link or "/admin",
+                }),
+                vapid_private_key=VAPID_PRIVATE_KEY,
+                vapid_claims={"sub": VAPID_SUBJECT},
+            )
+            sent += 1
+
+        except WebPushException as exc:
+            status = getattr(
+                getattr(exc, "response", None),
+                "status_code",
+                None,
+            )
+
+            if status in (404, 410):
+                await db_execute(
+                    """
+                    DELETE FROM admin_push_subscriptions
+                    WHERE endpoint = :endpoint
+                    """,
+                    {"endpoint": item["endpoint"]},
+                )
+            else:
+                logger.warning(
+                    "Admin push delivery failed with status %s",
+                    status,
+                )
+
+        except Exception:
+            logger.exception("Admin push delivery failed")
+
+    return sent
+
+
+async def admin_vip_expiry_monitor(interval_seconds=300):
+    logger.info("VIP subscription expiry monitor started")
+
+    while True:
+        try:
+            vips = await db_fetch_all(
+                """
+                SELECT id, name, number, subscription, subscription_expiry
+                FROM vip_users
+                WHERE approved = TRUE
+                  AND subscription_expiry IS NOT NULL
+                """
+            )
+
+            now = datetime.now(UTC)
+
+            for vip in vips:
+                expiry_text = str(vip["subscription_expiry"])
+
+                try:
+                    expiry = datetime.fromisoformat(
+                        expiry_text.replace("Z", "+00:00")
+                    )
+
+                    if expiry.tzinfo is None:
+                        expiry = expiry.replace(tzinfo=UTC)
+
+                    if expiry > now:
+                        continue
+
+                except (ValueError, TypeError):
+                    logger.warning(
+                        "Invalid VIP expiry date for VIP ID %s",
+                        vip["id"],
+                    )
+                    continue
+
+                claim = await db_fetch_one(
+                    """
+                    INSERT INTO admin_vip_expiry_notifications (
+                        vip_id,
+                        subscription_expiry,
+                        claimed_at
+                    )
+                    VALUES (
+                        :vip_id,
+                        :expiry,
+                        CURRENT_TIMESTAMP
+                    )
+                    ON CONFLICT (vip_id, subscription_expiry)
+                    DO UPDATE SET claimed_at = CURRENT_TIMESTAMP
+                    WHERE admin_vip_expiry_notifications.notified_at IS NULL
+                      AND admin_vip_expiry_notifications.claimed_at
+                          < CURRENT_TIMESTAMP - INTERVAL '10 minutes'
+                    RETURNING vip_id
+                    """,
+                    {
+                        "vip_id": vip["id"],
+                        "expiry": expiry_text,
+                    },
+                )
+
+                if not claim:
+                    continue
+
+                try:
+                    sent = await send_admin_push(
+                        "VIP subscription expired",
+                        (
+                            f'{vip["name"]} ({vip["number"]}) '
+                            f'has reached the end of their '
+                            f'{vip["subscription"]} subscription.'
+                        ),
+                        "/admin",
+                    )
+
+                    if sent:
+                        await db_execute(
+                            """
+                            UPDATE admin_vip_expiry_notifications
+                            SET notified_at = CURRENT_TIMESTAMP
+                            WHERE vip_id = :vip_id
+                              AND subscription_expiry = :expiry
+                            """,
+                            {
+                                "vip_id": vip["id"],
+                                "expiry": expiry_text,
+                            },
+                        )
+                    else:
+                        await db_execute(
+                            """
+                            DELETE FROM admin_vip_expiry_notifications
+                            WHERE vip_id = :vip_id
+                              AND subscription_expiry = :expiry
+                              AND notified_at IS NULL
+                            """,
+                            {
+                                "vip_id": vip["id"],
+                                "expiry": expiry_text,
+                            },
+                        )
+
+                except Exception:
+                    logger.exception(
+                        "VIP expiry notification failed for VIP ID %s",
+                        vip["id"],
+                    )
+                    await db_execute(
+                        """
+                        DELETE FROM admin_vip_expiry_notifications
+                        WHERE vip_id = :vip_id
+                          AND subscription_expiry = :expiry
+                          AND notified_at IS NULL
+                        """,
+                        {
+                            "vip_id": vip["id"],
+                            "expiry": expiry_text,
+                        },
+                    )
+
+        except Exception:
+            logger.exception("VIP expiry monitor check failed")
+
+        await asyncio.sleep(interval_seconds)
+
+
 def admin_required(fn):
     @functools.wraps(fn)
     async def wrapper(*args, **kwargs):
@@ -466,6 +743,58 @@ def admin_required(fn):
             }), 401
 
     return wrapper
+
+
+@app.post("/admin/push/subscribe")
+@admin_required
+async def admin_push_subscribe():
+    data = request.get_json(silent=True) or {}
+    subscription = data.get("subscription") or data
+
+    endpoint = str(subscription.get("endpoint") or "").strip()
+    keys = subscription.get("keys") or {}
+    p256dh = str(keys.get("p256dh") or "").strip()
+    auth = str(keys.get("auth") or "").strip()
+
+    if not endpoint.startswith("https://") or not p256dh or not auth:
+        return jsonify({"error": "Invalid push subscription"}), 400
+
+    await db_execute(
+        """
+        INSERT INTO admin_push_subscriptions (
+            endpoint, p256dh, auth, updated_at
+        )
+        VALUES (:endpoint, :p256dh, :auth, CURRENT_TIMESTAMP)
+        ON CONFLICT (endpoint)
+        DO UPDATE SET
+            p256dh = EXCLUDED.p256dh,
+            auth = EXCLUDED.auth,
+            updated_at = CURRENT_TIMESTAMP
+        """,
+        {"endpoint": endpoint, "p256dh": p256dh, "auth": auth},
+    )
+
+    return jsonify({"success": True})
+
+
+@app.post("/admin/push/unsubscribe")
+@admin_required
+async def admin_push_unsubscribe():
+    data = request.get_json(silent=True) or {}
+    endpoint = str(data.get("endpoint") or "").strip()
+
+    if not endpoint.startswith("https://"):
+        return jsonify({"error": "Invalid endpoint"}), 400
+
+    await db_execute(
+        """
+        DELETE FROM admin_push_subscriptions
+        WHERE endpoint = :endpoint
+        """,
+        {"endpoint": endpoint},
+    )
+
+    return jsonify({"success": True})
 
 
 # ============================================================
@@ -637,6 +966,18 @@ async def init_db_async():
 
     await db_execute(
         """
+        CREATE TABLE IF NOT EXISTS admin_vip_expiry_notifications (
+            vip_id BIGINT NOT NULL,
+            subscription_expiry TEXT NOT NULL,
+            claimed_at TIMESTAMPTZ,
+            notified_at TIMESTAMPTZ,
+            PRIMARY KEY (vip_id, subscription_expiry)
+        )
+        """
+    )
+
+    await db_execute(
+        """
         ALTER TABLE vip_users
         ADD COLUMN IF NOT EXISTS password_hash TEXT
         """
@@ -699,6 +1040,18 @@ async def init_db_async():
 
     await db_execute(
         """
+        CREATE TABLE IF NOT EXISTS admin_push_subscriptions (
+            endpoint TEXT PRIMARY KEY,
+            p256dh TEXT NOT NULL,
+            auth TEXT NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+
+    await db_execute(
+        """
         CREATE INDEX IF NOT EXISTS idx_vip_push_subscriptions_number
         ON vip_push_subscriptions(number)
         """
@@ -722,6 +1075,13 @@ async def init_db_async():
             created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
             approved_at TIMESTAMPTZ
         )
+        """
+    )
+
+    await db_execute(
+        """
+        ALTER TABLE vip_upgrade_requests
+        ADD COLUMN IF NOT EXISTS request_type TEXT NOT NULL DEFAULT 'upgrade'
         """
     )
 
@@ -879,6 +1239,19 @@ async def vip_register():
                 "password_hash": password_hash,
             },
         )
+
+        try:
+            await send_admin_push(
+                "New VIP registration request",
+                f"{name} ({number}) requested the {subscription} plan.",
+                "/admin",
+            )
+        except Exception as push_error:
+            log_json(
+                "error",
+                event="admin_vip_registration_push_failed",
+                error=str(push_error),
+            )
 
         return jsonify({
             "message": "registration successful. waiting for admin approval.",
@@ -1274,13 +1647,15 @@ async def vip_upgrade():
             vip_id,
             from_plan,
             to_plan,
-            status
+            status,
+            request_type
         )
         VALUES (
             :vip_id,
             :from_plan,
             :to_plan,
-            'pending'
+            'pending',
+            'upgrade'
         )
         RETURNING
             id,
@@ -1297,8 +1672,145 @@ async def vip_upgrade():
         },
     )
 
+    try:
+        vip_name = await db_fetch_one(
+            """
+            SELECT name
+            FROM vip_users
+            WHERE id = :vip_id
+            """,
+            {"vip_id": vip["id"]},
+        )
+
+        name = vip_name["name"] if vip_name else "VIP member"
+
+        await send_admin_push(
+            "VIP upgrade request",
+            f"{name} ({vip['number']}) requested an upgrade from {current_plan} to {to_plan}.",
+            "/admin",
+        )
+    except Exception as push_error:
+        log_json(
+            "error",
+            event="admin_vip_upgrade_push_failed",
+            error=str(push_error),
+        )
+
     return jsonify({
         "message": "upgrade request submitted",
+        "request": row,
+    }), 201
+
+
+# ============================================================
+# VIP SUBSCRIPTION RENEWAL REQUEST
+# ============================================================
+
+@app.post("/vip/renew")
+@vip_required
+async def vip_renew():
+    data = request.get_json(silent=True) or {}
+
+    to_plan = str(
+        data.get("subscription", "")
+    ).strip().lower()
+
+    if to_plan not in PLAN_ORDER:
+        return jsonify({
+            "error": "invalid subscription plan"
+        }), 400
+
+    vip = request.vip_user
+
+    expiry_text = vip.get("subscription_expiry")
+
+    if expiry_text:
+        try:
+            expiry = datetime.fromisoformat(
+                str(expiry_text).replace("Z", "+00:00")
+            )
+
+            if expiry.tzinfo is None:
+                expiry = expiry.replace(tzinfo=UTC)
+
+            if expiry > datetime.now(UTC):
+                return jsonify({
+                    "error": "your subscription is still active"
+                }), 400
+
+        except (ValueError, TypeError):
+            return jsonify({
+                "error": "unable to verify subscription expiry"
+            }), 400
+
+    current_plan = vip["subscription"]
+
+    existing = await db_fetch_one(
+        """
+        SELECT id
+        FROM vip_upgrade_requests
+        WHERE vip_id = :vip_id
+          AND status = 'pending'
+        LIMIT 1
+        """,
+        {"vip_id": vip["id"]},
+    )
+
+    if existing:
+        return jsonify({
+            "error": "you already have a pending subscription request"
+        }), 409
+
+    row = await db_fetch_one(
+        """
+        INSERT INTO vip_upgrade_requests (
+            vip_id,
+            from_plan,
+            to_plan,
+            status,
+            request_type
+        )
+        VALUES (
+            :vip_id,
+            :from_plan,
+            :to_plan,
+            'pending',
+            'renewal'
+        )
+        RETURNING
+            id,
+            vip_id,
+            from_plan,
+            to_plan,
+            status,
+            created_at
+        """,
+        {
+            "vip_id": vip["id"],
+            "from_plan": current_plan,
+            "to_plan": to_plan,
+        },
+    )
+
+    try:
+        await send_admin_push(
+            "VIP renewal request",
+            (
+                f'{vip["name"]} ({vip["number"]}) '
+                f'requested to renew their subscription '
+                f'on the {to_plan} plan.'
+            ),
+            "/admin",
+        )
+    except Exception as push_error:
+        log_json(
+            "error",
+            event="admin_vip_renewal_push_failed",
+            error=str(push_error),
+        )
+
+    return jsonify({
+        "message": "subscription renewal request submitted",
         "request": row,
     }), 201
 
@@ -1728,6 +2240,7 @@ async def admin_upgrade_requests():
             ur.from_plan,
             ur.to_plan,
             ur.status,
+            ur.request_type,
             ur.created_at,
             ur.approved_at,
             vu.name,
@@ -1753,28 +2266,26 @@ async def admin_upgrade_requests():
 async def admin_approve_upgrade(request_id):
     req = await db_fetch_one(
         """
-        SELECT
-            id,
-            vip_id,
-            from_plan,
-            to_plan,
-            status
+        SELECT id, to_plan, status
         FROM vip_upgrade_requests
         WHERE id = :id
         """,
-        {
-            "id": request_id
-        },
+        {"id": request_id},
     )
 
     if not req:
         return jsonify({
-            "error": "upgrade request not found"
+            "error": "subscription request not found"
         }), 404
 
     if req["status"] != "pending":
         return jsonify({
-            "error": "upgrade request is not pending"
+            "error": "subscription request is not pending"
+        }), 400
+
+    if req["to_plan"] not in PLAN_DAYS:
+        return jsonify({
+            "error": "invalid subscription plan on request"
         }), 400
 
     expiry = (
@@ -1782,36 +2293,18 @@ async def admin_approve_upgrade(request_id):
         + timedelta(days=PLAN_DAYS[req["to_plan"]])
     ).isoformat()
 
-    await db_execute(
-        """
-        UPDATE vip_users
-        SET
-            subscription = :subscription,
-            subscription_expiry = :expiry
-        WHERE id = :vip_id
-        """,
-        {
-            "subscription": req["to_plan"],
-            "expiry": expiry,
-            "vip_id": req["vip_id"],
-        },
+    approved = await db_approve_vip_request(
+        request_id,
+        expiry,
     )
 
-    await db_execute(
-        """
-        UPDATE vip_upgrade_requests
-        SET
-            status = 'approved',
-            approved_at = CURRENT_TIMESTAMP
-        WHERE id = :id
-        """,
-        {
-            "id": request_id
-        },
-    )
+    if not approved:
+        return jsonify({
+            "error": "subscription request is no longer pending"
+        }), 409
 
     return jsonify({
-        "message": "upgrade approved successfully"
+        "message": "subscription request approved successfully"
     })
 
 
@@ -1824,33 +2317,36 @@ async def admin_approve_upgrade(request_id):
 async def admin_decline_upgrade(request_id):
     req = await db_fetch_one(
         """
-        SELECT id, status
-        FROM vip_upgrade_requests
-        WHERE id = :id
-        """,
-        {
-            "id": request_id
-        },
-    )
-
-    if not req:
-        return jsonify({
-            "error": "upgrade request not found"
-        }), 404
-
-    await db_execute(
-        """
         UPDATE vip_upgrade_requests
         SET status = 'declined'
         WHERE id = :id
+          AND status = 'pending'
+        RETURNING id
         """,
-        {
-            "id": request_id
-        },
+        {"id": request_id},
     )
 
+    if not req:
+        existing = await db_fetch_one(
+            """
+            SELECT id
+            FROM vip_upgrade_requests
+            WHERE id = :id
+            """,
+            {"id": request_id},
+        )
+
+        if not existing:
+            return jsonify({
+                "error": "subscription request not found"
+            }), 404
+
+        return jsonify({
+            "error": "subscription request is not pending"
+        }), 400
+
     return jsonify({
-        "message": "upgrade request declined"
+        "message": "subscription request declined"
     })
 
 

@@ -16,6 +16,8 @@ import {
   adminDeleteVip,
   adminSetVipPassword,
   adminSendVipPushTest,
+  vipPushPublicKey,
+  adminPushSubscribe,
   adminApproveUpgrade,
   adminDeclineUpgrade,
   adminPreviewVipPicks,
@@ -118,6 +120,76 @@ setDistributionSummary([]);
     });
   };
 
+  const [pushLoading, setPushLoading] = useState(false);
+  const [pushMessage, setPushMessage] = useState("");
+
+  const enableAdminNotifications = async () => {
+    if (!token) return;
+
+    if (
+      !("serviceWorker" in navigator) ||
+      !("PushManager" in window) ||
+      !("Notification" in window)
+    ) {
+      setPushMessage("This browser does not support push notifications.");
+      return;
+    }
+
+    setPushLoading(true);
+    setPushMessage("");
+
+    try {
+      const permission = await Notification.requestPermission();
+
+      if (permission !== "granted") {
+        throw new Error("Notification permission was not granted.");
+      }
+
+      const registration = await navigator.serviceWorker.ready;
+      let subscription = await registration.pushManager.getSubscription();
+
+      if (!subscription) {
+        const keyResponse = await vipPushPublicKey();
+        const publicKey =
+          keyResponse?.data?.publicKey ||
+          keyResponse?.publicKey;
+
+        if (!keyResponse?.success || !publicKey) {
+          throw new Error("Could not load the push notification public key.");
+        }
+
+        const padding = "=".repeat((4 - publicKey.length % 4) % 4);
+        const base64 = (publicKey + padding)
+          .replace(/-/g, "+")
+          .replace(/_/g, "/");
+
+        const raw = window.atob(base64);
+        const applicationServerKey = Uint8Array.from(
+          raw,
+          (char) => char.charCodeAt(0)
+        );
+
+        subscription = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey,
+        });
+      }
+
+      const saved = await adminPushSubscribe(token, subscription.toJSON());
+
+      if (!saved?.success) {
+        throw new Error(saved?.error || "Could not save the admin device.");
+      }
+
+      setPushMessage("Admin notifications are enabled on this device.");
+    } catch (error) {
+      console.error("[ADMIN PUSH] Enable failed:", error);
+      setPushMessage(error?.message || "Could not enable admin notifications.");
+    } finally {
+      setPushLoading(false);
+    }
+  };
+
   const fetchAll = useCallback(async (silent = false) => {
     if (!token) return;
 
@@ -181,7 +253,7 @@ setDistributionSummary([]);
 
     const confirmMessage =
       action === "delete"
-        ? "Are you sure you want to permanently DELETE this VIP?\\n\\nThis will remove the VIP account, all VIP picks, and upgrade requests. This cannot be undone."
+        ? "Are you sure you want to permanently DELETE this VIP?\\n\\nThis will remove the VIP account, all VIP picks, and subscription requests. This cannot be undone."
         : `Are you sure you want to ${verb} this VIP?`;
 
     if (!window.confirm(confirmMessage)) {
@@ -287,7 +359,8 @@ setDistributionSummary([]);
 
   const upgradeAction = async (
     reqId,
-    action
+    action,
+    requestType = "upgrade"
   ) => {
     const verb =
       action === "approve"
@@ -296,7 +369,7 @@ setDistributionSummary([]);
 
     if (
       !window.confirm(
-        `Are you sure you want to ${verb} this upgrade request?`
+        `Are you sure you want to ${verb} this ${requestType === "renewal" ? "renewal" : "upgrade"} request?`
       )
     ) {
       return;
@@ -328,13 +401,13 @@ setDistributionSummary([]);
         throw new Error(
           res?.error ||
             res?.message ||
-            `Failed to ${action} upgrade`
+            `Failed to ${action} subscription request`
         );
       }
 
       setMsg({
         type: "success",
-        text: `Upgrade ${action}d successfully.`,
+        text: `${requestType === "renewal" ? "Renewal" : "Upgrade"} ${action}d successfully.`,
       });
 
       await fetchAll();
@@ -709,7 +782,7 @@ setDistributionSummary([]);
       },
       {
         label:
-          "Upgrade requests",
+          "Subscription requests",
         value:
           upgradeRequests.filter(
             (req) => req.status === "pending"
@@ -856,6 +929,15 @@ setDistributionSummary([]);
 
             <button
               type="button"
+              onClick={enableAdminNotifications}
+              disabled={pushLoading || !token}
+              className="rounded-xl border border-cyan-400/20 bg-cyan-400/10 px-3 py-2 text-sm font-semibold text-cyan-300 transition hover:bg-cyan-400/20 disabled:opacity-50"
+            >
+              {pushLoading ? "Enabling..." : "Enable notifications"}
+            </button>
+
+            <button
+              type="button"
               onClick={logout}
               className="rounded-xl border border-red-400/20 bg-red-400/10 px-3 py-2 text-sm font-semibold text-red-300 transition hover:bg-red-400/20"
             >
@@ -883,6 +965,12 @@ setDistributionSummary([]);
                 match settlement from
                 one place.
               </p>
+
+              {pushMessage && (
+                <p className="mt-2 text-xs text-cyan-300" role="status">
+                  {pushMessage}
+                </p>
+              )}
             </div>
 
             <div className="rounded-2xl border border-white/10 bg-white/[0.035] px-4 py-3 text-xs text-slate-400">
@@ -1033,7 +1121,7 @@ setDistributionSummary([]);
               )}
                 {pendingUpgradeRequests.length > 0 && (
               <Card
-                title="Upgrade requests"
+                title="Subscription requests"
                 subtitle="Latest requests requiring attention"
                 action={
                   <button
@@ -1085,7 +1173,8 @@ setDistributionSummary([]);
                                 onClick={() =>
                                   upgradeAction(
                                     req.id,
-                                    "approve"
+                                    "approve",
+                                    req.request_type
                                   )
                                 }
                               >
@@ -1098,7 +1187,8 @@ setDistributionSummary([]);
                                 onClick={() =>
                                   upgradeAction(
                                     req.id,
-                                    "decline"
+                                    "decline",
+                                    req.request_type
                                   )
                                 }
                               >
@@ -1121,7 +1211,7 @@ setDistributionSummary([]);
                     ))}
 
                   {!pendingUpgradeRequests.length && (
-                    <Empty text="No upgrade requests." />
+                    <Empty text="No subscription requests." />
                   )}
                 </div>
               </Card>
@@ -1411,8 +1501,8 @@ setDistributionSummary([]);
 
               {pendingUpgradeRequests.length > 0 && (
               <Card
-                title="Upgrade requests"
-                subtitle="Approve or decline plan changes"
+                title="Subscription requests"
+                subtitle="Approve or decline renewals and upgrades"
               >
                 <div className="space-y-2">
                   {pendingUpgradeRequests.map(
@@ -1430,6 +1520,10 @@ setDistributionSummary([]);
                           </p>
 
                           <p className="text-xs text-slate-500">
+                            <span className="font-semibold text-amber-400">
+                              {req.request_type === "renewal" ? "Renewal" : "Upgrade"}
+                            </span>
+                            {" · "}
                             {req.number ||
                               "—"}{" "}
                             →{" "}
@@ -1486,7 +1580,7 @@ setDistributionSummary([]);
                   )}
 
                   {!pendingUpgradeRequests.length && (
-                    <Empty text="No upgrade requests." />
+                    <Empty text="No subscription requests." />
                   )}
                 </div>
               </Card>

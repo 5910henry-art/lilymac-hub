@@ -17,7 +17,11 @@ from werkzeug.middleware.dispatcher import DispatcherMiddleware
 # ============================================================
 
 from app import app as main_app, socketio
-from vipadmin import app as vipadmin_app, init_db_async
+from vipadmin import (
+    app as vipadmin_app,
+    init_db_async,
+    admin_vip_expiry_monitor,
+)
 from betting.bet import app as bet_app, init_services
 
 
@@ -167,28 +171,32 @@ logger.info(
     "🚀 Betting scheduler initialization started in background"
 )
 
-
 def start_vip_database():
     import asyncio
 
-    try:
-        asyncio.run(init_db_async())
+    async def run_vip_services():
+        await init_db_async()
         logger.info("VIP/Admin database initialization completed")
-    except Exception:
-        logger.exception("VIP/Admin database initialization failed")
+        await admin_vip_expiry_monitor()
 
+    try:
+        asyncio.run(run_vip_services())
+    except Exception:
+        logger.exception(
+            "VIP/Admin database or expiry monitor failed"
+        )
 
 vip_database_thread = threading.Thread(
     target=start_vip_database,
     name="vip-database-init",
     daemon=True,
 )
+
 vip_database_thread.start()
 
 logger.info(
-    "VIP/Admin database initialization started in background"
+    "VIP/Admin database and expiry monitor initialization started in background"
 )
-
 
 # ============================================================
 # Health
@@ -302,7 +310,7 @@ if __name__ == "__main__":
     run_simple(
         FLASK_HOST,
         FLASK_PORT,
-        application,
+        app,
         threaded=True,
         use_reloader=False,
         use_debugger=False,
