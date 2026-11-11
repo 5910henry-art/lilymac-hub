@@ -333,3 +333,16 @@ export const adminSetVipPassword = (
     body: { password },
     token,
   });
+
+// ============================================================
+// SEND VIP PUSH TEST (ADMIN ONLY)
+// ============================================================
+
+export const adminSendVipPushTest = (
+  token,
+  vip_id
+) =>
+  vipRequest(`/admin/vips/${vip_id}/push-test`, {
+    method: "POST",
+    token,
+  });

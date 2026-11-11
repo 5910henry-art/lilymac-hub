@@ -15,6 +15,7 @@ import {
   adminDeclineVip,
   adminDeleteVip,
   adminSetVipPassword,
+  adminSendVipPushTest,
   adminApproveUpgrade,
   adminDeclineUpgrade,
   adminPreviewVipPicks,
@@ -344,6 +345,61 @@ setDistributionSummary([]);
       );
 
       showError(e);
+    } finally {
+      setLoading(false);
+      setLoadingText("");
+    }
+  };
+
+  const sendVipPushTest = async () => {
+    if (selectedVIPs.length !== 1) {
+      setMsg({
+        type: "error",
+        text: "Select exactly one VIP to test push notifications.",
+      });
+      return;
+    }
+
+    const vip = approvedVips.find(
+      (item) =>
+        String(item.number) === String(selectedVIPs[0])
+    );
+
+    if (!vip?.id) {
+      setMsg({
+        type: "error",
+        text: "Could not find the selected VIP account.",
+      });
+      return;
+    }
+
+    setLoading(true);
+    setLoadingText("Sending test notification…");
+    setMsg(null);
+
+    try {
+      const res = await adminSendVipPushTest(token, vip.id);
+      const result = res?.data ?? res;
+
+      if (res?.success === false || result?.success === false) {
+        throw new Error(
+          result?.error ||
+          res?.error ||
+          "The test notification could not be sent."
+        );
+      }
+
+      const sent = result?.sent ?? 0;
+
+      setMsg({
+        type: "success",
+        text: `Test notification sent to ${sent} device subscription(s) for ${vip.name || vip.number}.`,
+      });
+    } catch (error) {
+      setMsg({
+        type: "error",
+        text: error?.message || "Push test failed.",
+      });
     } finally {
       setLoading(false);
       setLoadingText("");
@@ -1501,6 +1557,21 @@ setDistributionSummary([]);
                   {!approvedVips.length && (
                     <Empty text="No approved VIPs." />
                   )}
+
+                  <div className="mt-4 border-t border-white/10 pt-4">
+                    <Btn
+                      onClick={sendVipPushTest}
+                      disabled={
+                        loading ||
+                        selectedVIPs.length !== 1
+                      }
+                    >
+                      Send test notification
+                    </Btn>
+                    <p className="mt-2 text-xs text-slate-400">
+                      Select exactly one approved VIP above. This sends a test push only; it does not distribute picks.
+                    </p>
+                  </div>
                 </SelectionPanel>
 
                 <SelectionPanel

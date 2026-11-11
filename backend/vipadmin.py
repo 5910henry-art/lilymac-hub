@@ -469,6 +469,85 @@ def admin_required(fn):
 
 
 # ============================================================
+# ADMIN: SEND VIP PUSH TEST
+# ============================================================
+
+@app.post("/admin/vips/<int:vip_id>/push-test")
+@admin_required
+async def admin_test_vip_push(vip_id):
+    if not all((
+        VAPID_PUBLIC_KEY,
+        VAPID_PRIVATE_KEY,
+        VAPID_SUBJECT,
+    )):
+        return jsonify({
+            "success": False,
+            "error": "Push notification configuration is incomplete.",
+        }), 503
+
+    try:
+        from pywebpush import webpush
+    except ImportError:
+        return jsonify({
+            "success": False,
+            "error": "pywebpush is not installed on the backend.",
+        }), 503
+
+    vip = await db_fetch_one(
+        """
+        SELECT id, name, number
+        FROM vip_users
+        WHERE id = :id
+          AND approved = TRUE
+        """,
+        {"id": vip_id},
+    )
+
+    if not vip:
+        return jsonify({
+            "success": False,
+            "error": "Approved VIP account not found.",
+        }), 404
+
+    subscriptions = await db_fetch_all(
+        """
+        SELECT endpoint
+        FROM vip_push_subscriptions
+        WHERE number = :number
+        """,
+        {"number": vip["number"]},
+    )
+
+    if not subscriptions:
+        return jsonify({
+            "success": False,
+            "error": "This VIP has no registered push devices.",
+        }), 404
+
+    sent = await send_vip_push(
+        vip["number"],
+        "LilyMac VIP test notification",
+        "Push notifications are working on this device, even when you are logged out.",
+        "/vip",
+    )
+
+    if sent < 1:
+        return jsonify({
+            "success": False,
+            "sent": 0,
+            "subscriptions": len(subscriptions),
+            "error": "No push notification was delivered. Check backend logs.",
+        }), 502
+
+    return jsonify({
+        "success": True,
+        "sent": sent,
+        "subscriptions": len(subscriptions),
+        "message": "Test notification sent.",
+    })
+
+
+# ============================================================
 # MATCH HELPERS
 # ============================================================
 
