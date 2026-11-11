@@ -1445,10 +1445,21 @@ async def vip_quota():
 
     row = await db_fetch_one(
         """
-        SELECT used
-        FROM vip_daily_quota_usage
-        WHERE number = :number
-          AND quota_date = (CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Nairobi')::date
+        SELECT GREATEST(
+            COALESCE((
+                SELECT used
+                FROM vip_daily_quota_usage
+                WHERE number = :number
+                  AND quota_date = (CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Nairobi')::date
+            ), 0),
+            COALESCE((
+                SELECT COUNT(*)::int
+                FROM vip_picks
+                WHERE number = :number
+                  AND (created_at AT TIME ZONE 'Africa/Nairobi')::date =
+                      (CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Nairobi')::date
+            ), 0)
+        ) AS used
         """,
         {"number": vip["number"]},
     )
@@ -2523,16 +2534,30 @@ async def admin_distribute_vip_picks():
 
                     used = int(ledger["used"]) if ledger else 0
 
-                    # Update the plan's quota without resetting previous usage.
+                    # Reconcile legacy picks created today in Kenya time.
+                    # GREATEST prevents double-counting picks already in the ledger.
+                    existing_today = await conn.fetchval(
+                        """
+                        SELECT COUNT(*)::int
+                        FROM vip_picks
+                        WHERE number = $1
+                          AND (created_at AT TIME ZONE 'Africa/Nairobi')::date = $2
+                        """,
+                        number, today,
+                    )
+                    used = max(used, int(existing_today or 0))
+
+                    # Persist reconciled usage before checking remaining quota.
                     await conn.execute(
                         """
                         UPDATE vip_daily_quota_usage
                         SET plan = $3,
                             quota = $4,
+                            used = $5,
                             updated_at = CURRENT_TIMESTAMP
                         WHERE number = $1 AND quota_date = $2
                         """,
-                        number, today, plan, quota,
+                        number, today, plan, quota, used,
                     )
 
                     candidates = []
