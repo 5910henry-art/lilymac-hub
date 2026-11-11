@@ -479,6 +479,19 @@ function VipQuotaCard({
       quotaSource?.usedToday
     ) || 0;
 
+  const expired =
+    quotaSource?.expired === true;
+
+  const remainingToday = expired
+    ? 0
+    : Math.max(
+        0,
+        Number(
+          quotaSource?.remaining ??
+          (dailyQuota - usedToday)
+        ) || 0
+      );
+
   const percent =
     dailyQuota > 0
       ? Math.min(
@@ -531,6 +544,27 @@ function VipQuotaCard({
         </div>
       </div>
 
+      <div className="mt-4 flex items-center justify-between rounded-xl bg-blue-600/5 px-3 py-3">
+        <span className="text-sm font-medium text-slate-600">
+          Remaining today
+        </span>
+        <span className="text-lg font-bold text-blue-600">
+          {remainingToday}
+        </span>
+      </div>
+
+      {expired && (
+        <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-3">
+          <p className="text-sm font-semibold text-red-700">
+            Subscription expired
+          </p>
+          <p className="mt-1 text-xs text-red-600">
+            No new picks can be distributed until you renew or upgrade.
+            Your existing picks remain available.
+          </p>
+        </div>
+      )}
+
       <div className="mt-4 h-3 overflow-hidden rounded-full bg-slate-200">
         <div
           className="h-full rounded-full transition-all duration-500"
@@ -547,11 +581,11 @@ function VipQuotaCard({
           {percent}% used
         </span>
 
-        {quota.resets_at && (
+        {quotaSource.resets_at && (
           <span>
             Resets{" "}
             {formatExpiry(
-              quota.resets_at
+              quotaSource.resets_at
             )}
           </span>
         )}

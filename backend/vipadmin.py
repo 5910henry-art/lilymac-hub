@@ -120,11 +120,11 @@ async def vip_execute_db(sql, params=None):
         dsn=DATABASE_URL,
         command_timeout=60,
     )
-    await conn.execute(
-        f'SET search_path TO "{DB_SCHEMA}", public'
-    )
 
     try:
+        await conn.execute(
+            f'SET search_path TO "{DB_SCHEMA}", public'
+        )
         return await conn.execute(sql, *params)
     finally:
         await conn.close()
@@ -569,6 +569,17 @@ async def admin_vip_expiry_monitor(interval_seconds=300):
 
     while True:
         try:
+            # Remove picks for all VIPs once their matches are finished.
+            deleted = await db_execute(
+                """
+                DELETE FROM vip_picks vp
+                USING matches m
+                WHERE vp.match_id = m.id
+                  AND UPPER(COALESCE(m.status, '')) = 'FINISHED'
+                """
+            )
+            logger.info("Finished-match VIP picks cleanup: %s", deleted)
+
             vips = await db_fetch_all(
                 """
                 SELECT id, name, number, subscription, subscription_expiry
@@ -578,7 +589,7 @@ async def admin_vip_expiry_monitor(interval_seconds=300):
                 """
             )
 
-            now = datetime.now(UTC)
+            today = datetime.now(KENYA).date()
 
             for vip in vips:
                 expiry_text = str(vip["subscription_expiry"])
@@ -591,7 +602,10 @@ async def admin_vip_expiry_monitor(interval_seconds=300):
                     if expiry.tzinfo is None:
                         expiry = expiry.replace(tzinfo=UTC)
 
-                    if expiry > now:
+                    expiry_date = expiry.astimezone(KENYA).date()
+
+                    # The expiry date remains an entitled day.
+                    if expiry_date >= today:
                         continue
 
                 except (ValueError, TypeError):
@@ -1027,6 +1041,22 @@ async def init_db_async():
 
     await db_execute(
         """
+        CREATE TABLE IF NOT EXISTS vip_daily_quota_usage (
+            number TEXT NOT NULL,
+            quota_date DATE NOT NULL,
+            plan TEXT NOT NULL,
+            quota INTEGER NOT NULL DEFAULT 0,
+            used INTEGER NOT NULL DEFAULT 0,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (number, quota_date),
+            CHECK (quota >= 0),
+            CHECK (used >= 0)
+        )
+        """
+    )
+
+    await db_execute(
+        """
         CREATE TABLE IF NOT EXISTS vip_push_subscriptions (
             endpoint TEXT PRIMARY KEY,
             number TEXT NOT NULL,
@@ -1387,27 +1417,19 @@ async def vip_picks():
     rows = await db_fetch_all(
         """
         SELECT
-            id,
-            number,
-            match_id,
-            home_team,
-            away_team,
-            match_time,
-            pick,
-            odds,
-            created_at
-        FROM vip_picks
-        WHERE number = :number
-        ORDER BY created_at DESC
+            vp.id, vp.number, vp.match_id,
+            vp.home_team, vp.away_team, vp.match_time,
+            vp.pick, vp.odds, vp.created_at
+        FROM vip_picks vp
+        LEFT JOIN matches m ON m.id = vp.match_id
+        WHERE vp.number = :number
+          AND UPPER(COALESCE(m.status, '')) <> 'FINISHED'
+        ORDER BY vp.created_at DESC
         """,
-        {
-            "number": vip["number"]
-        },
+        {"number": vip["number"]},
     )
 
-    return jsonify({
-        "picks": rows
-    })
+    return jsonify({"picks": rows})
 
 
 # ============================================================
@@ -1418,29 +1440,40 @@ async def vip_picks():
 @vip_required
 async def vip_quota():
     vip = request.vip_user
-
-    plan = vip["subscription"]
+    plan = str(vip["subscription"] or "").lower()
     quota = SUBSCRIPTION_QUOTA.get(plan, 0)
 
     row = await db_fetch_one(
         """
-        SELECT COUNT(*) AS count
-        FROM vip_picks
+        SELECT used
+        FROM vip_daily_quota_usage
         WHERE number = :number
-          AND created_at >= CURRENT_DATE
+          AND quota_date = (CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Nairobi')::date
         """,
-        {
-            "number": vip["number"]
-        },
+        {"number": vip["number"]},
     )
 
-    used = int(row["count"]) if row else 0
+    used = int(row["used"]) if row else 0
+
+    try:
+        expiry = datetime.fromisoformat(
+            str(vip["subscription_expiry"]).replace("Z", "+00:00")
+        )
+        if expiry.tzinfo is None:
+            expiry = expiry.replace(tzinfo=UTC)
+        expiry_date = expiry.astimezone(KENYA).date()
+        expired = expiry_date < datetime.now(KENYA).date()
+    except (ValueError, TypeError, OverflowError):
+        expired = True
+
+    remaining = 0 if expired else max(quota - used, 0)
 
     return jsonify({
         "plan": plan,
         "quota": quota,
         "used": used,
-        "remaining": max(quota - used, 0),
+        "remaining": remaining,
+        "expired": expired,
     })
 
 
@@ -2394,216 +2427,285 @@ async def admin_vip_picks_preview():
 @admin_required
 async def admin_distribute_vip_picks():
     data = request.get_json(silent=True) or {}
-
-    number = str(
-        data.get("number", "")
-    ).strip()
-
+    number = str(data.get("number", "")).strip()
     picks = data.get("picks", [])
 
     if not number:
-        return jsonify({
-            "error": "number is required"
-        }), 400
+        return jsonify({"error": "number is required"}), 400
 
     if not isinstance(picks, list):
-        return jsonify({
-            "error": "picks must be a list"
-        }), 400
+        return jsonify({"error": "picks must be a list"}), 400
 
-    vip = await db_fetch_one(
-        """
-        SELECT
-            id,
-            name,
-            number,
-            subscription,
-            approved
-        FROM vip_users
-        WHERE number = :number
-        """,
-        {
-            "number": number
-        },
-    )
+    if not picks:
+        return jsonify({"error": "At least one pick is required"}), 400
 
-    if not vip:
-        return jsonify({
-            "error": "VIP user not found"
-        }), 404
-
-    if not vip["approved"]:
-        return jsonify({
-            "error": "VIP user is not approved"
-        }), 403
-
-    quota = SUBSCRIPTION_QUOTA.get(
-        vip["subscription"],
-        0,
-    )
-
-    existing = await db_fetch_one(
-        """
-        SELECT COUNT(*) AS count
-        FROM vip_picks
-        WHERE number = :number
-          AND created_at >= CURRENT_DATE
-        """,
-        {
-            "number": number
-        },
-    )
-
-    used = int(existing["count"]) if existing else 0
-
-    remaining = max(quota - used, 0)
-
-    if len(picks) > remaining:
-        return jsonify({
-            "error": "VIP quota exceeded",
-            "quota": quota,
-            "used": used,
-            "remaining": remaining,
-        }), 400
-
+    conn = await asyncpg.connect(dsn=DATABASE_URL, command_timeout=60)
     created = []
+    failure = None
+    quota = 0
+    used = 0
+    remaining_after = 0
 
-    for item in picks:
-        match_id = item.get("match_id")
-        pick = str(
-            item.get("pick", "")
-        ).strip().upper()
+    try:
+        await conn.execute(f'SET search_path TO "{DB_SCHEMA}", public')
 
-        odds = item.get("odds")
-
-        if not match_id or not pick:
-            continue
-
-        match = await db_fetch_one(
-            """
-            SELECT
-                id,
-                home_team_name,
-                away_team_name,
-                utcdate,
-                status
-            FROM matches
-            WHERE id = :id
-            """,
-            {
-                "id": match_id
-            },
-        )
-
-        if not match:
-            continue
-
-        existing_pick = await db_fetch_one(
-            """
-            SELECT id
-            FROM vip_picks
-            WHERE number = :number
-              AND match_id = :match_id
-            LIMIT 1
-            """,
-            {
-                "number": number,
-                "match_id": match_id,
-            },
-        )
-
-        if existing_pick:
-            continue
-
-        row = await db_fetch_one(
-            """
-            INSERT INTO vip_picks (
+        async with conn.transaction():
+            # Serialize all distributions for this VIP.
+            vip = await conn.fetchrow(
+                """
+                SELECT id, name, number, subscription,
+                       subscription_expiry, approved
+                FROM vip_users
+                WHERE number = $1
+                FOR UPDATE
+                """,
                 number,
-                match_id,
-                home_team,
-                away_team,
-                match_time,
-                pick,
-                odds
             )
-            VALUES (
-                :number,
-                :match_id,
-                :home_team,
-                :away_team,
-                :match_time,
-                :pick,
-                :odds
-            )
-            RETURNING
-                id,
-                number,
-                match_id,
-                home_team,
-                away_team,
-                match_time,
-                pick,
-                odds,
-                created_at
-            """,
-            {
-                "number": number,
-                "match_id": match_id,
-                "home_team": match["home_team_name"],
-                "away_team": match["away_team_name"],
-                "match_time": match["utcdate"],
-                "pick": pick,
-                "odds": odds,
-            },
-        )
 
-        created.append(row)
+            if not vip:
+                failure = ({"error": "VIP user not found"}, 404)
+
+            elif not vip["approved"]:
+                failure = ({"error": "VIP user is not approved"}, 403)
+
+            else:
+                plan = str(vip["subscription"] or "").lower()
+                quota = SUBSCRIPTION_QUOTA.get(plan, 0)
+                today = datetime.now(KENYA).date()
+
+                try:
+                    expiry = datetime.fromisoformat(
+                        str(vip["subscription_expiry"]).replace("Z", "+00:00")
+                    )
+                    if expiry.tzinfo is None:
+                        expiry = expiry.replace(tzinfo=UTC)
+                    expiry_date = expiry.astimezone(KENYA).date()
+                except (ValueError, TypeError, OverflowError):
+                    expiry_date = None
+
+                if expiry_date is None:
+                    failure = ({
+                        "error": "VIP subscription expiry is invalid"
+                    }, 403)
+
+                elif expiry_date < today:
+                    failure = ({
+                        "error": "VIP subscription has expired. No new picks can be distributed.",
+                        "expiry_date": expiry_date.isoformat(),
+                    }, 403)
+
+                elif quota <= 0:
+                    failure = ({
+                        "error": "VIP subscription plan has no pick quota"
+                    }, 400)
+
+                else:
+                    # Create today's ledger row if this is the first distribution.
+                    await conn.execute(
+                        """
+                        INSERT INTO vip_daily_quota_usage
+                            (number, quota_date, plan, quota, used)
+                        VALUES ($1, $2, $3, $4, 0)
+                        ON CONFLICT (number, quota_date) DO NOTHING
+                        """,
+                        number, today, plan, quota,
+                    )
+
+                    ledger = await conn.fetchrow(
+                        """
+                        SELECT used
+                        FROM vip_daily_quota_usage
+                        WHERE number = $1 AND quota_date = $2
+                        FOR UPDATE
+                        """,
+                        number, today,
+                    )
+
+                    used = int(ledger["used"]) if ledger else 0
+
+                    # Update the plan's quota without resetting previous usage.
+                    await conn.execute(
+                        """
+                        UPDATE vip_daily_quota_usage
+                        SET plan = $3,
+                            quota = $4,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE number = $1 AND quota_date = $2
+                        """,
+                        number, today, plan, quota,
+                    )
+
+                    candidates = []
+                    seen_match_ids = set()
+
+                    for item in picks:
+                        if not isinstance(item, dict):
+                            continue
+
+                        try:
+                            match_id = int(item.get("match_id"))
+                        except (TypeError, ValueError):
+                            continue
+
+                        pick = str(item.get("pick", "")).strip().upper()
+
+                        if not pick or match_id in seen_match_ids:
+                            continue
+
+                        seen_match_ids.add(match_id)
+
+                        match = await conn.fetchrow(
+                            """
+                            SELECT id, home_team_name, away_team_name,
+                                   utcdate, status
+                            FROM matches
+                            WHERE id = $1
+                            """,
+                            match_id,
+                        )
+
+                        if not match:
+                            continue
+
+                        if str(match["status"] or "").upper() == "FINISHED":
+                            continue
+
+                        duplicate = await conn.fetchval(
+                            """
+                            SELECT EXISTS(
+                                SELECT 1
+                                FROM vip_picks
+                                WHERE number = $1 AND match_id = $2
+                            )
+                            """,
+                            number, match_id,
+                        )
+
+                        if duplicate:
+                            continue
+
+                        odds = item.get("odds")
+                        if odds is not None:
+                            try:
+                                odds = float(odds)
+                            except (TypeError, ValueError):
+                                continue
+
+                        candidates.append((match, pick, odds))
+
+                    if not candidates:
+                        failure = ({
+                            "error": "No eligible new picks to distribute"
+                        }, 400)
+
+                    remaining = max(quota - used, 0)
+
+                    if failure:
+                        pass
+                    elif len(candidates) > remaining:
+                        failure = ({
+                            "error": "VIP quota exceeded",
+                            "quota": quota,
+                            "used": used,
+                            "remaining": remaining,
+                        }, 400)
+
+                    else:
+                        for match, pick, odds in candidates:
+                            row = await conn.fetchrow(
+                                """
+                                INSERT INTO vip_picks (
+                                    number, match_id, home_team, away_team,
+                                    match_time, pick, odds
+                                )
+                                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                                RETURNING id, number, match_id, home_team,
+                                          away_team, match_time, pick, odds,
+                                          created_at
+                                """,
+                                number,
+                                match["id"],
+                                match["home_team_name"],
+                                match["away_team_name"],
+                                match["utcdate"],
+                                pick,
+                                odds,
+                            )
+                            created.append(dict(row))
+
+                        if created:
+                            used += len(created)
+
+                            await conn.execute(
+                                """
+                                UPDATE vip_daily_quota_usage
+                                SET used = $3,
+                                    updated_at = CURRENT_TIMESTAMP
+                                WHERE number = $1 AND quota_date = $2
+                                """,
+                                number, today, used,
+                            )
+
+                        remaining_after = max(quota - used, 0)
+
+    finally:
+        await conn.close()
+
+    if failure:
+        return jsonify(failure[0]), failure[1]
 
     if created:
-        remaining_after = max(
-            quota - used - len(created),
-            0,
-        )
         first_id = created[0]["id"]
         last_id = created[-1]["id"]
 
-        picks_message = (
+        message = (
             f"{len(created)} new VIP pick(s) have been added "
             f"to your account. You have {remaining_after} "
             f"pick(s) remaining in today's quota."
         )
 
-        picks_notification = await db_fetch_one(
-            """
-            INSERT INTO vip_notifications (
-                number, event_key, notification_type, title, message, link
+        try:
+            notification = await db_fetch_one(
+                """
+                INSERT INTO vip_notifications (
+                    number, event_key, notification_type,
+                    title, message, link
+                )
+                VALUES (
+                    :number, :event_key, 'new_picks',
+                    'New VIP picks are available', :message, '/vip'
+                )
+                ON CONFLICT (number, event_key) DO NOTHING
+                RETURNING id
+                """,
+                {
+                    "number": number,
+                    "event_key": f"new-picks-{first_id}-{last_id}",
+                    "message": message,
+                },
             )
-            VALUES (
-                :number, :event_key, 'new_picks',
-                'New VIP picks are available', :message, '/vip'
-            )
-            ON CONFLICT (number, event_key) DO NOTHING
-            RETURNING id
-            """,
-            {
-                "number": number,
-                "event_key": f"new-picks-{first_id}-{last_id}",
-                "message": picks_message,
-            },
-        )
 
-        if picks_notification:
-            await send_vip_push(
+            if notification:
+                await send_vip_push(
+                    number,
+                    "New VIP picks are available",
+                    message,
+                    "/vip",
+                )
+
+        except Exception:
+            logger.exception(
+                "VIP picks were saved, but notification delivery failed for %s",
                 number,
-                "New VIP picks are available",
-                picks_message,
-                "/vip",
             )
 
     return jsonify({
         "message": "VIP picks distributed successfully",
         "count": len(created),
         "picks": created,
+        "quota": quota,
+        "used": used,
+        "remaining": remaining_after,
     })
 
 
