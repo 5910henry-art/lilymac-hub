@@ -1,86 +1,335 @@
-// src/api/vipAdminApi.js
+// src/api/authVipAdmin.js
+
 import { makeRequester, BACKEND_ADMIN } from "./core.js";
 
-const { request } = makeRequester(BACKEND_ADMIN);
+const { requestRaw } = makeRequester(BACKEND_ADMIN);
+
 /**
  * VIP / Admin API client
- * - Uses its own backend base URL
- * - Returns { success, data, status, error }
+ *
+ * Returns:
+ * {
+ *   success,
+ *   data,
+ *   status,
+ *   error
+ * }
  */
 
-// ---------- Helper ----------
+// ============================================================
+// HELPER
+// ============================================================
+
 const vipRequest = async (path, options = {}) => {
   try {
-    const res = await request(
-      path,
-      options.method || "GET",
-      options.body ?? null,
-      options.token ?? null
-    );
+    const res = await requestRaw(path, {
+      method: options.method || "GET",
+      body: options.body ?? null,
+      headers: options.token
+        ? { Authorization: `Bearer ${options.token}` }
+        : {},
+      skipAuth: !options.token,
+    });
+
     return res;
   } catch (err) {
     console.error(`[VIP API ERROR] ${path}`, err);
-    return { success: false, error: err?.message || String(err) };
+
+    return {
+      success: false,
+      error: err?.message || String(err),
+      message: err?.message || String(err),
+      data: null,
+    };
   }
 };
+
+// ============================================================
+// QUERY STRING HELPER
+// ============================================================
 
 const qsFor = (params = {}) => {
   const s = new URLSearchParams(params).toString();
   return s ? `?${s}` : "";
 };
 
-// ---------- VIP ----------
-export const vipRegister = ({ name, number, subscription }) =>
-  vipRequest("/vip/register", { method: "POST", body: { name, number, subscription } });
+// ============================================================
+// VIP REGISTRATION
+// ============================================================
 
-export const vipLogin = (number) =>
-  vipRequest("/vip/login", { method: "POST", body: { number } });
+export const vipRegister = ({
+  name,
+  number,
+  password,
+  subscription,
+}) =>
+  vipRequest("/vip/register", {
+    method: "POST",
+    body: {
+      name,
+      number,
+      password,
+      subscription,
+    },
+  });
+
+// ============================================================
+// VIP LOGIN
+// ============================================================
+
+export const vipLogin = (number, password) =>
+  vipRequest("/vip/login", {
+    method: "POST",
+    body: {
+      number,
+      password,
+    },
+  });
+
+// ============================================================
+// VIP PROFILE
+// ============================================================
 
 export const vipMe = (token) =>
-  vipRequest("/vip/me", { method: "GET", token });
+  vipRequest("/vip/me", {
+    method: "GET",
+    token,
+  });
+
+// ============================================================
+// VIP DEREGISTER
+// ============================================================
+
+export const vipDeregister = (token) =>
+  vipRequest("/vip/deregister", {
+    method: "POST",
+    token,
+  });
+
+// ============================================================
+// VIP UPGRADE
+// ============================================================
 
 export const vipUpgrade = (token, plan) =>
-  vipRequest("/vip/upgrade", { method: "POST", body: { plan }, token });
+  vipRequest("/vip/upgrade", {
+    method: "POST",
+    body: {
+      subscription: plan,
+    },
+    token,
+  });
+
+// ============================================================
+// VIP PICKS
+// ============================================================
 
 export const vipPicks = (token) =>
-  vipRequest("/vip/picks", { method: "GET", token });
+  vipRequest("/vip/picks", {
+    method: "GET",
+    token,
+  });
+
+// ============================================================
+// VIP QUOTA
+// ============================================================
 
 export const vipQuota = (token) =>
-  vipRequest("/vip/quota", { method: "GET", token });
+  vipRequest("/vip/quota", {
+    method: "GET",
+    token,
+  });
 
-// ---------- Admin ----------
+// ============================================================
+// VIP NOTIFICATIONS
+// ============================================================
+
+export const vipNotifications = (token) =>
+  vipRequest("/vip/notifications", {
+    method: "GET",
+    token,
+  });
+
+export const vipMarkNotificationRead = (
+  token,
+  notificationId
+) =>
+  vipRequest(
+    `/vip/notifications/${notificationId}/read`,
+    {
+      method: "POST",
+      token,
+    }
+  );
+
+export const vipMarkAllNotificationsRead = (token) =>
+  vipRequest("/vip/notifications/read-all", {
+    method: "POST",
+    token,
+  });
+
+// ============================================================
+// VIP WEB PUSH
+// ============================================================
+
+export const vipPushPublicKey = () =>
+  vipRequest("/vip/push/public-key");
+
+export const vipPushSubscribe = (token, subscription) =>
+  vipRequest("/vip/push/subscribe", {
+    method: "POST",
+    body: { subscription },
+    token,
+  });
+
+export const vipPushUnsubscribe = (token, endpoint) =>
+  vipRequest("/vip/push/unsubscribe", {
+    method: "POST",
+    body: { endpoint },
+    token,
+  });
+
+// ============================================================
+// ADMIN LOGIN
+// ============================================================
+
 export const adminLogin = (username, password) =>
-  vipRequest("/admin/login", { method: "POST", body: { username, password } });
+  vipRequest("/admin/login", {
+    method: "POST",
+    body: {
+      username,
+      password,
+    },
+  });
+
+// ============================================================
+// VIP MANAGEMENT
+// ============================================================
 
 export const adminListVips = (token) =>
-  vipRequest("/admin/vips", { method: "GET", token });
+  vipRequest("/admin/vips", {
+    method: "GET",
+    token,
+  });
 
 export const adminListPendingVips = (token) =>
-  vipRequest("/admin/vips/pending", { method: "GET", token });
+  vipRequest("/admin/vips/pending", {
+    method: "GET",
+    token,
+  });
 
 export const adminApproveVip = (token, vip_id) =>
-  vipRequest(`/admin/vips/approve/${vip_id}`, { method: "POST", token });
+  vipRequest(`/admin/vips/${vip_id}/approve`, {
+    method: "POST",
+    token,
+  });
 
 export const adminDeclineVip = (token, vip_id) =>
-  vipRequest(`/admin/vips/decline/${vip_id}`, { method: "POST", token });
+  vipRequest(`/admin/vips/${vip_id}/decline`, {
+    method: "POST",
+    token,
+  });
+
+export const adminDeleteVip = (token, vip_id) =>
+  vipRequest(`/admin/vips/${vip_id}/delete`, {
+    method: "POST",
+    token,
+  });
+
+// ============================================================
+// VIP UPGRADE REQUESTS
+// ============================================================
 
 export const adminListUpgradeRequests = (token) =>
-  vipRequest("/admin/vip-upgrades", { method: "GET", token });
+  vipRequest("/admin/upgrade-requests", {
+    method: "GET",
+    token,
+  });
 
 export const adminApproveUpgrade = (token, req_id) =>
-  vipRequest(`/admin/vip-upgrades/approve/${req_id}`, { method: "POST", token });
+  vipRequest(
+    `/admin/upgrade-requests/${req_id}/approve`,
+    {
+      method: "POST",
+      token,
+    }
+  );
 
 export const adminDeclineUpgrade = (token, req_id) =>
-  vipRequest(`/admin/vip-upgrades/decline/${req_id}`, { method: "POST", token });
+  vipRequest(
+    `/admin/upgrade-requests/${req_id}/decline`,
+    {
+      method: "POST",
+      token,
+    }
+  );
 
-export const adminPreviewVipPicks = (token, days = 3) =>
-  vipRequest(`/admin/vip-picks/preview${qsFor({ days })}`, { method: "GET", token });
+// ============================================================
+// VIP PICKS PREVIEW
+// ============================================================
 
-export const adminDistributeVipPicks = (token, payload) =>
-  vipRequest("/admin/vip-picks/distribute", { method: "POST", body: payload, token });
+export const adminPreviewVipPicks = (
+  token,
+  days = 3
+) =>
+  vipRequest(
+    `/admin/vip-picks/preview${qsFor({ days })}`,
+    {
+      method: "GET",
+      token,
+    }
+  );
+
+// ============================================================
+// DISTRIBUTE VIP PICKS
+// ============================================================
+
+export const adminDistributeVipPicks = (
+  token,
+  payload
+) =>
+  vipRequest("/admin/vip-picks/distribute", {
+    method: "POST",
+    body: payload,
+    token,
+  });
+
+// ============================================================
+// CLEAR ALL VIP PICKS
+// ============================================================
 
 export const adminClearAllVipPicks = (token) =>
-  vipRequest("/admin/vip-picks/clear", { method: "POST", token });
+  vipRequest("/admin/vip-picks/clear-all", {
+    method: "POST",
+    token,
+  });
 
-export const adminClearVipPicksForNumber = (token, number) =>
-  vipRequest(`/admin/vip-picks/clear/${encodeURIComponent(number)}`, { method: "POST", token });
+// ============================================================
+// CLEAR PICKS FOR ONE VIP NUMBER
+// ============================================================
+
+export const adminClearVipPicksForNumber = (
+  token,
+  number
+) =>
+  vipRequest(
+    `/admin/vip-picks/${encodeURIComponent(number)}`,
+    {
+      method: "POST",
+      token,
+    }
+  );
+
+// ============================================================
+// SET / RESET VIP PASSWORD (ADMIN ONLY)
+// ============================================================
+
+export const adminSetVipPassword = (
+  token,
+  vip_id,
+  password
+) =>
+  vipRequest(`/admin/vips/${vip_id}/password`, {
+    method: "POST",
+    body: { password },
+    token,
+  });

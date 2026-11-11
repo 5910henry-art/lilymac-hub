@@ -1,9 +1,10 @@
 // src/api/virtualAPI.js
-// Updated version: supports single and multi-bets, safe payloads, polling helpers
+import {
+  getAuthToken,
+  BACKEND_VIRTUAL,
+} from "./core.js";
 
-import { getAuthToken, BACKEND_BASE } from "./core.js";
-
-const BASE_URL = `${BACKEND_BASE}/virtual`;
+const BASE_URL = BACKEND_VIRTUAL;
 /* ---------------- GENERIC REQUEST ---------------- */
 async function request(path, { method = "GET", body = null, useAuth = true, signal } = {}) {
   const headers = { Accept: "application/json" };               

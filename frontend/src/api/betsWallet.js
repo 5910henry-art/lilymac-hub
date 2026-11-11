@@ -55,6 +55,9 @@ export const deleteAccount = () => request("/delete_account", "DELETE");
 // --------------------------------------------------
 export const getBalance = () => request("/balance");
 export const deposit = (amount) => request("/deposit", "POST", { amount });
+
+export const mpesaDeposit = (amount) =>
+  request("/mpesa/stkpush", "POST", { amount });
 export const withdraw = (amount) => request("/withdraw", "POST", { amount });
 export const getTransactions = () => request("/transactions");
 export const getBalanceHistory = () => request("/balance_history");
@@ -134,7 +137,7 @@ export const getOdds = (match_id) => request(`/odds/${match_id}`);
 // STATS
 // --------------------------------------------------
 export const getStats = () => request("/stats");
-export const getProfit = () => request("/profit");
+export const getProfit = () => request("/profit_history");
 export const getProfitHistory = () => request("/profit_history");
 
 // --------------------------------------------------

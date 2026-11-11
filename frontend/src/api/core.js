@@ -5,11 +5,11 @@ export const DEFAULT_TIMEOUT = 15000;
 // ============================================================
 // BACKEND URLS
 // ============================================================
-// Vercel frontend -> Render
-// =========================================================
+
 export const BACKEND_BASE =
   process.env.REACT_APP_BACKEND_URL ||
   "https://lilymac-hub.onrender.com";
+
 export const BACKEND_FOOTBALL =
   process.env.REACT_APP_FOOTBALL_API_URL ||
   `${BACKEND_BASE}/app`;
@@ -21,6 +21,11 @@ export const BACKEND_ADMIN =
 export const BACKEND_BET =
   process.env.REACT_APP_BET_API_URL ||
   `${BACKEND_BASE}/bet`;
+
+export const BACKEND_VIRTUAL =
+  process.env.REACT_APP_VIRTUAL_API_URL ||
+  "https://lilymac-hub-1.onrender.com";
+
 // ============================================================
 // AUTH TOKEN
 // ============================================================
@@ -39,7 +44,9 @@ if (typeof localStorage !== "undefined") {
 }
 
 export function getAuthToken() {
-  if (authToken) return authToken;
+  if (authToken) {
+    return authToken;
+  }
 
   if (typeof localStorage === "undefined") {
     return null;
@@ -78,13 +85,235 @@ export function clearToken() {
 }
 
 // ============================================================
+// ERROR HANDLING
+// ============================================================
+
+function isHtmlResponse(value) {
+  if (typeof value !== "string") {
+    return false;
+  }
+
+  const text = value.trim().toLowerCase();
+
+  return (
+    text.startsWith("<!doctype") ||
+    text.startsWith("<html") ||
+    text.includes("<html") ||
+    text.includes("<head>") ||
+    text.includes("<body") ||
+    text.includes("<title>500 internal server error") ||
+    text.includes("internal server error</h1>") ||
+    text.includes("werkzeug")
+  );
+}
+
+function cleanErrorMessage(value) {
+  if (value === null || value === undefined) {
+    return "";
+  }
+
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  const message = value.trim();
+
+  if (!message) {
+    return "";
+  }
+
+  // NEVER expose HTML pages to users.
+  if (isHtmlResponse(message)) {
+    return "";
+  }
+
+  return message;
+}
+
+function extractBackendMessage(data) {
+  if (!data) {
+    return "";
+  }
+
+  if (typeof data === "string") {
+    return cleanErrorMessage(data);
+  }
+
+  if (typeof data !== "object") {
+    return "";
+  }
+
+  const candidates = [
+    data.message,
+    data.error,
+    data.msg,
+    data.detail,
+  ];
+
+  for (const candidate of candidates) {
+    const cleaned = cleanErrorMessage(candidate);
+
+    if (cleaned) {
+      return cleaned;
+    }
+  }
+
+  return "";
+}
+
+function getFriendlyErrorMessage(status, data, path = "") {
+  const normalizedPath = String(path || "").toLowerCase();
+
+  const backendMessage = extractBackendMessage(data);
+
+  // ----------------------------------------------------------
+  // AUTH
+  // ----------------------------------------------------------
+
+  if (normalizedPath.startsWith("/login")) {
+    if (status === 400) {
+      return (
+        backendMessage ||
+        "Please check your phone number and password."
+      );
+    }
+
+    if (status === 401) {
+      return "Incorrect phone number or password.";
+    }
+
+    if (status === 403) {
+      return (
+        backendMessage ||
+        "Your account is not allowed to sign in."
+      );
+    }
+
+    if (status === 404) {
+      return "We couldn't find an account with those details.";
+    }
+  }
+
+  if (normalizedPath.startsWith("/signup")) {
+    if (status === 400 || status === 422) {
+      return (
+        backendMessage ||
+        "Please check the information you entered."
+      );
+    }
+
+    if (status === 409) {
+      return (
+        backendMessage ||
+        "An account with this phone number already exists."
+      );
+    }
+
+    if (status === 403) {
+      return (
+        backendMessage ||
+        "You are not allowed to create an account."
+      );
+    }
+  }
+
+  // ----------------------------------------------------------
+  // COMMON HTTP ERRORS
+  // ----------------------------------------------------------
+
+  switch (status) {
+    case 400:
+      return (
+        backendMessage ||
+        "The request could not be completed. Please check your information."
+      );
+
+    case 401:
+      return (
+        backendMessage ||
+        "Your session has expired. Please sign in again."
+      );
+
+    case 403:
+      return (
+        backendMessage ||
+        "You are not allowed to perform this action."
+      );
+
+    case 404:
+      return (
+        backendMessage ||
+        "The requested service could not be found."
+      );
+
+    case 409:
+      return (
+        backendMessage ||
+        "This request conflicts with existing information."
+      );
+
+    case 422:
+      return (
+        backendMessage ||
+        "Some of the information provided is invalid."
+      );
+
+    case 429:
+      return (
+        backendMessage ||
+        "Too many requests. Please wait a moment and try again."
+      );
+
+    // --------------------------------------------------------
+    // SERVER ERRORS
+    // --------------------------------------------------------
+
+    case 500:
+    case 501:
+    case 502:
+    case 503:
+    case 504:
+      return "Something went wrong on our server. Please try again shortly.";
+
+    default:
+      break;
+  }
+
+  // ----------------------------------------------------------
+  // SAFE BACKEND MESSAGE
+  // ----------------------------------------------------------
+
+  if (backendMessage) {
+    const lower = backendMessage.toLowerCase();
+
+    const technical =
+      lower.includes("traceback") ||
+      lower.includes("werkzeug") ||
+      lower.includes("sqlalchemy") ||
+      lower.includes("psycopg") ||
+      lower.includes("exception") ||
+      lower.includes("internal server error") ||
+      lower.includes("<html") ||
+      lower.includes("<!doctype");
+
+    if (!technical) {
+      return backendMessage;
+    }
+  }
+
+  return "The request could not be completed. Please try again.";
+}
+
+// ============================================================
 // TOKEN REFRESH
 // ============================================================
 
 let refreshing = false;
 
 async function refreshToken() {
-  if (refreshing) return null;
+  if (refreshing) {
+    return null;
+  }
 
   refreshing = true;
 
@@ -92,16 +321,18 @@ async function refreshToken() {
     const token = getAuthToken();
 
     if (!token) {
-      refreshing = false;
       return null;
     }
 
-    const res = await fetch(`${BACKEND_BET}/refresh`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
+    const res = await fetch(
+      `${BACKEND_BET}/refresh`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
 
     if (!res.ok) {
       throw new Error("refresh failed");
@@ -109,16 +340,27 @@ async function refreshToken() {
 
     const data = await res.json();
 
-    if (data.token) {
-      setToken(data.token);
-      refreshing = false;
-      return data.token;
+    const newToken =
+      data?.token ||
+      data?.data?.token ||
+      data?.data?.data?.token ||
+      null;
+
+    if (newToken) {
+      setToken(newToken);
+      return newToken;
     }
-  } catch {
+  } catch (error) {
+    console.error(
+      "Token refresh failed:",
+      error
+    );
+
     clearToken();
+  } finally {
+    refreshing = false;
   }
 
-  refreshing = false;
   return null;
 }
 
@@ -133,9 +375,11 @@ async function timeoutFetch(ms, fetchFn) {
     controller.abort();
   }, ms);
 
-  return fetchFn(controller.signal).finally(() => {
+  try {
+    return await fetchFn(controller.signal);
+  } finally {
     clearTimeout(id);
-  });
+  }
 }
 
 // ============================================================
@@ -145,7 +389,11 @@ async function timeoutFetch(ms, fetchFn) {
 export async function rawFetch(
   method,
   fullUrl,
-  { headers = {}, body = null, timeout = DEFAULT_TIMEOUT } = {}
+  {
+    headers = {},
+    body = null,
+    timeout = DEFAULT_TIMEOUT,
+  } = {}
 ) {
   const options = {
     method,
@@ -162,14 +410,21 @@ export async function rawFetch(
       options.headers = {
         ...headers,
         "Content-Type": "application/json",
+        Accept: "application/json",
       };
     } else {
       options.body = body;
     }
   }
 
-  // Debug stake validation
-  if (fullUrl.includes("/place_bet") && body) {
+  // ----------------------------------------------------------
+  // DEBUG BET STAKE
+  // ----------------------------------------------------------
+
+  if (
+    fullUrl.includes("/place_bet") &&
+    body
+  ) {
     try {
       const payload =
         typeof body === "string"
@@ -185,14 +440,18 @@ export async function rawFetch(
           payload
         );
       }
-    } catch {}
+    } catch {
+      // Ignore debug parsing failures.
+    }
   }
 
-  return timeoutFetch(timeout, (signal) =>
-    fetch(fullUrl, {
-      ...options,
-      signal,
-    })
+  return timeoutFetch(
+    timeout,
+    (signal) =>
+      fetch(fullUrl, {
+        ...options,
+        signal,
+      })
   );
 }
 
@@ -201,59 +460,81 @@ export async function rawFetch(
 // ============================================================
 
 export function makeRequester(baseUrl) {
-  const base = String(baseUrl).replace(/\/+$/, "");
+  const base = String(baseUrl)
+    .replace(/\/+$/, "");
 
   async function requestRawFor(
     path,
     opts = {},
     retry = true
   ) {
-    const url = path.startsWith("/")
-      ? `${base}${path}`
-      : `${base}/${path}`;
+    const url =
+      path.startsWith("/")
+        ? `${base}${path}`
+        : `${base}/${path}`;
+
+    const { skipAuth = false, ...requestOptions } = opts;
 
     const headers = {
-      ...(opts.headers || {}),
+      Accept: "application/json",
+      ...(requestOptions.headers || {}),
     };
 
-    const token = getAuthToken();
+    const token = skipAuth ? null : getAuthToken();
 
     if (
       token &&
       !headers.Authorization
     ) {
-      headers.Authorization = `Bearer ${token}`;
+      headers.Authorization =
+        `Bearer ${token}`;
     }
 
     try {
-      const res = await rawFetch(
-        opts.method || "GET",
-        url,
-        {
-          ...opts,
-          headers,
-        }
-      );
+      const res =
+        await rawFetch(
+          opts.method || "GET",
+          url,
+          {
+            ...requestOptions,
+            headers,
+          }
+        );
 
-      const text = await res.text();
+      const text =
+        await res.text();
 
       let data = null;
 
+      /*
+       * Safely parse JSON.
+       *
+       * If Flask returns HTML, data remains the
+       * HTML string, but it will NEVER be exposed
+       * directly to the user.
+       */
       try {
         data = text
           ? JSON.parse(text)
-          : text;
+          : null;
       } catch {
-        data = text;
+        data = text || null;
       }
 
-      // ------------------------------------------------------
+      // --------------------------------------------------------
       // TOKEN EXPIRED
-      // ------------------------------------------------------
+      // --------------------------------------------------------
+
+      const isAuthRoute =
+        path === "/login" ||
+        path === "/signup" ||
+        path === "/refresh";
 
       if (
         res.status === 401 &&
-        retry
+        retry &&
+        !isAuthRoute &&
+        !skipAuth
       ) {
         const newToken =
           await refreshToken();
@@ -275,28 +556,46 @@ export function makeRequester(baseUrl) {
         clearToken();
       }
 
-      // ------------------------------------------------------
+      // --------------------------------------------------------
       // ERROR
-      // ------------------------------------------------------
+      // --------------------------------------------------------
 
       if (!res.ok) {
-        const err =
-          typeof data === "object"
-            ? data.error ||
-              JSON.stringify(data)
-            : data ||
-              res.statusText;
+        const errorMessage =
+          getFriendlyErrorMessage(
+            res.status,
+            data,
+            path
+          );
+
+        /*
+         * IMPORTANT:
+         *
+         * Do NOT return raw HTML.
+         * Do NOT JSON.stringify an HTML response.
+         * Do NOT expose Render/Flask internals.
+         */
 
         return {
           success: false,
           status: res.status,
-          error: err,
+          error: errorMessage,
+          message: errorMessage,
+
+          /*
+           * Keep the original data available for
+           * internal consumers if needed.
+           *
+           * The UI should use error/message, never
+           * render this raw value.
+           */
+          data,
         };
       }
 
-      // ------------------------------------------------------
+      // --------------------------------------------------------
       // SUCCESS
-      // ------------------------------------------------------
+      // --------------------------------------------------------
 
       return {
         success: true,
@@ -304,11 +603,59 @@ export function makeRequester(baseUrl) {
         data,
       };
     } catch (err) {
+      // --------------------------------------------------------
+      // NETWORK / TIMEOUT
+      // --------------------------------------------------------
+
+      if (err?.name === "AbortError") {
+        return {
+          success: false,
+          status: 0,
+          error:
+            "The request took too long. Please try again.",
+          message:
+            "The request took too long. Please try again.",
+          data: null,
+        };
+      }
+
+      /*
+       * fetch() throws TypeError on many network failures.
+       */
+      const networkError =
+        err?.name === "TypeError" ||
+        String(err?.message || "")
+          .toLowerCase()
+          .includes("failed to fetch") ||
+        String(err?.message || "")
+          .toLowerCase()
+          .includes("network");
+
+      if (networkError) {
+        return {
+          success: false,
+          status: 0,
+          error:
+            "Unable to connect to Lilymac Hub. Please check your internet connection.",
+          message:
+            "Unable to connect to Lilymac Hub. Please check your internet connection.",
+          data: null,
+        };
+      }
+
+      console.error(
+        "Request failed:",
+        err
+      );
+
       return {
         success: false,
+        status: 0,
         error:
-          err.message ||
-          "Network error",
+          "Something went wrong while processing your request. Please try again.",
+        message:
+          "Something went wrong while processing your request. Please try again.",
+        data: null,
       };
     }
   }
@@ -321,15 +668,19 @@ export function makeRequester(baseUrl) {
   ) {
     const headers = token
       ? {
-          Authorization: `Bearer ${token}`,
+          Authorization:
+            `Bearer ${token}`,
         }
       : {};
 
-    return requestRawFor(path, {
-      method,
-      body,
-      headers,
-    });
+    return requestRawFor(
+      path,
+      {
+        method,
+        body,
+        headers,
+      }
+    );
   }
 
   return {
@@ -343,44 +694,79 @@ export function makeRequester(baseUrl) {
 // ============================================================
 
 function resolveBackend(path) {
-  // Admin / VIP API
+  const normalizedPath =
+    String(path || "").split("?")[0];
+
+  // ----------------------------------------------------------
+  // ADMIN / VIP API
+  // ----------------------------------------------------------
+
   if (
-    path.startsWith("/vip") ||
-    path.startsWith("/admin")
+    normalizedPath.startsWith("/vip") ||
+    normalizedPath.startsWith("/admin")
   ) {
     return BACKEND_ADMIN;
   }
 
-  // Betting / authentication API
+  // ----------------------------------------------------------
+  // BETTING API
+  // ----------------------------------------------------------
+
   const betPaths = [
+    // AUTH
     "/login",
     "/signup",
+    "/refresh",
+
+    // USER / PROFILE
+    "/me",
+    "/change_password",
+    "/reset_password",
+    "/delete_account",
+
+    // WALLET
     "/balance",
     "/deposit",
     "/withdraw",
-    "/place_bet",
-    "/refresh",
-    "/me",
     "/transactions",
-    "/tickets",
+    "/balance_history",
+
+    // M-PESA
+    "/mpesa/stkpush",
+
+    // BETTING
+    "/place_bet",
     "/my_bets",
+
+    // TICKETS
+    "/tickets",
+    "/ticket",
+
+    // CASHOUT
     "/cashout",
-    "/profit",
-    "/profit_history",
-    "/stats",
+
+    // MARKETS / ODDS
     "/odds",
     "/markets",
+
+    // STATS / PROFIT
+    "/stats",
+    "/profit",
+    "/profit_history",
   ];
 
   if (
     betPaths.some((p) =>
-      path.startsWith(p)
+      normalizedPath.startsWith(p)
     )
   ) {
     return BACKEND_BET;
   }
 
-  // Football / virtual API
+  // ----------------------------------------------------------
+  // FOOTBALL / APP API
+  // ----------------------------------------------------------
+
   return BACKEND_FOOTBALL;
 }
 

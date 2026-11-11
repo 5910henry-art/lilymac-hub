@@ -1,0 +1,415 @@
+import React, { useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { vipLogin, adminLogin } from "../api/authVipAdmin";
+
+function normalizeToE164(input) {
+  if (!input) return "";
+
+  const value = String(input).replace(/\s|-/g, "");
+
+  if (/^0\d{9}$/.test(value)) return "254" + value.slice(1);
+  if (/^[71]\d{8}$/.test(value)) return "254" + value;
+  if (/^254\d+$/.test(value)) return value;
+
+  return value;
+}
+
+function responseData(res) {
+  return res?.data?.data || res?.data || res || {};
+}
+
+function responseToken(res) {
+  return (
+    res?.data?.token ||
+    res?.token ||
+    res?.data?.data?.token ||
+    null
+  );
+}
+
+export default function VIPAdminLogin({ adminOnly = false }) {
+  const navigate = useNavigate();
+
+  const [identifier, setIdentifier] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [mode, setMode] = useState(adminOnly ? "admin" : "vip");
+
+  const tapCount = useRef(0);
+  const lastTap = useRef(0);
+
+  const isAdmin = mode === "admin";
+
+  const handleTitleTap = () => {
+    if (adminOnly) return;
+
+    const now = Date.now();
+
+    if (now - lastTap.current > 800) {
+      tapCount.current = 0;
+    }
+
+    lastTap.current = now;
+    tapCount.current += 1;
+
+    if (tapCount.current >= 3) {
+      tapCount.current = 0;
+      setMode(current => current === "vip" ? "admin" : "vip");
+      setIdentifier("");
+      setPassword("");
+      setError("");
+    }
+  };
+
+  const submit = async (event) => {
+    event.preventDefault();
+    setError("");
+
+    if (!identifier.trim() || !password) {
+      setError("Enter your login details.");
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const res = isAdmin
+        ? await adminLogin(identifier.trim(), password)
+        : await vipLogin(normalizeToE164(identifier), password);
+
+      const data = responseData(res);
+      const token = responseToken(res);
+
+      if (!token) {
+        throw new Error(
+          data?.error ||
+          data?.message ||
+          res?.error ||
+          "Login failed. Check your details and try again."
+        );
+      }
+
+      if (isAdmin) {
+        const adminUser =
+          data?.admin ||
+          data?.data?.admin ||
+          { username: identifier.trim() };
+
+        localStorage.setItem("admin_token", token);
+        localStorage.setItem("admin_user", JSON.stringify(adminUser));
+        navigate("/admin", { replace: true });
+      } else {
+        localStorage.setItem("vip_token", token);
+        navigate("/vip", { replace: true });
+      }
+    } catch (err) {
+      setError(
+        err?.message || "Unable to sign in. Please try again."
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+
+  const styles = {
+    page: {
+      minHeight: "100vh",
+      position: "relative",
+      isolation: "isolate",
+      overflow: "hidden",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: "36px 18px",
+      boxSizing: "border-box",
+      background: "#020617",
+      color: "#ffffff",
+      fontFamily: "Arial, sans-serif",
+    },
+    card: {
+      position: "relative",
+      zIndex: 1,
+      width: "100%",
+      maxWidth: 440,
+      padding: "34px 30px 26px",
+      boxSizing: "border-box",
+      border: "1px solid rgba(255,255,255,.10)",
+      borderRadius: 25,
+      background: "rgba(15,23,42,.88)",
+      boxShadow: "0 28px 80px rgba(0,0,0,.45)",
+      backdropFilter: "blur(20px)",
+      WebkitBackdropFilter: "blur(20px)",
+    },
+    button: {
+      width: "100%",
+      minHeight: 51,
+      padding: "14px 16px",
+      border: 0,
+      borderRadius: 13,
+      background: "linear-gradient(110deg, #2563eb 0%, #3158d8 48%, #dc2626 100%)",
+      color: "#ffffff",
+      fontWeight: 800,
+      fontSize: 15,
+      letterSpacing: ".2px",
+      cursor: "pointer",
+      boxShadow: "0 10px 22px rgba(37,99,235,.22)",
+      transition: "transform .2s ease, box-shadow .2s ease",
+    },
+    input: {
+      display: "block",
+      width: "100%",
+      boxSizing: "border-box",
+      padding: "14px 15px",
+      marginTop: 8,
+      border: "1px solid rgba(255,255,255,.12)",
+      borderRadius: 12,
+      background: "#1e293b",
+      color: "#ffffff",
+      fontSize: 15,
+      outline: "none",
+    },
+    label: {
+      display: "block",
+      marginTop: 19,
+      color: "rgba(255,255,255,.75)",
+      fontSize: 13,
+      fontWeight: 700,
+    },
+  };
+
+  return (
+    <main style={styles.page}>
+
+      <div
+        aria-hidden="true"
+        style={{
+          position: "absolute",
+          zIndex: 0,
+          width: 320,
+          height: 320,
+          borderRadius: "50%",
+          top: "-160px",
+          left: "-130px",
+          background: "rgba(37,99,235,.20)",
+          filter: "blur(90px)",
+          pointerEvents: "none",
+        }}
+      />
+      <div
+        aria-hidden="true"
+        style={{
+          position: "absolute",
+          zIndex: 0,
+          width: 320,
+          height: 320,
+          borderRadius: "50%",
+          bottom: "-170px",
+          right: "-130px",
+          background: "rgba(220,38,38,.15)",
+          filter: "blur(90px)",
+          pointerEvents: "none",
+        }}
+      />
+
+      <section style={styles.card}>
+        <div style={{ textAlign: "center", marginBottom: 29 }}>
+          <div
+            style={{
+              width: 76,
+              height: 76,
+              margin: "0 auto 15px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              borderRadius: 22,
+              background: "linear-gradient(145deg, #172554, #3f1d2e)",
+              border: "1px solid rgba(255,255,255,.12)",
+              boxShadow: "0 8px 22px rgba(15,23,42,.10)",
+            }}
+          >
+            <img
+              src="/icons/lilymac-icon.svg"
+              alt="LilyMac Hub"
+              style={{ width: 53, height: 53, objectFit: "contain" }}
+            />
+          </div>
+
+          <h1
+            onClick={handleTitleTap}
+            style={{
+              margin: 0,
+              fontSize: 27,
+              lineHeight: 1.2,
+              fontWeight: 900,
+              letterSpacing: "-.8px",
+              color: "#f8fafc",
+              cursor: "default",
+              userSelect: "none",
+            }}
+          >
+            LilyMac <span style={{ color: "#2563eb" }}>Hub</span>
+          </h1>
+
+          <p
+            style={{
+              color: "rgba(255,255,255,.55)",
+              margin: "9px 0 0",
+              fontSize: 13,
+              letterSpacing: ".35px",
+            }}
+          >
+            YOUR GAME. YOUR EDGE.
+          </p>
+
+          <div
+            style={{
+              width: 55,
+              height: 4,
+              borderRadius: 10,
+              margin: "17px auto 0",
+              background: "linear-gradient(90deg, #2563eb, #dc2626)",
+            }}
+          />
+        </div>
+
+        <div style={{ marginBottom: 23 }}>
+          <h2
+            style={{
+              fontSize: 22,
+              lineHeight: 1.3,
+              margin: "0 0 7px",
+              color: "#f8fafc",
+              fontWeight: 800,
+            }}
+          >
+            {isAdmin ? "Welcome, Administrator" : "Welcome back"}
+          </h2>
+          <p style={{ color: "rgba(255,255,255,.55)", fontSize: 13, lineHeight: 1.6, margin: 0 }}>
+            {isAdmin
+              ? "Sign in with your administrator credentials to continue."
+              : "Sign in to access your VIP membership and football insights."}
+          </p>
+        </div>
+
+        <form onSubmit={submit}>
+          <label style={styles.label}>
+            {isAdmin ? "Username" : "Phone number"}
+            <input
+              style={styles.input}
+              type={isAdmin ? "text" : "tel"}
+              value={identifier}
+              onChange={(e) => setIdentifier(e.target.value)}
+              placeholder={isAdmin ? "Enter your username" : "e.g. 07XXXXXXXX"}
+              autoComplete={isAdmin ? "username" : "tel"}
+              required
+            />
+          </label>
+
+          <label style={styles.label}>
+            Password
+            <input
+              style={styles.input}
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Enter your password"
+              autoComplete="current-password"
+              required
+            />
+          </label>
+
+          {error && (
+            <p
+              role="alert"
+              style={{
+                color: "#fca5a5",
+                background: "rgba(127,29,29,.22)",
+                border: "1px solid rgba(248,113,113,.30)",
+                borderRadius: 11,
+                padding: "11px 13px",
+                fontSize: 13,
+                lineHeight: 1.5,
+                marginTop: 17,
+              }}
+            >
+              {error}
+            </p>
+          )}
+
+          <button
+            type="submit"
+            disabled={loading}
+            style={{
+              ...styles.button,
+              marginTop: 25,
+              opacity: loading ? 0.7 : 1,
+              cursor: loading ? "wait" : "pointer",
+            }}
+          >
+            {loading ? "Signing in..." : "Sign in to LilyMac Hub  →"}
+          </button>
+        </form>
+
+        {!isAdmin && (
+          <p
+            style={{
+              color: "rgba(255,255,255,.55)",
+              textAlign: "center",
+              fontSize: 13,
+              marginTop: 23,
+              marginBottom: 0,
+            }}
+          >
+            New to VIP?{" "}
+            <button
+              type="button"
+              onClick={() => navigate("/vip")}
+              style={{
+                border: 0,
+                padding: 0,
+                background: "none",
+                color: "#2563eb",
+                fontWeight: 800,
+                cursor: "pointer",
+              }}
+            >
+              Create an account
+            </button>
+          </p>
+        )}
+
+        <button
+          type="button"
+          onClick={() => navigate("/auth")}
+          style={{
+            display: "block",
+            margin: "22px auto 0",
+            padding: "10px 12px",
+            border: "1px solid rgba(255,255,255,.14)",
+            borderRadius: 10,
+            background: "#1e293b",
+            color: "rgba(255,255,255,.75)",
+            cursor: "pointer",
+            fontSize: 12,
+            fontWeight: 600,
+          }}
+        >
+          ← Back to Betting Account
+        </button>
+
+        <p
+          style={{
+            textAlign: "center",
+            color: "rgba(255,255,255,.35)",
+            fontSize: 11,
+            margin: "23px 0 0",
+          }}
+        >
+          © {new Date().getFullYear()} LilyMac Hub. All rights reserved.
+        </p>
+      </section>
+    </main>
+  );
+}

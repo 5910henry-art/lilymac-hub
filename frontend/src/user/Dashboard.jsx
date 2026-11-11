@@ -163,10 +163,7 @@ export default function Dashboard() {
 
   const topRef = useRef(null);
   const titleRef = useRef(null);
-  const scrollRef = useRef(null);
 
-  const [scrollMaxHeight, setScrollMaxHeight] =
-    useState("300px");
 
   // Update now every second
   useEffect(() => {
@@ -183,7 +180,9 @@ export default function Dashboard() {
     setLoading(true);
 
     try {
-      const res = await fetchDashboard();
+      const res = await fetchDashboard({
+        date: selectedDate,
+      });
 
       const filtered = (
         res.data.matches || []
@@ -260,67 +259,6 @@ export default function Dashboard() {
   useEffect(() => {
     loadDashboard();
   }, [selectedDate]);
-
-  // =====================================================
-  // CROSS-BROWSER HEIGHT CALCULATION
-  // =====================================================
-  useLayoutEffect(() => {
-    function recalcHeight() {
-      const topHeight =
-        topRef.current?.getBoundingClientRect()
-          .height || 0;
-
-      const bottomNav =
-        document.querySelector(".bottom-nav");
-
-      const bottomHeight =
-        bottomNav?.getBoundingClientRect()
-          .height || 0;
-
-      // visualViewport gives a more accurate viewport
-      // on mobile Chrome and Firefox.
-      const viewportHeight =
-        window.visualViewport?.height ||
-        window.innerHeight;
-
-      const availableHeight =
-        viewportHeight -
-        topHeight -
-        bottomHeight -
-        80;
-
-      setScrollMaxHeight(
-        `${Math.max(
-          120,
-          availableHeight
-        )}px`
-      );
-    }
-
-    recalcHeight();
-
-    window.addEventListener(
-      "resize",
-      recalcHeight
-    );
-
-    window.visualViewport?.addEventListener(
-      "resize",
-      recalcHeight
-    );
-
-    return () => {
-      window.removeEventListener(
-        "resize",
-        recalcHeight
-      );
-
-      window.visualViewport?.removeEventListener(
-        "resize",
-        recalcHeight
-      );
-    };
-  }, [loading, predictions.length]);
 
   const STATS_COLORS = [
     "bg-pink-100 text-pink-700",
@@ -431,20 +369,14 @@ export default function Dashboard() {
         {/* =================================================
             LILYMAC BETTING HUB DESCRIPTION
         ================================================== */}
+     
+       <div className="mb-4 p-4 bg-purple-50 dark:bg-purple-950/30 rounded-lg">
+           <h2 className="font-semibold text-lg mb-2"></h2>
 
-        <div className="mb-4 p-4 bg-purple-50 rounded-lg text-gray-700">
-          <h2 className="font-semibold text-lg mb-2"></h2>
+           <p className="lilymac-gradient-text text-sm italic font-semibold">
 
-          <p>
-            Welcome to Lilymac Predictions Hub,
-            your trusted platform for accurate and
-            smart betting insights. We provide daily
-            top predictions, live updates, and VIP
-            tips to help you make informed decisions
-            and enjoy smarter wins every day. Join
-            our community and elevate your betting
-            strategy with confidence.
-          </p>
+           🎯 Smart insights. Better decisions. Every match. ⚡
+           </p>
         </div>
       </div>
 
@@ -464,10 +396,8 @@ export default function Dashboard() {
           </h3>
 
           <div
-            ref={scrollRef}
             className="overflow-x-auto overflow-y-hidden flex flex-row space-x-3 pb-4 scroll-smooth snap-x snap-mandatory"
             style={{
-              maxHeight: scrollMaxHeight,
             }}
           >
             {loading ? (

@@ -1,70 +1,230 @@
 // src/components/SportsMenu.jsx
+
 import React from "react";
 import { motion } from "framer-motion";
+import { useNavigate } from "react-router-dom";
 
 export default function SportsMenu({
-  selectedSport = "All",
+  selectedSport = "Football",
   setSelectedSport,
-  evPercent = 12,
-  valueBets = 8,
-  topPick = "Arsenal vs Chelsea",
+  evPercent = 0,
+  valueBets = 0,
   profit = "+24%",
 }) {
-  const sports = ["All", "Football", "Virtual"];
+  const navigate = useNavigate();
+
+  const activeSport =
+    selectedSport === "All" || !selectedSport
+      ? "Football"
+      : selectedSport;
+
+  const sports = [
+    {
+      key: "Football",
+      label: "Football",
+      icon: "⚽",
+    },
+    {
+      key: "Virtual",
+      label: "Virtual",
+      icon: "🎮",
+    },
+  ];
 
   return (
-    <div className="mt-3 space-y-2">
+    <div className="mt-3 space-y-3">
 
-      {/* SPORTS TABS */}
-      <div className="flex gap-2 overflow-x-auto no-scrollbar">
-        {sports.map((sport) => (
-          <button
-            key={sport}
-            onClick={() => setSelectedSport?.(sport)}
-            className={`px-4 py-1.5 rounded-full text-xs font-semibold transition
-              ${
-                selectedSport === sport
-                  ? "bg-green-500 text-white shadow"
-                  : "bg-slate-800 text-gray-300"
-              }`}
-          >
-            {sport}
-          </button>
-        ))}
+      {/* =====================================================
+          SPORTS NAVIGATION
+      ====================================================== */}
+
+      <div
+        className="
+          relative
+          overflow-hidden
+          bg-gradient-to-r
+          from-red-950/80
+          via-slate-900/90
+          to-blue-950/80
+          border
+          border-slate-700/70
+          rounded-xl
+          p-1.5
+          shadow-lg
+        "
+      >
+        <div className="pointer-events-none absolute inset-0">
+          <div className="absolute -left-10 -top-10 h-24 w-24 rounded-full bg-red-600/15 blur-2xl" />
+          <div className="absolute -right-10 -top-10 h-24 w-24 rounded-full bg-blue-600/15 blur-2xl" />
+        </div>
+
+        <div className="relative flex gap-1">
+          {sports.map((sport) => {
+            const active =
+              activeSport === sport.key;
+
+            return (
+              <button
+                key={sport.key}
+                type="button"
+                onClick={() =>
+                  setSelectedSport?.(
+                    sport.key
+                  )
+                }
+                className={`
+                  relative
+                  flex-1
+                  px-4
+                  py-2.5
+                  rounded-lg
+                  text-xs
+                  font-semibold
+                  transition-all
+                  duration-200
+                  active:scale-95
+                  ${
+                    active
+                      ? "bg-gradient-to-r from-red-600/90 via-slate-800 to-blue-600/90 text-white shadow-lg shadow-blue-900/30 border border-blue-400/20"
+                      : "text-gray-400 hover:text-white hover:bg-slate-800/80"
+                  }
+                `}
+              >
+                <span className="mr-1.5">
+                  {sport.icon}
+                </span>
+
+                {sport.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
-      {/* STATS BAR */}
-      <div className="bg-slate-800 rounded p-3 flex justify-between items-center text-xs">
+      {/* =====================================================
+          PERFORMANCE / VALUE METRICS
+      ====================================================== */}
 
-        {/* EV Badge */}
-        <motion.div
-          className="px-3 py-1 text-green-400 font-bold bg-slate-900 rounded-full border border-green-500"
-          animate={{
-            scale: [1, 1.08, 1],
-            boxShadow: [
-              "0 0 4px #22c55e",
-              "0 0 12px #22c55e",
-              "0 0 4px #22c55e",
-            ],
+      <div className="grid grid-cols-2 gap-2">
+
+        {/* ===================================================
+            EV+
+        ==================================================== */}
+
+        <motion.button
+          type="button"
+          onClick={() =>
+            navigate("/ev")
+          }
+          whileTap={{
+            scale: 0.97,
           }}
-          transition={{ duration: 1.8, repeat: Infinity }}
+          className="
+            relative
+            overflow-hidden
+            text-left
+            bg-gradient-to-br
+            from-red-950/70
+            via-slate-800/90
+            to-blue-950/70
+            border
+            border-red-500/25
+            rounded-xl
+            p-3
+            transition-all
+            hover:border-blue-500/50
+            hover:from-red-950/80
+            hover:to-blue-950/80
+            active:scale-95
+            shadow-lg
+          "
         >
-          ⚡ EV+ {evPercent}%
-        </motion.div>
+          <div className="pointer-events-none absolute -left-8 -top-8 h-20 w-20 rounded-full bg-red-500/15 blur-2xl" />
 
-        {/* Value Bets */}
-        <div className="text-orange-400 font-semibold">
-          🔥 {valueBets} Bets
-        </div>
+          <div className="relative">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[10px] uppercase tracking-wide text-gray-500">
+                Expected Value
+              </span>
 
-        {/* Top Pick */}
-        <div className="text-sky-400 truncate max-w-[120px]">
-          🎯 {topPick}
-        </div>
+              <motion.span
+                className="text-green-400 text-sm"
+                animate={{
+                  opacity: [
+                    0.55,
+                    1,
+                    0.55,
+                  ],
+                }}
+                transition={{
+                  duration: 1.8,
+                  repeat: Infinity,
+                }}
+              >
+                ⚡
+              </motion.span>
+            </div>
 
-        {/* Profit */}
-        <div className="text-green-400 font-bold">
-          💰 {profit}
+            <div className="flex items-center gap-1">
+              <span className="text-green-400 font-bold text-base">
+                +
+                {Number(
+                  evPercent || 0
+                ).toFixed(0)}
+                %
+              </span>
+
+              <span className="text-green-500 text-xs">
+                →
+              </span>
+            </div>
+
+            <div className="text-[10px] text-gray-500 mt-0.5">
+              View EV opportunities
+            </div>
+          </div>
+        </motion.button>
+
+        {/* ===================================================
+            VALUE BETS
+        ==================================================== */}
+
+        <div
+          className="
+            relative
+            overflow-hidden
+            bg-gradient-to-br
+            from-blue-950/70
+            via-slate-800/90
+            to-red-950/50
+            border
+            border-blue-500/25
+            rounded-xl
+            p-3
+            shadow-lg
+          "
+        >
+          <div className="pointer-events-none absolute -right-8 -top-8 h-20 w-20 rounded-full bg-blue-500/15 blur-2xl" />
+
+          <div className="relative">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[10px] uppercase tracking-wide text-gray-500">
+                Opportunities
+              </span>
+
+              <span className="text-orange-400 text-sm">
+                🔥
+              </span>
+            </div>
+
+            <div className="text-orange-400 font-bold text-base">
+              {valueBets}
+            </div>
+
+            <div className="text-[10px] text-gray-500 mt-0.5">
+              Positive EV
+            </div>
+          </div>
         </div>
       </div>
     </div>

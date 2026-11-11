@@ -1,8 +1,62 @@
 // src/components/Header.jsx
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { Menu, Zap } from "lucide-react";
 
 export default function Header({ mobileOpen, setMobileOpen }) {
+  const [installPrompt, setInstallPrompt] = useState(null);
+  const [appInstalled, setAppInstalled] = useState(false);
+
+  useEffect(() => {
+    const standalone =
+      window.matchMedia("(display-mode: standalone)").matches ||
+      window.navigator.standalone === true;
+
+    if (standalone) setAppInstalled(true);
+
+    const handleInstallPrompt = (event) => {
+      event.preventDefault();
+      setInstallPrompt(event);
+    };
+
+    const handleInstalled = () => {
+      setAppInstalled(true);
+      setInstallPrompt(null);
+    };
+
+    window.addEventListener("beforeinstallprompt", handleInstallPrompt);
+    window.addEventListener("appinstalled", handleInstalled);
+
+    return () => {
+      window.removeEventListener("beforeinstallprompt", handleInstallPrompt);
+      window.removeEventListener("appinstalled", handleInstalled);
+    };
+  }, []);
+
+  const handleInstall = async () => {
+    if (installPrompt) {
+      installPrompt.prompt();
+      const result = await installPrompt.userChoice;
+      if (result.outcome === "accepted") setInstallPrompt(null);
+      return;
+    }
+
+    const ua = navigator.userAgent || "";
+    let instructions;
+
+    if (/Firefox/i.test(ua)) {
+      instructions =
+        "In Firefox, use the browser's available Install or Add to Home Screen option. On desktop, check the address bar and Firefox menu.";
+    } else if (/iPhone|iPad|iPod/i.test(ua)) {
+      instructions =
+        "Open the Share menu in Safari, then choose Add to Home Screen.";
+    } else {
+      instructions =
+        "Open your browser menu and look for Install app, Install LilyMac Hub, or Add to Home Screen. If the option is missing, check that this site is open over HTTPS and reload it.";
+    }
+
+    window.alert(instructions);
+  };
+
   return (
     <header
       className="
@@ -97,6 +151,25 @@ export default function Header({ mobileOpen, setMobileOpen }) {
           Smart Predictions • Better Wins
         </span>
       </div>
+
+      {!appInstalled && (
+        <button
+          type="button"
+          onClick={handleInstall}
+          className="
+            flex shrink-0 items-center gap-1.5
+            rounded-xl border border-white/25
+            bg-white/15 px-3 py-2
+            text-xs font-semibold text-white
+            shadow-sm transition
+            hover:bg-white/25 active:scale-95
+          "
+          aria-label="Install LilyMac Hub"
+        >
+          <span aria-hidden="true">⬇</span>
+          <span>Install App</span>
+        </button>
+      )}
     </header>
   );
 }

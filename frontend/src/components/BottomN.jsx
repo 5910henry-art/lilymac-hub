@@ -4,7 +4,10 @@ import { useNavigate } from "react-router-dom";
 import { Home, Ticket } from "lucide-react";
 import { motion, useAnimation } from "framer-motion";
 
-export default function BottomNav({ liveCount = 0 }) {
+export default function BottomNav({
+  liveCount = 0,
+  onLiveClick,
+}) {
   const navigate = useNavigate();
   const controls = useAnimation();
 
@@ -45,7 +48,7 @@ export default function BottomNav({ liveCount = 0 }) {
     >
       {/* LIVE COUNT */}
       <button
-        onClick={() => navigate("/live")}
+        onClick={onLiveClick}
         className="flex flex-col items-center text-red-500 text-sm"
       >
         <motion.div

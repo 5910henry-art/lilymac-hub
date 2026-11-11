@@ -1,5 +1,6 @@
 // src/user/Betslip.jsx
-import React, { useState, useEffect, useRef } from "react";
+
+import React, { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { placeBet } from "../api/betsWallet";
 import { useUser } from "../contexts/UserContext";
@@ -8,11 +9,74 @@ import { toast } from "react-hot-toast";
 
 const MAX_STAKE = 50000;
 const MAX_PAYOUT = 200000;
-const MIN_STAKE = 1; // must be >= 1
+const MIN_STAKE = 1;
+
+function formatMarket(market, selection) {
+  const m = String(market || "").toLowerCase();
+  const value = String(selection || "").toUpperCase();
+
+  if (m.includes("3way") || m.includes("3-way")) {
+    if (value === "HOME") return "Home Win";
+    if (value === "AWAY") return "Away Win";
+    if (value === "DRAW") return "Draw";
+  }
+
+  if (m.includes("btts")) {
+    return value === "YES" ? "BTTS Yes" : "BTTS No";
+  }
+
+  if (m.includes("o2.5") || m.includes("over 2.5")) {
+    return value === "OVER" ? "Over 2.5" : "Under 2.5";
+  }
+
+  if (m.includes("o3.5") || m.includes("over 3.5")) {
+    return value === "OVER" ? "Over 3.5" : "Under 3.5";
+  }
+
+  if (m.includes("o1.5") || m.includes("over 1.5")) {
+    return value === "OVER" ? "Over 1.5" : "Under 1.5";
+  }
+
+  if (m.includes("o4.5") || m.includes("over 4.5")) {
+    return value === "OVER" ? "Over 4.5" : "Under 4.5";
+  }
+
+  return value || "Selection";
+}
+
+function formatKickoff(value) {
+  if (!value) return "Kickoff TBA";
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "Kickoff TBA";
+  }
+
+  return date.toLocaleString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function hasOdds(value) {
+  const odds = Number(value);
+  return Number.isFinite(odds) && odds > 0;
+}
 
 export default function Betslip() {
   const navigate = useNavigate();
-  const { user, balance = 0, reloadUser, setUser, setBalance } = useUser() || {};
+
+  const {
+    user,
+    balance = 0,
+    reloadUser,
+    setUser,
+    setBalance,
+  } = useUser() || {};
+
   const {
     betslip,
     removeBet,
@@ -20,69 +84,142 @@ export default function Betslip() {
     combinedOdds,
     totalStake,
     getPayload,
-    setTotalStake
+    setTotalStake,
   } = useBetslip();
 
-  // Local string state for input
-  const [stakeInput, setStakeInput] = useState(totalStake ? String(totalStake) : String(MIN_STAKE));
+  const [stakeInput, setStakeInput] = useState(
+    totalStake ? String(totalStake) : String(MIN_STAKE)
+  );
+
   const [loading, setLoading] = useState(false);
+
   const placeBtnRef = useRef(null);
 
   useEffect(() => {
     reloadUser?.();
-  }, []);
+  }, [reloadUser]);
 
-  // Sync stakeInput when totalStake changes from other parts of app
   useEffect(() => {
-    setStakeInput(totalStake ? String(totalStake) : String(MIN_STAKE));
+    setStakeInput(
+      totalStake ? String(totalStake) : String(MIN_STAKE)
+    );
   }, [totalStake]);
 
-  // Parse numeric stake safely
-  const parseStake = (val) => {
-    if (val === "" || val === null || typeof val === "undefined") return 0;
-    const n = Number(val);
-    return Number.isFinite(n) ? n : 0;
+  const parseStake = (value) => {
+    if (
+      value === "" ||
+      value === null ||
+      typeof value === "undefined"
+    ) {
+      return 0;
+    }
+
+    const number = Number(value);
+
+    return Number.isFinite(number) ? number : 0;
   };
 
-  const effectiveStake = Math.max(parseStake(stakeInput), MIN_STAKE);
+  const effectiveStake = Math.max(
+    parseStake(stakeInput),
+    MIN_STAKE
+  );
 
-  const potentialWin = (() => {
-    if (!effectiveStake || !combinedOdds) return 0;
-    return effectiveStake * combinedOdds;
-  })();
+  const oddsAvailable =
+    betslip.length > 0 &&
+    betslip.every((bet) => hasOdds(bet?.odds));
+
+  const potentialWin =
+    oddsAvailable && Number(combinedOdds) > 0
+      ? effectiveStake * Number(combinedOdds)
+      : 0;
 
   const canPlaceBetClient = () => {
     if (!betslip.length) return false;
-    if (effectiveStake < MIN_STAKE) return false;
-    if (effectiveStake > MAX_STAKE) return false;
-    if (effectiveStake > balance) return false;
-    if (potentialWin > MAX_PAYOUT) return false;
+
+    if (effectiveStake < MIN_STAKE) {
+      return false;
+    }
+
+    if (effectiveStake > MAX_STAKE) {
+      return false;
+    }
+
+    if (effectiveStake > Number(balance)) {
+      return false;
+    }
+
+    if (
+      potentialWin > 0 &&
+      potentialWin > MAX_PAYOUT
+    ) {
+      return false;
+    }
+
     return true;
   };
 
   const validateBeforeSend = () => {
-    if (!betslip.length) return { ok: false, msg: "No selections in betslip" };
-    if (effectiveStake < MIN_STAKE) return { ok: false, msg: `Stake must be at least ${MIN_STAKE}` };
-    if (effectiveStake > MAX_STAKE) return { ok: false, msg: `Stake exceeds maximum of ${MAX_STAKE}` };
-    if (effectiveStake > balance) return { ok: false, msg: "Insufficient balance" };
-    if (potentialWin > MAX_PAYOUT) return { ok: false, msg: `Potential win KES ${potentialWin.toFixed(2)} exceeds max payout ${MAX_PAYOUT}` };
-    return { ok: true };
+    if (!betslip.length) {
+      return {
+        ok: false,
+        msg: "No selections in betslip",
+      };
+    }
+
+    if (effectiveStake < MIN_STAKE) {
+      return {
+        ok: false,
+        msg: `Stake must be at least KES ${MIN_STAKE}`,
+      };
+    }
+
+    if (effectiveStake > MAX_STAKE) {
+      return {
+        ok: false,
+        msg: `Stake exceeds the maximum of KES ${MAX_STAKE}`,
+      };
+    }
+
+    if (effectiveStake > Number(balance)) {
+      return {
+        ok: false,
+        msg: "Insufficient balance",
+      };
+    }
+
+    if (
+      potentialWin > 0 &&
+      potentialWin > MAX_PAYOUT
+    ) {
+      return {
+        ok: false,
+        msg: `Potential win KES ${potentialWin.toFixed(
+          2
+        )} exceeds the maximum payout of KES ${MAX_PAYOUT}`,
+      };
+    }
+
+    return {
+      ok: true,
+    };
   };
 
   const handlePlaceBet = async () => {
-    // update context totalStake from input
-    setTotalStake(effectiveStake);
+    const stake = effectiveStake;
 
-    // client-side validation
+    setTotalStake(stake);
+
     const check = validateBeforeSend();
+
     if (!check.ok) {
       toast.error(check.msg);
       return;
     }
 
     const token = localStorage.getItem("token");
+
     if (!token) {
-      toast.error("Please login first!");
+      toast.error("Please login first.");
       navigate("/auth");
       return;
     }
@@ -90,191 +227,490 @@ export default function Betslip() {
     try {
       setLoading(true);
 
-      // build payload from context
       const payload = getPayload();
 
-      // extra safety: ensure payload.stake >= MIN_STAKE
-      payload.stake = Math.max(Number(payload?.stake ?? 0), MIN_STAKE);
+      payload.stake = Math.max(
+        Number(payload?.stake ?? stake),
+        MIN_STAKE
+      );
 
-      if (!Number.isFinite(payload.stake) || payload.stake < MIN_STAKE) {
-        toast.error("Invalid stake (client).");
-        console.debug("Aborting placeBet — invalid stake in payload:", payload);
-        setLoading(false);
+      if (
+        !Number.isFinite(payload.stake) ||
+        payload.stake < MIN_STAKE
+      ) {
+        toast.error("Invalid stake.");
         return;
       }
 
-      console.debug("Placing bet - payload:", JSON.stringify(payload));
+      console.debug(
+        "Placing bet:",
+        JSON.stringify(payload)
+      );
 
-      const res = await placeBet(payload);
+      const response = await placeBet(payload);
 
-      console.debug("placeBet response:", res);
+      console.debug(
+        "placeBet response:",
+        response
+      );
 
-      const ok = res && (res.success === true || !!res?.betslip_id || !!res?.ticket_id || !!res?.msg);
+      const success =
+        response &&
+        (
+          response.success === true ||
+          !!response?.betslip_id ||
+          !!response?.ticket_id ||
+          !!response?.msg
+        );
 
-      if (!ok) {
-        const errMsg = res?.error || res?.msg || JSON.stringify(res) || "Bet failed";
-        toast.error(`Server: ${errMsg}`);
+      if (!success) {
+        const errorMessage =
+          response?.error ||
+          response?.msg ||
+          "Bet placement failed.";
+
+        toast.error(errorMessage);
         return;
       }
 
-      // Update balance if returned; otherwise adjust locally
       const newBalance =
-        res?.data?.balance ?? res?.balance ?? res?.data?.user?.balance ?? null;
+        response?.data?.balance ??
+        response?.balance ??
+        response?.data?.user?.balance ??
+        null;
 
-      if (newBalance !== null && typeof newBalance !== "undefined") {
-        setBalance?.(Number(newBalance));
-        if (user) setUser?.({ ...user, balance: Number(newBalance) });
+      if (
+        newBalance !== null &&
+        typeof newBalance !== "undefined"
+      ) {
+        const numericBalance = Number(newBalance);
+
+        setBalance?.(numericBalance);
+
+        if (user) {
+          setUser?.({
+            ...user,
+            balance: numericBalance,
+          });
+        }
       } else {
-        setBalance?.((prev) => prev - payload.stake);
+        setBalance?.(
+          (previous) =>
+            Number(previous || 0) - payload.stake
+        );
       }
 
-      const potential =
-        Number(res?.data?.potential_win ?? res?.potential_win ?? potentialWin);
+      const serverPotentialWin =
+        response?.data?.potential_win ??
+        response?.potential_win ??
+        null;
 
-      toast.success(`Bet placed! Potential win KES ${Number(potential).toFixed(2)}`);
+      if (
+        serverPotentialWin !== null &&
+        Number.isFinite(
+          Number(serverPotentialWin)
+        )
+      ) {
+        toast.success(
+          `Bet placed • Potential win KES ${Number(
+            serverPotentialWin
+          ).toFixed(2)}`
+        );
+      } else {
+        toast.success("Bet placed successfully.");
+      }
+
       await reloadUser?.();
 
-      // clear local + context state
       clearBetslip();
       setStakeInput("");
-    } catch (err) {
-      console.error("PLACE BET ERROR:", err);
-      const errMsg = err?.message || "Bet failed";
-      toast.error(errMsg);
+    } catch (error) {
+      console.error(
+        "PLACE BET ERROR:",
+        error
+      );
+
+      toast.error(
+        error?.message ||
+          "Unable to place bet."
+      );
     } finally {
       setLoading(false);
     }
   };
 
   const handleFocusTotalStake = () => {
-    placeBtnRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    placeBtnRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "center",
+    });
   };
 
   return (
-    <div className="flex flex-col min-h-screen bg-slate-900 text-white">
+    <div className="min-h-screen bg-[#070b10] text-white">
+      {/* Background glow */}
+      <div className="pointer-events-none fixed inset-0 overflow-hidden">
+        <div className="absolute -top-32 left-1/2 h-72 w-72 -translate-x-1/2 rounded-full bg-emerald-500/10 blur-3xl" />
+        <div className="absolute bottom-0 right-0 h-64 w-64 rounded-full bg-cyan-500/5 blur-3xl" />
+      </div>
+
       {/* Header */}
-      <div className="sticky top-0 z-30 bg-slate-900 p-3 flex items-center justify-between border-b border-slate-700">
-        <button
-          onClick={() => navigate("/bookmarks")}
-          className="text-gray-400 font-bold px-3 py-1 bg-slate-800 rounded"
-        >
-          ← Back
-        </button>
+      <header className="sticky top-0 z-40 border-b border-white/5 bg-[#070b10]/90 backdrop-blur-xl">
+        <div className="mx-auto flex max-w-4xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
+          <button
+            type="button"
+            onClick={() => navigate("/bookmarks")}
+            className="flex items-center gap-2 rounded-xl border border-white/5 bg-white/[0.04] px-3 py-2 text-sm font-semibold text-gray-300 transition hover:bg-white/[0.08]"
+          >
+            <span className="text-lg">←</span>
+            <span className="hidden sm:inline">
+              Back
+            </span>
+          </button>
 
-        <h1 className="text-xl font-bold">Betslip ({betslip.length})</h1>
+          <div className="text-center">
+            <div className="text-[9px] font-black uppercase tracking-[0.25em] text-emerald-400">
+              LilyMac Hub
+            </div>
 
-        <button
-          onClick={() => { clearBetslip(); setStakeInput(""); }}
-          className="text-red-500 font-semibold px-3 py-1 bg-slate-800 rounded"
-        >
-          Remove All
-        </button>
-      </div>
-
-      {/* Bets list */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-3">
-        {betslip.length === 0 ? (
-          <p className="text-gray-400 text-center">No selections yet.</p>
-        ) : (
-          <div className="space-y-3">
-            {betslip.map((b, i) => (
-              <div
-                key={i}
-                className="bg-slate-800 p-3 rounded flex justify-between items-center"
-              >
-                <div className="flex flex-col gap-1">
-                  <div className="text-sm font-medium truncate">
-                    {b.match?.home_team} vs {b.match?.away_team}
-                  </div>
-                  <div className="text-gray-400 text-xs">1X2 • {b.selection}</div>
-                  <div className="text-gray-400 text-xs">
-                    Starts{" "}
-                    {b.match?.match_time
-                      ? new Date(b.match.match_time).toLocaleString([], {
-                          day: "2-digit",
-                          month: "2-digit",
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })
-                      : "Unknown"}
-                  </div>
-                </div>
-
-                <div className="flex flex-col items-end gap-1">
-                  <span className="text-green-400 font-semibold">
-                    {(Number(b.odds) || 0).toFixed(2)}
-                  </span>
-
-                  <button
-                    onClick={() => removeBet(b.match.id)}
-                    className="text-red-400 font-bold text-lg"
-                  >
-                    ✕
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Bet Controls */}
-      {betslip.length > 0 && (
-        <div className="sticky bottom-0 left-0 right-0 w-full bg-slate-900 p-3 border-t border-slate-700 flex flex-col gap-2 z-30">
-          <div className="flex justify-between text-sm text-gray-200">
-            <span>Balance</span>
-            <span>KES {Number(balance).toFixed(2)}</span>
-          </div>
-
-          <div className="flex justify-between text-sm text-gray-200">
-            <span>Total Odds</span>
-            <span>{combinedOdds.toFixed(2)}</span>
-          </div>
-
-          {/* Total stake input */}
-          <div className="flex justify-between text-sm text-gray-200 items-center gap-2">
-            <span>Total Stake</span>
-            <input
-              type="number"
-              inputMode="numeric"
-              value={stakeInput}
-              min={MIN_STAKE}
-              max={MAX_STAKE}
-              onFocus={handleFocusTotalStake}
-              onChange={(e) => {
-                const v = e.target.value;
-                if (v === "" || /^ *\d*\.?\d*$/.test(v)) setStakeInput(v);
-
-                const n = Number(v);
-                if (!Number.isFinite(n) || n < MIN_STAKE) {
-                  setTotalStake(MIN_STAKE);
-                } else {
-                  setTotalStake(n);
-                }
-              }}
-              className="w-40 p-2 rounded bg-slate-700 text-white font-semibold text-right placeholder-gray-400"
-              placeholder="Enter stake (KES)"
-            />
-          </div>
-
-          <div className="flex justify-between text-sm text-gray-200">
-            <span>Potential Win</span>
-            <span>KES {Number(potentialWin).toFixed(2)}</span>
+            <h1 className="mt-0.5 text-lg font-black tracking-tight sm:text-xl">
+              Betslip
+            </h1>
           </div>
 
           <button
-            ref={placeBtnRef}
-            onClick={handlePlaceBet}
-            disabled={loading}
-            className={
-              "w-full font-bold py-3 rounded " +
-              (canPlaceBetClient()
-                ? "bg-green-500 text-black"
-                : "bg-gray-700 text-gray-400 cursor-not-allowed")
-            }
+            type="button"
+            onClick={() => {
+              clearBetslip();
+              setStakeInput("");
+            }}
+            disabled={!betslip.length}
+            className="rounded-xl border border-red-500/10 bg-red-500/5 px-3 py-2 text-xs font-bold text-red-400 transition hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            {loading ? "Placing Bet..." : `Place Bet KES ${stakeInput === "" ? "0.00" : Number(stakeInput).toFixed(2)}`}
+            Clear
           </button>
+        </div>
+      </header>
+
+      <main className="relative mx-auto max-w-4xl px-4 py-5 pb-52 sm:px-6 sm:py-7">
+        {/* Hero */}
+        <section className="mb-5 rounded-3xl border border-white/5 bg-gradient-to-br from-white/[0.06] to-white/[0.02] p-5 shadow-2xl shadow-black/20">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-500/10 text-lg">
+                  ⚽
+                </span>
+
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-500">
+                    Your selections
+                  </p>
+
+                  <h2 className="mt-0.5 text-xl font-black tracking-tight">
+                    {betslip.length}{" "}
+                    {betslip.length === 1
+                      ? "selection"
+                      : "selections"}
+                  </h2>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-emerald-500/10 bg-emerald-500/5 px-4 py-3 text-right">
+              <div className="text-[9px] font-black uppercase tracking-widest text-gray-500">
+                Balance
+              </div>
+
+              <div className="mt-0.5 text-sm font-black text-emerald-400">
+                KES{" "}
+                {Number(balance || 0).toLocaleString(
+                  "en-KE",
+                  {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  }
+                )}
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* Empty state */}
+        {betslip.length === 0 ? (
+          <section className="rounded-3xl border border-white/5 bg-white/[0.03] p-10 text-center">
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-emerald-500/10 text-3xl">
+              🧾
+            </div>
+
+            <h2 className="mt-5 text-xl font-black">
+              Your betslip is empty
+            </h2>
+
+            <p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-gray-500">
+              Add selections from matches or
+              accumulator tips and they will appear here.
+            </p>
+
+            <button
+              type="button"
+              onClick={() => navigate("/")}
+              className="mt-6 rounded-xl bg-emerald-500 px-5 py-3 text-sm font-black text-black transition hover:bg-emerald-400"
+            >
+              Browse Tips
+            </button>
+          </section>
+        ) : (
+          <section className="space-y-3">
+            {betslip.map((bet, index) => {
+              const marketLabel = formatMarket(
+                bet?.market,
+                bet?.selection
+              );
+
+              const oddsPresent = hasOdds(
+                bet?.odds
+              );
+
+              return (
+                <article
+                  key={
+                    bet?.id ??
+                    `${bet?.match?.id}-${bet?.market}-${index}`
+                  }
+                  className="group overflow-hidden rounded-2xl border border-white/5 bg-white/[0.035] shadow-lg shadow-black/10 transition hover:border-white/10 hover:bg-white/[0.05]"
+                >
+                  <div className="p-4 sm:p-5">
+                    <div className="flex items-start gap-3">
+                      {/* Number */}
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-gray-800 text-xs font-black text-gray-400">
+                        {String(index + 1).padStart(
+                          2,
+                          "0"
+                        )}
+                      </div>
+
+                      <div className="min-w-0 flex-1">
+                        {/* Teams */}
+                        <div className="pr-2">
+                          <h3 className="truncate text-sm font-black text-white sm:text-base">
+                            {bet?.match?.home_team ||
+                              "Home Team"}
+                          </h3>
+
+                          <div className="my-1 text-[9px] font-black uppercase tracking-[0.18em] text-gray-600">
+                            VS
+                          </div>
+
+                          <h3 className="truncate text-sm font-black text-white sm:text-base">
+                            {bet?.match?.away_team ||
+                              "Away Team"}
+                          </h3>
+                        </div>
+
+                        {/* Selection */}
+                        <div className="mt-3 flex flex-wrap items-center gap-2">
+                          <span className="rounded-lg bg-emerald-500/10 px-2.5 py-1.5 text-[11px] font-black text-emerald-400">
+                            {marketLabel}
+                          </span>
+
+                          <span className="rounded-lg bg-white/[0.04] px-2.5 py-1.5 text-[11px] font-semibold text-gray-400">
+                            {formatKickoff(
+                              bet?.match?.match_time ??
+                                bet?.match?.kickoff
+                            )}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Remove */}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          removeBet(
+                            bet?.id ??
+                              bet?.match?.id
+                          )
+                        }
+                        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-red-500/5 text-lg text-red-400 transition hover:bg-red-500/10"
+                        aria-label="Remove selection"
+                      >
+                        ×
+                      </button>
+                    </div>
+
+                    {/* Odds status */}
+                    <div className="mt-4 flex items-center justify-between border-t border-white/5 pt-3">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-gray-600">
+                        {oddsPresent
+                          ? "Selection odds"
+                          : "Odds"}
+                      </span>
+
+                      <span
+                        className={`text-xs font-black ${
+                          oddsPresent
+                            ? "text-emerald-400"
+                            : "text-gray-500"
+                        }`}
+                      >
+                        {oddsPresent
+                          ? `@${Number(
+                              bet.odds
+                            ).toFixed(2)}`
+                          : "Calculated at placement"}
+                      </span>
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
+          </section>
+        )}
+
+        {/* Information */}
+        {betslip.length > 0 && (
+          <div className="mt-5 rounded-2xl border border-cyan-500/10 bg-cyan-500/5 p-4">
+            <div className="flex gap-3">
+              <span className="text-lg">ℹ️</span>
+
+              <div>
+                <p className="text-xs font-bold text-cyan-300">
+                  Betting information
+                </p>
+
+                <p className="mt-1 text-xs leading-5 text-gray-500">
+                  Selections added from accumulator tips
+                  are submitted with the fixture and
+                  selection. Odds can be calculated by the
+                  betting service when the bet is placed.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+      </main>
+
+      {/* Bottom controls */}
+      {betslip.length > 0 && (
+        <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-white/5 bg-[#070b10]/95 backdrop-blur-xl">
+          <div className="mx-auto max-w-4xl px-4 py-3 sm:px-6">
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div className="rounded-xl bg-white/[0.035] px-3 py-2.5">
+                <div className="text-[9px] font-black uppercase tracking-widest text-gray-600">
+                  Total odds
+                </div>
+
+                <div className="mt-1 font-black text-white">
+                  {oddsAvailable &&
+                  Number(combinedOdds) > 0
+                    ? `@${Number(
+                        combinedOdds
+                      ).toFixed(2)}`
+                    : "—"}
+                </div>
+              </div>
+
+              <div className="rounded-xl bg-white/[0.035] px-3 py-2.5 text-right">
+                <div className="text-[9px] font-black uppercase tracking-widest text-gray-600">
+                  Balance
+                </div>
+
+                <div className="mt-1 font-black text-emerald-400">
+                  KES{" "}
+                  {Number(balance || 0).toFixed(2)}
+                </div>
+              </div>
+            </div>
+
+            {/* Stake */}
+            <div className="mt-3 flex items-center gap-3 rounded-2xl border border-white/5 bg-white/[0.035] p-3">
+              <div className="min-w-0 flex-1">
+                <div className="text-[9px] font-black uppercase tracking-widest text-gray-600">
+                  Stake
+                </div>
+
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  value={stakeInput}
+                  min={MIN_STAKE}
+                  max={MAX_STAKE}
+                  onFocus={handleFocusTotalStake}
+                  onChange={(event) => {
+                    const value =
+                      event.target.value;
+
+                    if (
+                      value === "" ||
+                      /^\d*\.?\d*$/.test(value)
+                    ) {
+                      setStakeInput(value);
+                    }
+
+                    const numericValue =
+                      Number(value);
+
+                    if (
+                      !Number.isFinite(
+                        numericValue
+                      ) ||
+                      numericValue < MIN_STAKE
+                    ) {
+                      setTotalStake(MIN_STAKE);
+                    } else {
+                      setTotalStake(
+                        numericValue
+                      );
+                    }
+                  }}
+                  className="mt-1 w-full bg-transparent text-lg font-black text-white outline-none"
+                  placeholder="KES 1"
+                />
+              </div>
+
+              <div className="border-l border-white/5 pl-3 text-right">
+                <div className="text-[9px] font-black uppercase tracking-widest text-gray-600">
+                  Potential
+                </div>
+
+                <div className="mt-1 text-sm font-black text-emerald-400">
+                  {potentialWin > 0
+                    ? `KES ${potentialWin.toFixed(
+                        2
+                      )}`
+                    : "Calculated at placement"}
+                </div>
+              </div>
+            </div>
+
+            {/* Place bet */}
+            <button
+              ref={placeBtnRef}
+              type="button"
+              onClick={handlePlaceBet}
+              disabled={
+                loading ||
+                !canPlaceBetClient()
+              }
+              className={`mt-3 w-full rounded-2xl px-4 py-3.5 text-sm font-black tracking-wide transition ${
+                loading ||
+                !canPlaceBetClient()
+                  ? "cursor-not-allowed bg-gray-800 text-gray-600"
+                  : "bg-emerald-500 text-black shadow-lg shadow-emerald-500/10 hover:bg-emerald-400 active:scale-[0.99]"
+              }`}
+            >
+              {loading
+                ? "PLACING BET..."
+                : `PLACE BET • KES ${
+                    stakeInput === ""
+                      ? "0.00"
+                      : Number(
+                          stakeInput
+                        ).toFixed(2)
+                  }`}
+            </button>
+          </div>
         </div>
       )}
     </div>

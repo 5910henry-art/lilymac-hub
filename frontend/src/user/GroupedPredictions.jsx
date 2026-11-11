@@ -127,13 +127,30 @@ export default function MatchGroupedPredictionsPage() {
       try {
         const res = await getGroupedPredictions();
 
+        // getGroupedPredictions() returns:
+        // {
+        //   success: true,
+        //   data: {
+        //     count: 50,
+        //     matches: [...]
+        //   }
+        // }
+        //
+        // The actual match array is therefore data.matches.
         const raw =
+          res?.data?.matches ||
           res?.data?.predictions ||
-          res?.data ||
+          res?.matches ||
           res?.predictions ||
           [];
 
         const list = Array.isArray(raw) ? raw : [];
+
+        console.log(
+          "Grouped predictions loaded:",
+          list.length,
+          list
+        );
 
         if (alive) setMatches(list);
       } catch (err) {

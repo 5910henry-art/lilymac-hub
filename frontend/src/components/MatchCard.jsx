@@ -1,15 +1,39 @@
 // src/components/MatchCard.jsx
-import React, { useState, memo } from "react";
+
+import React, {
+  useState,
+  useMemo,
+  useCallback,
+  memo,
+} from "react";
 import { CSSTransition } from "react-transition-group";
 import "./MatchCard.css";
 
-/* ---------- Market Label ---------- */
-function formatMarketLabel(market, label) {
-  if (/over|under/i.test(market)) {
-    return label.replace(/goals/i, "").trim();
+// =========================================================
+// HELPERS
+// =========================================================
+
+function formatKickoff(matchTime) {
+  if (!matchTime) return "";
+
+  const date = new Date(matchTime);
+
+  if (Number.isNaN(date.getTime())) {
+    return "";
   }
-  return label;
+
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(date);
 }
+
+// =========================================================
+// MATCH CARD
+// =========================================================
 
 function MatchCard({
   match,
@@ -17,138 +41,534 @@ function MatchCard({
   isPicked = () => false,
   formatOdds = (o) => Number(o || 0).toFixed(2),
   getCountdown = () => "",
-  oddsFlash = {},
+  oddsFlashHome = null,
+  oddsFlashDraw = null,
+  oddsFlashAway = null,
 }) {
   const [showMarkets, setShowMarkets] = useState(false);
 
-  if (!match) return null;
+  const id = match?.match_id ?? match?.id;
 
-  const id = match.match_id || match.id;
-  const flash = oddsFlash?.[id] || {};
+  const leagueName =
+    match?.league_name ||
+    match?.competition_name ||
+    match?.league ||
+    "Football";
 
-  const oddsColor = (type) => {
-    if (flash[type] === "up") return "text-green-400";
-    if (flash[type] === "down") return "text-red-400";
-    return "text-white";
-  };
+  const formattedKickoff = useMemo(() => {
+    const formatted = formatKickoff(match?.match_time);
 
-  /* ---------- Normalize Keys ---------- */
-  const normalizeKey = (key) => {
-    if (key === "home") return "home_odds";
-    if (key === "draw") return "draw_odds";
-    if (key === "away") return "away_odds";
-    return key;
-  };
+    if (formatted) {
+      return formatted;
+    }
 
-  /* ---------- H2H Markets ---------- */
-  const h2hMarkets = [
-    { key: "home", label: "Home", odds: match.home_odds },
-    { key: "draw", label: "Draw", odds: match.draw_odds },
-    { key: "away", label: "Away", odds: match.away_odds },
-  ].filter((m) => m.odds);
+    return match?.match_date || "";
+  }, [match?.match_time, match?.match_date]);
 
-  /* ---------- Goal Markets ---------- */
-  const goalMarkets = [
-    { key: "over05", label: "Over 0.5", odds: match.over05 },
-    { key: "under05", label: "Under 0.5", odds: match.under05 },
-    { key: "over15", label: "Over 1.5", odds: match.over15 },
-    { key: "under15", label: "Under 1.5", odds: match.under15 },
-    { key: "over25", label: "Over 2.5", odds: match.over25 },
-    { key: "under25", label: "Under 2.5", odds: match.under25 },
-    { key: "over35", label: "Over 3.5", odds: match.over35 },
-    { key: "under35", label: "Under 3.5", odds: match.under35 },
-  ].filter((m) => m.odds);
+  // =======================================================
+  // 1X2 MARKETS
+  // =======================================================
 
-  /* ---------- BTTS Markets (GG / NG) ---------- */
-  const bttsMarkets = [
-    { key: "gg", label: "GG", odds: match.gg_odds },
-    { key: "ng", label: "NG", odds: match.ng_odds },
-  ].filter((m) => m.odds);
+  const h2hMarkets = useMemo(() => {
+    if (!match) return [];
 
-  const extraMarkets = [...goalMarkets, ...bttsMarkets];
+    return [
+      {
+        key: "home",
+        shortLabel: "1",
+        teamLabel: match.home_team || "Home",
+        odds: Number(match.home_odds || 0),
+      },
+      {
+        key: "draw",
+        shortLabel: "X",
+        teamLabel: "Draw",
+        odds: Number(match.draw_odds || 0),
+      },
+      {
+        key: "away",
+        shortLabel: "2",
+        teamLabel: match.away_team || "Away",
+        odds: Number(match.away_odds || 0),
+      },
+    ].filter((market) => market.odds > 0);
+  }, [
+    match?.home_team,
+    match?.away_team,
+    match?.home_odds,
+    match?.draw_odds,
+    match?.away_odds,
+  ]);
 
-  /* ---------- Handle Bet Click ---------- */
-  const handleClick = (m) => {
-    let key = m.key;
-    if (key === "home") key = "home_odds";
-    if (key === "draw") key = "draw_odds";
-    if (key === "away") key = "away_odds";
-    toggleBetslip(match, key, m.odds);
-  };
+  // =======================================================
+  // GOALS MARKETS
+  // =======================================================
+
+  const goalMarkets = useMemo(() => {
+    if (!match) return [];
+
+    return [
+      {
+        key: "over05",
+        label: "Over 0.5 Goals",
+        compactLabel: "O 0.5",
+        odds: Number(match.over05 || 0),
+      },
+      {
+        key: "under05",
+        label: "Under 0.5 Goals",
+        compactLabel: "U 0.5",
+        odds: Number(match.under05 || 0),
+      },
+      {
+        key: "over15",
+        label: "Over 1.5 Goals",
+        compactLabel: "O 1.5",
+        odds: Number(match.over15 || 0),
+      },
+      {
+        key: "under15",
+        label: "Under 1.5 Goals",
+        compactLabel: "U 1.5",
+        odds: Number(match.under15 || 0),
+      },
+      {
+        key: "over25",
+        label: "Over 2.5 Goals",
+        compactLabel: "O 2.5",
+        odds: Number(match.over25 || 0),
+      },
+      {
+        key: "under25",
+        label: "Under 2.5 Goals",
+        compactLabel: "U 2.5",
+        odds: Number(match.under25 || 0),
+      },
+      {
+        key: "over35",
+        label: "Over 3.5 Goals",
+        compactLabel: "O 3.5",
+        odds: Number(match.over35 || 0),
+      },
+      {
+        key: "under35",
+        label: "Under 3.5 Goals",
+        compactLabel: "U 3.5",
+        odds: Number(match.under35 || 0),
+      },
+    ].filter((market) => market.odds > 0);
+  }, [
+    match?.over05,
+    match?.under05,
+    match?.over15,
+    match?.under15,
+    match?.over25,
+    match?.under25,
+    match?.over35,
+    match?.under35,
+  ]);
+
+  // =======================================================
+  // BTTS MARKETS
+  // =======================================================
+
+  const bttsMarkets = useMemo(() => {
+    if (!match) return [];
+
+    return [
+      {
+        key: "gg",
+        label: "Both Teams To Score",
+        compactLabel: "GG",
+        odds: Number(match.gg || 0),
+      },
+      {
+        key: "ng",
+        label: "Both Teams Not To Score",
+        compactLabel: "NG",
+        odds: Number(match.ng || 0),
+      },
+    ].filter((market) => market.odds > 0);
+  }, [match?.gg, match?.ng]);
+
+  // =======================================================
+  // EXTRA MARKETS
+  // =======================================================
+
+  const extraMarkets = useMemo(
+    () => [...goalMarkets, ...bttsMarkets],
+    [goalMarkets, bttsMarkets]
+  );
+
+  // =======================================================
+  // HANDLE MARKET CLICK
+  // =======================================================
+
+  const handleClick = useCallback(
+    (market) => {
+      if (!match || !market) return;
+
+      toggleBetslip(
+        match,
+        market.key,
+        market.odds
+      );
+    },
+    [match, toggleBetslip]
+  );
+
+  // =======================================================
+  // TOGGLE MARKETS
+  // =======================================================
+
+  const handleMarketsToggle = useCallback(() => {
+    setShowMarkets((previous) => !previous);
+  }, []);
+
+  // =======================================================
+  // FLASH CLASSES
+  // =======================================================
+
+  const getFlashClass = useCallback((direction) => {
+    if (direction === "up") {
+      return "odds-up";
+    }
+
+    if (direction === "down") {
+      return "odds-down";
+    }
+
+    return "";
+  }, []);
+
+  const homeFlashClass = getFlashClass(oddsFlashHome);
+  const drawFlashClass = getFlashClass(oddsFlashDraw);
+  const awayFlashClass = getFlashClass(oddsFlashAway);
+
+  // =======================================================
+  // SAFETY
+  // =======================================================
+
+  if (!match) {
+    return null;
+  }
+
+  // =======================================================
+  // RENDER
+  // =======================================================
 
   return (
-    <div className="bg-slate-800 p-3 rounded-lg shadow space-y-2">
-      {/* TEAMS */}
-      <div className="flex justify-between items-center">
-        <div>
-          <div className="font-semibold text-white">{match.home_team}</div>
-          <div className="text-gray-400 text-sm">{match.away_team}</div>
+    <article className="match-card">
+
+      {/* =================================================
+          HEADER
+          ================================================= */}
+
+      <div className="match-card-top">
+
+        <div className="match-league">
+          <span className="league-name">
+            {leagueName}
+          </span>
         </div>
 
-        {/* H2H MARKETS */}
-        <div className="flex gap-1 items-center">
-          {h2hMarkets.map((m) => {
-            const selected = isPicked(id, normalizeKey(m.key)); // ✅ FIXED LINE
-            return (
-              <button
-                key={m.key}
-                onClick={() => handleClick(m)}
-                className={`px-2 py-1 rounded text-xs min-w-[58px] transition ${
-                  selected
-                    ? "bg-green-600 text-white ring-2 ring-green-400"
-                    : "bg-slate-700 hover:bg-slate-600"
-                }`}
-              >
-                <span className={oddsColor(m.key)}>
-                  {formatMarketLabel(m.key, m.label)}
-                </span>
-                <div className="text-xs">{formatOdds(m.odds)}</div>
-              </button>
-            );
-          })}
+        <div className="match-time">
+          {formattedKickoff}
+        </div>
 
-          {/* Toggle Extra Markets */}
-          {extraMarkets.length > 0 && (
+      </div>
+
+
+      {/* =================================================
+          FIXTURE
+          ================================================= */}
+
+      <div className="fixture-row">
+
+        <div className="teams">
+
+          {/* HOME */}
+
+          <div className="team-row home-team-row">
+            <span className="team-name">
+              {match.home_team || "Home"}
+            </span>
+          </div>
+
+
+          {/* VS */}
+
+          <div className="fixture-status">
+            <span>VS</span>
+          </div>
+
+
+          {/* AWAY */}
+
+          <div className="team-row away-team-row">
+            <span className="team-name">
+              {match.away_team || "Away"}
+            </span>
+          </div>
+
+        </div>
+
+      </div>
+
+
+      {/* =================================================
+          1X2 TITLE
+          ================================================= */}
+
+      <div className="market-title-row">
+
+        <span>1X2</span>
+
+        <span>Match Result</span>
+
+      </div>
+
+
+      {/* =================================================
+          1X2 ODDS
+
+          IMPORTANT:
+          result-market itself is the grid.
+
+          This fixes the vertical odds problem.
+          ================================================= */}
+
+      <div className="result-market">
+
+        {h2hMarkets.map((market) => {
+
+          const picked = isPicked(
+            id,
+            market.key
+          );
+
+          let flashClass = "";
+
+          if (market.key === "home") {
+            flashClass = homeFlashClass;
+          }
+
+          if (market.key === "draw") {
+            flashClass = drawFlashClass;
+          }
+
+          if (market.key === "away") {
+            flashClass = awayFlashClass;
+          }
+
+          return (
             <button
-              onClick={() => setShowMarkets(!showMarkets)}
-              className="px-2 py-1 rounded bg-gray-600 hover:bg-gray-500 text-xs"
+              key={market.key}
+              type="button"
+              className={[
+                "result-odd",
+                picked ? "picked" : "",
+                flashClass,
+              ]
+                .filter(Boolean)
+                .join(" ")}
+              onClick={() => handleClick(market)}
+              aria-pressed={picked}
             >
-              {showMarkets ? "-" : `+${extraMarkets.length}`}
+
+              <span className="result-label">
+                {market.shortLabel}
+              </span>
+
+              <span className="result-team">
+                {market.teamLabel}
+              </span>
+
+              <strong className="result-value">
+                {formatOdds(market.odds)}
+              </strong>
+
             </button>
-          )}
-        </div>
+          );
+        })}
+
       </div>
 
-      {/* COLLAPSIBLE MARKETS */}
-      <CSSTransition in={showMarkets} timeout={200} classNames="slide" unmountOnExit>
-        <div className="flex flex-wrap gap-1 mt-2">
-          {extraMarkets.map((m) => {
-            const selected = isPicked(id, m.key);
-            return (
-              <button
-                key={m.key}
-                onClick={() => handleClick(m)}
-                className={`px-2 py-1 rounded text-xs min-w-[58px] transition ${
-                  selected
-                    ? "bg-green-600 text-white ring-2 ring-green-400"
-                    : "bg-slate-700 hover:bg-slate-600"
-                }`}
-              >
-                <span className={oddsColor(m.key)}>{m.label}</span>
-                <div className="text-xs">{formatOdds(m.odds)}</div>
-              </button>
-            );
-          })}
-        </div>
-      </CSSTransition>
 
-      {/* FOOTER */}
-      <div className="text-xs text-gray-400 flex justify-between">
-        <span>{match.league}</span>
-        <span>{getCountdown(match.match_time)}</span>
-      </div>
-    </div>
+      {/* =================================================
+          EXTRA MARKETS
+          ================================================= */}
+
+      {extraMarkets.length > 0 && (
+        <>
+
+          {/* MORE MARKETS */}
+
+          <button
+            type="button"
+            className={`markets-toggle ${
+              showMarkets ? "markets-open" : ""
+            }`}
+            onClick={handleMarketsToggle}
+            aria-expanded={showMarkets}
+          >
+
+            <span>
+              {showMarkets
+                ? "Hide Markets"
+                : "More Markets"}
+            </span>
+
+            <span className="markets-count">
+              {extraMarkets.length}
+            </span>
+
+            <span className="markets-arrow">
+              {showMarkets ? "⌃" : "⌄"}
+            </span>
+
+          </button>
+
+
+          {/* EXPANDED MARKETS */}
+
+          <CSSTransition
+            in={showMarkets}
+            timeout={180}
+            classNames="slide"
+            unmountOnExit
+          >
+
+            <div className="extra-markets">
+
+              {/* =========================================
+                  GOALS
+                  ========================================= */}
+
+              {goalMarkets.length > 0 && (
+                <div className="market-section">
+
+                  <div className="market-section-title">
+                    <span>Goals</span>
+                  </div>
+
+                  <div className="compact-market-grid">
+
+                    {goalMarkets.map((market) => {
+
+                      const picked = isPicked(
+                        id,
+                        market.key
+                      );
+
+                      return (
+                        <button
+                          key={market.key}
+                          type="button"
+                          className={[
+                            "compact-market",
+                            picked ? "picked" : "",
+                          ]
+                            .filter(Boolean)
+                            .join(" ")}
+                          onClick={() =>
+                            handleClick(market)
+                          }
+                          aria-pressed={picked}
+                        >
+
+                          <span className="compact-label">
+                            {market.compactLabel}
+                          </span>
+
+                          <strong>
+                            {formatOdds(market.odds)}
+                          </strong>
+
+                        </button>
+                      );
+                    })}
+
+                  </div>
+
+                </div>
+              )}
+
+
+              {/* =========================================
+                  BTTS
+                  ========================================= */}
+
+              {bttsMarkets.length > 0 && (
+                <div className="market-section">
+
+                  <div className="market-section-title">
+                    <span>
+                      Both Teams To Score
+                    </span>
+                  </div>
+
+                  <div className="compact-market-grid btts-grid">
+
+                    {bttsMarkets.map((market) => {
+
+                      const picked = isPicked(
+                        id,
+                        market.key
+                      );
+
+                      return (
+                        <button
+                          key={market.key}
+                          type="button"
+                          className={[
+                            "compact-market",
+                            picked ? "picked" : "",
+                          ]
+                            .filter(Boolean)
+                            .join(" ")}
+                          onClick={() =>
+                            handleClick(market)
+                          }
+                          aria-pressed={picked}
+                        >
+
+                          <span className="compact-label">
+                            {market.compactLabel}
+                          </span>
+
+                          <strong>
+                            {formatOdds(market.odds)}
+                          </strong>
+
+                        </button>
+                      );
+                    })}
+
+                  </div>
+
+                </div>
+              )}
+
+            </div>
+
+          </CSSTransition>
+
+        </>
+      )}
+
+    </article>
   );
 }
+
+
+// =========================================================
+// EXPORT
+//
+// IMPORTANT:
+// Do NOT use the old custom areEqual().
+// isPicked changes when the betslip changes, so the card
+// must be allowed to re-render.
+// =========================================================
 
 export default memo(MatchCard);

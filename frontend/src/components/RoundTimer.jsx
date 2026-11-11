@@ -1,27 +1,59 @@
-import React, { useState, useEffect } from "react";
+// src/components/RoundTimer.jsx
 
-export default function RoundTimer({ seconds }) {
-  const [time, setTime] = useState(seconds);
+import React, {
+  useEffect,
+  useState,
+} from "react";
 
-  // Reset timer if seconds prop changes
+export default function RoundTimer({
+  seconds = 0,
+}) {
+  const safeSeconds = Math.max(
+    0,
+    Number(seconds) || 0
+  );
+
+  const [time, setTime] =
+    useState(safeSeconds);
+
+  /*
+   * Reset timer whenever the server
+   * provides a new countdown.
+   */
   useEffect(() => {
-    setTime(seconds);
-  }, [seconds]);
+    setTime(safeSeconds);
+  }, [safeSeconds]);
 
+  /*
+   * Countdown every second.
+   */
   useEffect(() => {
     const timer = setInterval(() => {
-      setTime((prev) => (prev > 0 ? prev - 1 : 0));
+      setTime((previous) =>
+        previous > 0
+          ? previous - 1
+          : 0
+      );
     }, 1000);
 
-    return () => clearInterval(timer);
+    return () => {
+      clearInterval(timer);
+    };
   }, []);
 
-  const minutes = Math.floor(time / 60);
+  const minutes = Math.floor(
+    time / 60
+  );
+
   const secs = time % 60;
 
   return (
-    <div className="round-timer px-3 py-1 bg-blue-600 text-white rounded-md inline-block">
-      Next Round: {minutes}:{secs.toString().padStart(2, "0")}
+    <div className="inline-flex items-center rounded-md bg-blue-600 px-3 py-1 text-sm font-semibold text-white shadow-sm">
+      Next Round:{" "}
+      {minutes}:
+      {secs
+        .toString()
+        .padStart(2, "0")}
     </div>
   );
 }

@@ -2,7 +2,7 @@
 // src/user/AccountPage.jsx
 
 import React, { useState } from "react";
-import { deposit, withdraw } from "../api/betsWallet";
+import { mpesaDeposit, withdraw } from "../api/betsWallet";
 import { useUser } from "../contexts/UserContext";
 
 export default function AccountPage() {
@@ -30,7 +30,7 @@ export default function AccountPage() {
       let res;
 
       if (action === "deposit") {
-        res = await deposit(numAmount);
+        res = await mpesaDeposit(numAmount);
       } else {
         res = await withdraw(numAmount);
       }
@@ -42,7 +42,7 @@ export default function AccountPage() {
 
       alert(
         action === "deposit"
-          ? `Deposited KES ${numAmount.toFixed(2)}`
+          ? `M-PESA STK Push sent for KES ${numAmount.toFixed(2)}. Enter your M-PESA PIN to complete the deposit.`
           : `Withdrew KES ${numAmount.toFixed(2)}`
       );
 

@@ -1,13 +1,22 @@
 // src/api/footballApi.js
 // (Updated) includes normalizeLogoUrl + improved extractLogoFromTeam so crest URLs load via tunnel
 
-import { makeRequester, BACKEND_FOOTBALL } from "./core.js";
+import {
+  makeRequester,
+  BACKEND_FOOTBALL,
+  BACKEND_BASE,
+} from "./core.js";
+
 const { requestRaw, request } = makeRequester(BACKEND_FOOTBALL);
+
+const { request: requestLive } =
+  makeRequester(BACKEND_BASE);
 
 // Toggle debug logs (set true temporarily when debugging)
 const DEBUG = false;
 
 // ---------- Teams / Logos helpers ----------
+
 let teamMap = null; // numeric-id -> team object
 let nameMap = null; // normalized name -> team object (first match)
 
@@ -17,7 +26,6 @@ function normalize(str = "") {
     .toLowerCase()
     .trim()
     .replace(/\s+/g, "")
-
     .replace(/[^\w]/g, "");
 }
 
@@ -33,6 +41,7 @@ function svgToDataUri(svg) {
   } catch (e) {
     // fall through to URI encoding
   }
+
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 
@@ -43,9 +52,6 @@ function svgToDataUri(svg) {
  * - localhost / 127.0.0.1 => rewrite to current origin + path
  * - upgrade http -> https if page is https
  * - otherwise return absolute URL unchanged
- *
- * (Optional) You can extend this to route external hosts through an image proxy
- * by returning `/image-proxy?url=${encodeURIComponent(url)}` for matching hosts.
  */
 function normalizeLogoUrl(url) {
   if (!url) return null;
@@ -53,7 +59,12 @@ function normalizeLogoUrl(url) {
   // Keep data URIs and inline SVGs as-is
   if (typeof url === "string") {
     const t = url.trim();
-    if (t.startsWith("data:") || t.startsWith("blob:") || t.startsWith("<svg")) {
+
+    if (
+      t.startsWith("data:") ||
+      t.startsWith("blob:") ||
+      t.startsWith("<svg")
+    ) {
       return url;
     }
   }
@@ -66,12 +77,22 @@ function normalizeLogoUrl(url) {
     const parsed = new URL(url, window.location.origin);
 
     // If URL points to localhost, rewrite to current origin so tunnel serves it
-    if (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1") {
-      return window.location.origin + parsed.pathname + parsed.search;
+    if (
+      parsed.hostname === "localhost" ||
+      parsed.hostname === "127.0.0.1"
+    ) {
+      return (
+        window.location.origin +
+        parsed.pathname +
+        parsed.search
+      );
     }
 
-    // If page is HTTPS and the image is HTTP, try upgrading to HTTPS to avoid mixed content
-    if (window.location.protocol === "https:" && parsed.protocol === "http:") {
+    // If page is HTTPS and the image is HTTP, try upgrading to HTTPS
+    if (
+      window.location.protocol === "https:" &&
+      parsed.protocol === "http:"
+    ) {
       parsed.protocol = "https:";
       return parsed.toString();
     }
@@ -96,7 +117,11 @@ function generateFootballBadge(teamName = "FC") {
     .join("")
     .toUpperCase() || "FC";
 
-  const hash = [...String(teamName)].reduce((a, c) => a + c.charCodeAt(0), 0);
+  const hash = [...String(teamName)].reduce(
+    (a, c) => a + c.charCodeAt(0),
+    0
+  );
+
   const color = `hsl(${hash % 360},70%,45%)`;
 
   const svg = `
@@ -107,10 +132,32 @@ function generateFootballBadge(teamName = "FC") {
         <stop offset="1" stop-color="${color}" stop-opacity="0.8"/>
       </linearGradient>
     </defs>
+
     <rect width="120" height="120" rx="18" ry="18" fill="url(#g)" />
-    <rect x="6" y="6" width="108" height="108" rx="14" ry="14" fill="none" stroke="white" stroke-width="4" opacity="0.18"/>
-    <text x="50%" y="54%" font-size="44" fill="white" font-family="system-ui, Arial, sans-serif"
-      text-anchor="middle" dominant-baseline="middle" font-weight="700">
+
+    <rect
+      x="6"
+      y="6"
+      width="108"
+      height="108"
+      rx="14"
+      ry="14"
+      fill="none"
+      stroke="white"
+      stroke-width="4"
+      opacity="0.18"
+    />
+
+    <text
+      x="50%"
+      y="54%"
+      font-size="44"
+      fill="white"
+      font-family="system-ui, Arial, sans-serif"
+      text-anchor="middle"
+      dominant-baseline="middle"
+      font-weight="700"
+    >
       ${initials}
     </text>
   </svg>
@@ -122,55 +169,80 @@ function generateFootballBadge(teamName = "FC") {
 /**
  * Normalize possible logo fields into a single URL string or data URI.
  * supports: crest, logo, badge, image, svg
- *
- * This version normalizes absolute URLs so logos load through the current origin
- * (fixes localhost URLs when site is accessed via tunnel).
  */
 function extractLogoFromTeam(t) {
   if (!t) return null;
 
   // prefer inline svg content, then crest/logo fields
-  const raw = t.svg || t.crest || t.logo || t.badge || t.image || null;
+  const raw =
+    t.svg ||
+    t.crest ||
+    t.logo ||
+    t.badge ||
+    t.image ||
+    null;
+
   if (!raw) return null;
 
   // Inline SVG content -> convert to data URI
-  if (typeof raw === "string" && raw.trim().startsWith("<svg")) {
+  if (
+    typeof raw === "string" &&
+    raw.trim().startsWith("<svg")
+  ) {
     return svgToDataUri(raw);
   }
 
   // If raw is already a data URI keep it
-  if (typeof raw === "string" && raw.trim().startsWith("data:")) {
+  if (
+    typeof raw === "string" &&
+    raw.trim().startsWith("data:")
+  ) {
     return raw;
   }
 
-  // Normalize logo URL (handles localhost -> tunnel origin, http->https, relative paths)
+  // Normalize logo URL
   return normalizeLogoUrl(raw);
 }
 
 // ---------- Load teams ----------
+
 export async function loadTeams() {
   // return earlier if already loaded
-  if (teamMap && Object.keys(teamMap).length) return teamMap;
+  if (
+    teamMap &&
+    Object.keys(teamMap).length
+  ) {
+    return teamMap;
+  }
 
   try {
     const r = await requestRaw("/teams");
 
     if (!r || !r.success) {
-      if (DEBUG) console.warn("loadTeams: teams request failed", r);
+      if (DEBUG) {
+        console.warn(
+          "loadTeams: teams request failed",
+          r
+        );
+      }
+
       teamMap = {};
       nameMap = {};
+
       return teamMap;
     }
 
     const teams = r.data?.teams || [];
+
     teamMap = {};
     nameMap = {};
 
     teams.forEach((t) => {
       if (!t) return;
 
-      // Ensure numeric ID keys to avoid "454" vs 454 mismatch
+      // Ensure numeric ID keys
       const idNum = Number(t.id);
+
       if (!Number.isNaN(idNum)) {
         teamMap[idNum] = t;
       }
@@ -187,38 +259,67 @@ export async function loadTeams() {
 
       candidates.forEach((c) => {
         const key = normalize(c);
-        if (key && !nameMap[key]) nameMap[key] = t;
+
+        if (key && !nameMap[key]) {
+          nameMap[key] = t;
+        }
       });
 
-      // also map normalized full name once more (fallbacks)
+      // also map normalized full name once more
       const full = normalize(t.name || "");
-      if (full && !nameMap[full]) nameMap[full] = t;
+
+      if (full && !nameMap[full]) {
+        nameMap[full] = t;
+      }
     });
 
     if (DEBUG) {
-      console.log("loadTeams: loaded teams count =", Object.keys(teamMap).length);
-      console.log("loadTeams: sample keys =", Object.keys(teamMap).slice(0, 10));
+      console.log(
+        "loadTeams: loaded teams count =",
+        Object.keys(teamMap).length
+      );
+
+      console.log(
+        "loadTeams: sample keys =",
+        Object.keys(teamMap).slice(0, 10)
+      );
     }
 
     return teamMap;
   } catch (err) {
     console.error("Error loading teams:", err);
+
     teamMap = {};
     nameMap = {};
+
     return teamMap;
   }
 }
 
 export async function ensureTeams() {
-  if (!teamMap || !Object.keys(teamMap).length) await loadTeams();
+  if (
+    !teamMap ||
+    !Object.keys(teamMap).length
+  ) {
+    await loadTeams();
+  }
 }
 
 // ---------- Robust logo lookup ----------
+
 function getLogo(id, name) {
-  // try numeric id lookup first (handles "454" and 454)
+  // try numeric id lookup first
   const numericId = Number(id);
-  if (!Number.isNaN(numericId) && teamMap && teamMap[numericId]) {
-    const l = extractLogoFromTeam(teamMap[numericId]);
+
+  if (
+    !Number.isNaN(numericId) &&
+    teamMap &&
+    teamMap[numericId]
+  ) {
+    const l = extractLogoFromTeam(
+      teamMap[numericId]
+    );
+
     if (l) return l;
   }
 
@@ -226,31 +327,47 @@ function getLogo(id, name) {
   if (name && nameMap) {
     const key = normalize(name);
     const t = nameMap[key];
+
     if (t) {
       const l = extractLogoFromTeam(t);
+
       if (l) return l;
     }
 
-    // small fuzzy scan fallback (only when nameMap fails)
-    const fallback = Object.values(teamMap || {}).find((tt) => {
+    // small fuzzy scan fallback
+    const fallback = Object.values(
+      teamMap || {}
+    ).find((tt) => {
       if (!tt) return false;
+
       return (
         normalize(tt.name) === key ||
-        normalize(tt.short_name || tt.shortName || "") === key ||
+        normalize(
+          tt.short_name ||
+            tt.shortName ||
+            ""
+        ) === key ||
         normalize(tt.tla || "") === key
       );
     });
+
     if (fallback) {
-      const l = extractLogoFromTeam(fallback);
+      const l = extractLogoFromTeam(
+        fallback
+      );
+
       if (l) return l;
     }
   }
 
-  // last resort: generate badge for the team name (or generic FC)
-  return generateFootballBadge(name || "FC");
+  // last resort: generated badge
+  return generateFootballBadge(
+    name || "FC"
+  );
 }
 
 // ---------- attach logos safely ----------
+
 export function attachLogosSafe(
   item,
   homeNameKey = "home_team_name",
@@ -258,17 +375,35 @@ export function attachLogosSafe(
   homeIdKey = "home_team_id",
   awayIdKey = "away_team_id"
 ) {
-  // if teamMap is not loaded yet, return generated defaults (not crashing)
-  if (!teamMap || !Object.keys(teamMap).length) {
+  // if teamMap is not loaded yet, return generated defaults
+  if (
+    !teamMap ||
+    !Object.keys(teamMap).length
+  ) {
     return {
       ...item,
-      home_logo: generateFootballBadge(item?.[homeNameKey] || "FC"),
-      away_logo: generateFootballBadge(item?.[awayNameKey] || "FC"),
+
+      home_logo:
+        generateFootballBadge(
+          item?.[homeNameKey] || "FC"
+        ),
+
+      away_logo:
+        generateFootballBadge(
+          item?.[awayNameKey] || "FC"
+        ),
     };
   }
 
-  const homeLogo = getLogo(item[homeIdKey], item[homeNameKey]);
-  const awayLogo = getLogo(item[awayIdKey], item[awayNameKey]);
+  const homeLogo = getLogo(
+    item?.[homeIdKey],
+    item?.[homeNameKey]
+  );
+
+  const awayLogo = getLogo(
+    item?.[awayIdKey],
+    item?.[awayNameKey]
+  );
 
   return {
     ...item,
@@ -278,191 +413,596 @@ export function attachLogosSafe(
 }
 
 // ---------- Matches / Predictions / Tips ----------
-export async function getDashboard(filters = {}) {
-  const qs = new URLSearchParams(filters).toString();
-  return await request(`/dashboard${qs ? `?${qs}` : ""}`);
+
+export async function getDashboard(
+  filters = {}
+) {
+  const qs = new URLSearchParams(
+    filters
+  ).toString();
+
+  return await request(
+    `/dashboard${qs ? `?${qs}` : ""}`
+  );
 }
 
-export async function getRecentMatches(params = {}) {
-  const qs = new URLSearchParams(params).toString();
-  const r = await request(`/matches/recent${qs ? `?${qs}` : ""}`);
+export async function getRecentMatches(
+  params = {}
+) {
+  const qs = new URLSearchParams(
+    params
+  ).toString();
+
+  const r = await request(
+    `/matches/recent${qs ? `?${qs}` : ""}`
+  );
+
   if (!r.success) return r;
+
   await ensureTeams();
-  if (Array.isArray(r.data.matches))
-    r.data.matches = r.data.matches.map((m) => attachLogosSafe(m));
-  return r;
-}
 
-export async function getUpcomingMatches(params = {}) {
-  const qs = new URLSearchParams(params).toString();
-  const r = await request(`/matches/upcoming${qs ? `?${qs}` : ""}`);
-  if (!r.success) return r;
-  await ensureTeams();
-  if (Array.isArray(r.data.matches))
-    r.data.matches = r.data.matches.map((m) => attachLogosSafe(m));
-  return r;
-}
-
-export async function getLiveMatches(params = {}) {
-  const qs = new URLSearchParams(params).toString();
-  const r = await request(`/matches/live${qs ? `?${qs}` : ""}`);
-  if (!r.success) return r;
-  await ensureTeams();
-  if (Array.isArray(r.data.matches))
-    r.data.matches = r.data.matches.map((m) => attachLogosSafe(m));
-  return r;
-}
-
-export async function getAllMatches(params = {}) {
-  const qs = new URLSearchParams(params).toString();
-  const r = await request(`/matches${qs ? `?${qs}` : ""}`);
-  if (!r.success) return r;
-  await ensureTeams();
-  if (Array.isArray(r.data.matches))
-    r.data.matches = r.data.matches.map((m) => attachLogosSafe(m));
-  return r;
-}
-
-// ---------- Predictions ----------
-export async function getPredictionsLatest(params = {}) {
-  const qs = new URLSearchParams(params).toString();
-
-  const r = await request(`/predictions/latest${qs ? `?${qs}` : ""}`);
-
-  // 🔥 DO NOT trust r.success (backend doesn't send it)
-  if (!r) {
-    return { success: false, data: { predictions: [] } };
+  if (Array.isArray(r.data.matches)) {
+    r.data.matches =
+      r.data.matches.map((m) =>
+        attachLogosSafe(m)
+      );
   }
 
+  return r;
+}
+
+export async function getUpcomingMatches(
+  params = {}
+) {
+  const qs = new URLSearchParams(
+    params
+  ).toString();
+
+  const r = await request(
+    `/matches/upcoming${qs ? `?${qs}` : ""}`
+  );
+
+  if (!r.success) return r;
+
   await ensureTeams();
 
-  // 🔥 normalize backend response safely
-  const rawPredictions =
-    r.data?.predictions ||   // if wrapped
-    r.predictions ||
-    [];
+  if (Array.isArray(r.data.matches)) {
+    r.data.matches =
+      r.data.matches.map((m) =>
+        attachLogosSafe(m)
+      );
+  }
 
-  const normalized = Array.isArray(rawPredictions)
-    ? rawPredictions.map((p) =>
+  return r;
+}
+
+export async function getLiveMatches(
+  params = {}
+) {
+  const qs = new URLSearchParams(
+    params
+  ).toString();
+
+  const r = await requestLive(
+    `/live${qs ? `?${qs}` : ""}`
+  );
+
+  if (!r.success) return r;
+
+  await ensureTeams();
+
+  if (Array.isArray(r.data?.matches)) {
+    r.data.matches =
+      r.data.matches.map((m) =>
         attachLogosSafe(
           {
-            ...p,
-            utcDate: p.utcDate || p.utcdate, // 🔥 FIX DATE BUG
+            ...m,
+
+            home_team_name:
+              m?.home_team_name ||
+              m?.home_team ||
+              "",
+
+            away_team_name:
+              m?.away_team_name ||
+              m?.away_team ||
+              "",
           },
           "home_team_name",
           "away_team_name"
         )
-      )
-    : [];
+      );
+  }
+
+  return r;
+}
+
+export async function getAllMatches(
+  params = {}
+) {
+  const qs = new URLSearchParams(
+    params
+  ).toString();
+
+  const r = await request(
+    `/matches${qs ? `?${qs}` : ""}`
+  );
+
+  if (!r.success) return r;
+
+  await ensureTeams();
+
+  if (Array.isArray(r.data.matches)) {
+    r.data.matches =
+      r.data.matches.map((m) =>
+        attachLogosSafe(m)
+      );
+  }
+
+  return r;
+}
+
+// ---------- Predictions ----------
+
+export async function getPredictionsLatest(
+  params = {}
+) {
+  const qs = new URLSearchParams(
+    params
+  ).toString();
+
+  const r = await request(
+    `/predictions/latest${qs ? `?${qs}` : ""}`
+  );
+
+  // Do not trust r.success
+  if (!r) {
+    return {
+      success: false,
+      data: {
+        predictions: [],
+      },
+    };
+  }
+
+  await ensureTeams();
+
+  // Normalize backend response safely
+  const rawPredictions =
+    r.data?.predictions ||
+    r.predictions ||
+    [];
+
+  const normalized =
+    Array.isArray(rawPredictions)
+      ? rawPredictions.map((p) =>
+          attachLogosSafe(
+            {
+              ...p,
+
+              utcDate:
+                p.utcDate ||
+                p.utcdate,
+            },
+            "home_team_name",
+            "away_team_name"
+          )
+        )
+      : [];
 
   return {
     success: true,
+
     data: {
       predictions: normalized,
     },
   };
 }
 
-export async function getGroupedPredictions({ home, away, match_id } = {}) {
-  const params = new URLSearchParams();
-  if (home) params.append("home", home);
-  if (away) params.append("away", away);
-  if (match_id) params.append("match_id", match_id);
+export async function getGroupedPredictions({
+  home,
+  away,
+  match_id,
+} = {}) {
+  const params =
+    new URLSearchParams();
+
+  if (home) {
+    params.append("home", home);
+  }
+
+  if (away) {
+    params.append("away", away);
+  }
+
+  if (match_id) {
+    params.append("match_id", match_id);
+  }
+
   const qs = params.toString();
-  const r = await request(`/predictions/match/grouped${qs ? `?${qs}` : ""}`);
-  if (!r.success) return r;
+
+  const r = await request(
+    `/predictions/match/grouped${
+      qs ? `?${qs}` : ""
+    }`
+  );
+
+  if (!r?.success) return r;
+
   await ensureTeams();
-  return r;
+
+  const payload = r.data || {};
+
+  const rawMatches =
+    Array.isArray(payload.matches)
+      ? payload.matches
+      : [];
+
+  const matches = rawMatches.map((match) => {
+    const normalizedMatch = {
+      ...match,
+
+      utcDate:
+        match?.utcDate ||
+        match?.utcdate ||
+        null,
+
+      localDate:
+        match?.localDate ||
+        null,
+
+      grouped_predictions:
+        Array.isArray(match?.grouped_predictions)
+          ? match.grouped_predictions
+          : [],
+
+      home_team_name:
+        match?.home_team_name ||
+        match?.home ||
+        "",
+
+      away_team_name:
+        match?.away_team_name ||
+        match?.away ||
+        "",
+    };
+
+    return attachLogosSafe(
+      normalizedMatch,
+      "home_team_name",
+      "away_team_name"
+    );
+  });
+
+  return {
+    ...r,
+    data: {
+      count:
+        Number.isFinite(Number(payload.count))
+          ? Number(payload.count)
+          : matches.length,
+      matches,
+    },
+  };
 }
 
 export async function getTipsDaily(date) {
   const r = await request(
-    `/tips/daily${date ? `?date=${encodeURIComponent(date)}` : ""}`
+    `/tips/daily${
+      date
+        ? `?date=${encodeURIComponent(
+            date
+          )}`
+        : ""
+    }`
   );
+
   if (!r.success) return r;
+
   await ensureTeams();
-  if (Array.isArray(r.data.tips))
-    r.data.tips = r.data.tips.map((t) => attachLogosSafe(t));
+
+  if (Array.isArray(r.data.tips)) {
+    r.data.tips =
+      r.data.tips.map((t) =>
+        attachLogosSafe(t)
+      );
+  }
+
   return r;
 }
 
-export async function getTipsValue(status = "TIMED,SCHEDULED") {
-  const r = await request(`/tips/value?status=${encodeURIComponent(status)}`);
-  if (!r.success) return r;
+export async function getTipsValue(
+  status = "TIMED,SCHEDULED",
+  date = null
+) {
+  const params =
+    new URLSearchParams();
+
+  if (status) {
+    params.append("status", status);
+  }
+
+  if (date) {
+    params.append("date", date);
+  }
+
+  const qs = params.toString();
+
+  const r = await request(
+    `/tips/value${qs ? `?${qs}` : ""}`
+  );
+
+  if (!r?.success) return r;
+
   await ensureTeams();
-  if (Array.isArray(r.data.tips))
-    r.data.tips = r.data.tips.map((t) => attachLogosSafe(t));
+
+  if (Array.isArray(r.data?.tips)) {
+    r.data.tips =
+      r.data.tips.map((t) =>
+        attachLogosSafe(t)
+      );
+  }
+
   return r;
 }
 
 // ---------- Teams / Players / Lineups / Injuries ----------
+
 export async function getTeams() {
   await ensureTeams();
-  return { success: true, data: { teams: Object.values(teamMap || {}) } };
+
+  return {
+    success: true,
+    data: {
+      teams: Object.values(
+        teamMap || {}
+      ),
+    },
+  };
 }
 
-export async function getPlayers(params = {}) {
-  const qs = new URLSearchParams(params).toString();
-  return await request(`/players${qs ? `?${qs}` : ""}`);
+export async function getPlayers(
+  params = {}
+) {
+  const qs = new URLSearchParams(
+    params
+  ).toString();
+
+  return await request(
+    `/players${qs ? `?${qs}` : ""}`
+  );
 }
 
-export async function getLineups(params = {}) {
-  const qs = new URLSearchParams(params).toString();
-  return await request(`/lineups${qs ? `?${qs}` : ""}`);
+export async function getLineups(
+  params = {}
+) {
+  const qs = new URLSearchParams(
+    params
+  ).toString();
+
+  return await request(
+    `/lineups${qs ? `?${qs}` : ""}`
+  );
 }
 
-export async function getInjuries(params = {}) {
-  const qs = new URLSearchParams(params).toString();
-  return await request(`/injuries${qs ? `?${qs}` : ""}`);
+export async function getInjuries(
+  params = {}
+) {
+  const qs = new URLSearchParams(
+    params
+  ).toString();
+
+  return await request(
+    `/injuries${qs ? `?${qs}` : ""}`
+  );
 }
 
 // ---------- H2H / Team overview ----------
-export async function getH2H(home_team_id, away_team_id, limit = 5) {
+
+export async function getH2H(
+  home_team_id,
+  away_team_id,
+  limit = 5
+) {
   return await request(
     `/h2h?home_team_id=${home_team_id}&away_team_id=${away_team_id}&limit=${limit}`
   );
 }
 
-export async function getTeamMatchOverview(match_id, h2h_limit = 5, model_version = null) {
+export async function getTeamMatchOverview(
+  match_id,
+  h2h_limit = 5,
+  model_version = null
+) {
   let url = `/team-match-overview?match_id=${match_id}&h2h_limit=${h2h_limit}`;
-  if (model_version) url += `&model_version=${model_version}`;
+
+  if (model_version) {
+    url += `&model_version=${model_version}`;
+  }
+
   return await request(url);
 }
 
 // ---------- Finished matches & bookmarks ----------
-export async function getFinishedMatchesWithPredictions({ months = 2, limit } = {}) {
-  const params = new URLSearchParams();
-  if (months) params.append("months", String(months));
-  if (limit) params.append("limit", String(limit));
-  return await request(`/api/finished-matches-with-predictions?${params.toString()}`);
+
+export async function getFinishedMatchesWithPredictions({
+  months = 2,
+  limit,
+} = {}) {
+  const params =
+    new URLSearchParams();
+
+  if (months) {
+    params.append(
+      "months",
+      String(months)
+    );
+  }
+
+  if (limit) {
+    params.append(
+      "limit",
+      String(limit)
+    );
+  }
+
+  return await request(
+    `/api/finished-matches-with-predictions?${params.toString()}`
+  );
 }
 
-export async function getAllBookmarks(model_version = "") {
-  const url = model_version ? `/bookmark/all?model_version=${encodeURIComponent(model_version)}` : "/bookmark/all";
+export async function getAllBookmarks(
+  model_version = ""
+) {
+  const url = model_version
+    ? `/bookmark/all?model_version=${encodeURIComponent(
+        model_version
+      )}`
+    : "/bookmark/all";
+
   return await request(url);
 }
 
 // ---------- Accumulator ----------
-export async function getAccumulator(params = {}) {
-  const qs = new URLSearchParams(params).toString();
-  const r = await request(`/accumulator${qs ? `?${qs}` : ""}`);
-  if (!r.success) return { success: false, data: {} };
-  await ensureTeams();
 
-  // Normalize: convert each date key to an array
-  const d = r.data || {};
-  for (const key in d) {
-    if (!Array.isArray(d[key])) {
-      const val = d[key];
-      const arr = [];
-      if (val && typeof val === "object") {
-        Object.values(val).forEach((v) => {
-          if (Array.isArray(v)) arr.push(...v);
-        });
-      }
-      d[key] = arr;
-    }
+export async function getAccumulator(
+  params = {}
+) {
+  const qs = new URLSearchParams(
+    params
+  ).toString();
+
+  const r = await request(
+    `/accumulator${qs ? `?${qs}` : ""}`
+  );
+
+  // Handle both:
+  // 1. Direct backend response:
+  //    { "2026-09-20": [...] }
+  //
+  // 2. Wrapped response:
+  //    { success: true, data: {...} }
+
+  if (!r) {
+    return {
+      success: false,
+      data: {},
+    };
   }
 
-  return { ...r, data: d };
+  if (
+    r.success === false &&
+    r.data === undefined
+  ) {
+    return {
+      success: false,
+      data: {},
+    };
+  }
+
+  let d = {};
+
+  if (
+    r &&
+    typeof r === "object" &&
+    !Array.isArray(r) &&
+    r.success === true &&
+    r.data !== undefined
+  ) {
+    d = r.data || {};
+  } else if (
+    r &&
+    typeof r === "object" &&
+    !Array.isArray(r)
+  ) {
+    d = r;
+  }
+
+  if (
+    !d ||
+    typeof d !== "object" ||
+    Array.isArray(d)
+  ) {
+    return {
+      success: true,
+      data: {},
+    };
+  }
+
+  await ensureTeams();
+
+  const normalized = {};
+
+  Object.entries(d).forEach(
+    ([key, value]) => {
+      const arr = [];
+
+      if (Array.isArray(value)) {
+        arr.push(...value);
+      } else if (
+        value &&
+        typeof value === "object"
+      ) {
+        Object.values(value).forEach(
+          (nested) => {
+            if (Array.isArray(nested)) {
+              arr.push(...nested);
+            } else if (
+              nested &&
+              typeof nested === "object" &&
+              (
+                nested.home_team ||
+                nested.home_team_name ||
+                nested.home
+              )
+            ) {
+              arr.push(nested);
+            }
+          }
+        );
+      }
+
+      normalized[key] = arr
+        .filter(
+          (item) =>
+            item &&
+            typeof item === "object"
+        )
+        .map((item) => {
+          const normalizedItem = {
+            ...item,
+
+            home_team:
+              item.home_team ||
+              item.home_team_name ||
+              item.home ||
+              "",
+
+            away_team:
+              item.away_team ||
+              item.away_team_name ||
+              item.away ||
+              "",
+
+            match_time:
+              item.match_time ||
+              item.utcDate ||
+              item.utcdate ||
+              item.fixture_time ||
+              null,
+          };
+
+          return attachLogosSafe(
+            normalizedItem,
+            "home_team",
+            "away_team"
+          );
+        });
+    }
+  );
+
+  return {
+    success: true,
+    data: normalized,
+  };
 }
