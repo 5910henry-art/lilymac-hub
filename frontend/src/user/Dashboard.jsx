@@ -1,5 +1,5 @@
 // src/user/Dashboard.jsx
-import React, { useEffect, useState, memo, useRef, useLayoutEffect } from "react";
+import React, { useEffect, useState, useCallback, memo, useRef } from "react";
 import { Card } from "../components/ui/card";
 import { fetchDashboard } from "../api/api";
 
@@ -176,7 +176,7 @@ export default function Dashboard() {
   }, []);
 
   // Fetch dashboard
-  const loadDashboard = async () => {
+  const loadDashboard = useCallback(async () => {
     setLoading(true);
 
     try {
@@ -254,11 +254,11 @@ export default function Dashboard() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [selectedDate]);
 
   useEffect(() => {
     loadDashboard();
-  }, [selectedDate]);
+  }, [loadDashboard]);
 
   const STATS_COLORS = [
     "bg-pink-100 text-pink-700",
@@ -369,9 +369,9 @@ export default function Dashboard() {
         {/* =================================================
             LILYMAC BETTING HUB DESCRIPTION
         ================================================== */}
-     
+
        <div className="mb-4 p-4 bg-purple-50 dark:bg-purple-950/30 rounded-lg">
-           <h2 className="font-semibold text-lg mb-2"></h2>
+
 
            <p className="lilymac-gradient-text text-sm italic font-semibold">
 

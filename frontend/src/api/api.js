@@ -56,7 +56,7 @@ export async function getFinishedMatchesWithPredictions() {
 }
 
 // Default export
-export default {
+const api = {
   ...core,
   ...domain,
   ...authVipAdmin,
@@ -72,3 +72,5 @@ export default {
   getInjuries,
   getH2H
 };
+
+export default api;

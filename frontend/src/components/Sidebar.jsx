@@ -168,10 +168,8 @@ export default function Sidebar({
         path: "/teams",
         icon: <Shield size={19} strokeWidth={1.8} />,
       },
-
-,
     ],
-    []
+    [topCount]
   );
 
   return (

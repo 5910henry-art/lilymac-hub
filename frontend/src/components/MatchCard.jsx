@@ -92,13 +92,7 @@ function MatchCard({
         odds: Number(match.away_odds || 0),
       },
     ].filter((market) => market.odds > 0);
-  }, [
-    match?.home_team,
-    match?.away_team,
-    match?.home_odds,
-    match?.draw_odds,
-    match?.away_odds,
-  ]);
+  }, [match]);
 
   // =======================================================
   // GOALS MARKETS
@@ -157,16 +151,7 @@ function MatchCard({
         odds: Number(match.under35 || 0),
       },
     ].filter((market) => market.odds > 0);
-  }, [
-    match?.over05,
-    match?.under05,
-    match?.over15,
-    match?.under15,
-    match?.over25,
-    match?.under25,
-    match?.over35,
-    match?.under35,
-  ]);
+  }, [match]);
 
   // =======================================================
   // BTTS MARKETS
@@ -189,7 +174,7 @@ function MatchCard({
         odds: Number(match.ng || 0),
       },
     ].filter((market) => market.odds > 0);
-  }, [match?.gg, match?.ng]);
+  }, [match]);
 
   // =======================================================
   // EXTRA MARKETS

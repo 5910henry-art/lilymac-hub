@@ -3,6 +3,7 @@
 import React, {
   useEffect,
   useState,
+  useCallback,
 } from "react";
 
 import {
@@ -40,9 +41,8 @@ export default function Live({
    * INITIAL / MANUAL REFRESH
    * ==========================================================
    */
-  async function loadInitial(
-    showLoader = true
-  ) {
+  const loadInitial = useCallback(
+    async (showLoader = true) => {
     try {
       if (showLoader) {
         setLoading(true);
@@ -64,7 +64,9 @@ export default function Live({
       setLoading(false);
       setRefreshing(false);
     }
-  }
+    },
+    [refresh]
+  );
 
   /*
    * ==========================================================
@@ -73,7 +75,7 @@ export default function Live({
    */
   useEffect(() => {
     loadInitial();
-  }, []);
+  }, [loadInitial]);
 
   /*
    * ==========================================================

@@ -1238,10 +1238,7 @@ export default function VirtualSportsbook() {
       stopLegacyEvent?.();
       stopFinished?.();
     };
-  }, [
-    extractSocketEvent,
-    mergeEvents,
-  ]);
+  }, [mergeEvents]);
 
   // ============================================================
   // BETTING

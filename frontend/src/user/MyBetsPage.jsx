@@ -7,18 +7,15 @@ import {
   RefreshCw,
   Wallet,
   Ticket,
-  ChevronRight,
 } from "lucide-react";
 
 import { getMyBets } from "../api/betsWallet";
-import { useUser } from "../contexts/UserContext";
 import TicketDrawer from "../components/TicketDrawer";
 import BetCard from "../components/BetCard";
 import VirtualBets from "../components/virtualbets";
 
 export default function MyBetsPage() {
   const navigate = useNavigate();
-  const { reloadUser } = useUser();
 
   const [bets, setBets] = useState([]);
   const [filteredBets, setFilteredBets] = useState([]);
@@ -40,29 +37,6 @@ export default function MyBetsPage() {
       .trim()
       .toLowerCase()
       .replace(/[\s-]+/g, "_");
-
-  /*
-   * Internal cash-out systems can return different status names.
-   *
-   * We intentionally support all of these:
-   *   cashout
-   *   cash_out
-   *   cashed_out
-   *   cashedout
-   *
-   * This means the Cashout tab will correctly display
-   * bets that have already been internally cashed out.
-   */
-  const isCashoutStatus = (status) => {
-    const normalized = normalizeStatus(status);
-
-    return (
-      normalized === "cashout" ||
-      normalized === "cash_out" ||
-      normalized === "cashed_out" ||
-      normalized === "cashedout"
-    );
-  };
 
   // =========================================================
   // LOAD BETS
@@ -293,6 +267,17 @@ export default function MyBetsPage() {
   ];
 
   useEffect(() => {
+    const isCashoutStatus = (status) => {
+      const normalized = normalizeStatus(status);
+
+      return (
+        normalized === "cashout" ||
+        normalized === "cash_out" ||
+        normalized === "cashed_out" ||
+        normalized === "cashedout"
+      );
+    };
+
     let data = [...bets];
 
     if (tabFilter !== "all") {
