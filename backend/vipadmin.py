@@ -143,6 +143,42 @@ async def db_execute(sql, params=None):
     return await vip_execute_db(sql, params)
 
 
+async def delete_vip_account_completely(vip_id):
+    """Atomically delete one VIP and all related VIP records."""
+    conn = await asyncpg.connect(
+        dsn=DATABASE_URL,
+        command_timeout=60,
+    )
+    try:
+        await conn.execute(f'SET search_path TO "{DB_SCHEMA}", public')
+
+        async with conn.transaction():
+            vip = await conn.fetchrow(
+                "SELECT id, number FROM vip_users WHERE id = $1 FOR UPDATE",
+                vip_id,
+            )
+            if not vip:
+                return False
+
+            number = vip["number"]
+
+            await conn.execute("DELETE FROM vip_subscription_entitlements WHERE vip_id = $1", vip_id)
+            await conn.execute("DELETE FROM vip_upgrade_requests WHERE vip_id = $1", vip_id)
+            await conn.execute("DELETE FROM vip_picks WHERE number = $1", number)
+            await conn.execute("DELETE FROM vip_daily_quota_usage WHERE number = $1", number)
+            await conn.execute("DELETE FROM vip_notification_state WHERE number = $1", number)
+            await conn.execute("DELETE FROM vip_notifications WHERE number = $1", number)
+            await conn.execute("DELETE FROM vip_push_subscriptions WHERE number = $1", number)
+            await conn.execute("DELETE FROM admin_vip_expiry_notifications WHERE vip_id = $1", vip_id)
+
+            result = await conn.execute("DELETE FROM vip_users WHERE id = $1", vip_id)
+            return result == "DELETE 1"
+    finally:
+        await conn.close()
+
+
+
+
 
 async def _activate_next_vip_entitlement(conn, vip_id):
     """Activate the oldest queued entitlement if none is currently active."""
@@ -2640,41 +2676,10 @@ async def vip_renew():
 @app.post("/vip/deregister")
 @vip_required
 async def vip_deregister():
-    vip = request.vip_user
-
-    await db_execute(
-        """
-        DELETE FROM vip_picks
-        WHERE number = :number
-        """,
-        {
-            "number": vip["number"]
-        },
-    )
-
-    await db_execute(
-        """
-        DELETE FROM vip_upgrade_requests
-        WHERE vip_id = :vip_id
-        """,
-        {
-            "vip_id": vip["id"]
-        },
-    )
-
-    await db_execute(
-        """
-        DELETE FROM vip_users
-        WHERE id = :id
-        """,
-        {
-            "id": vip["id"]
-        },
-    )
-
-    return jsonify({
-        "message": "VIP account deleted successfully"
-    })
+    deleted = await delete_vip_account_completely(request.vip_user["id"])
+    if not deleted:
+        return jsonify({"error": "VIP account not found"}), 404
+    return jsonify({"message": "VIP account deleted successfully"})
 
 
 # ============================================================
@@ -2941,59 +2946,10 @@ async def admin_set_vip_password(vip_id):
 @app.post("/admin/vips/<int:vip_id>/decline")
 @admin_required
 async def admin_decline_vip(vip_id):
-    vip = await db_fetch_one(
-        """
-        SELECT id
-        FROM vip_users
-        WHERE id = :id
-        """,
-        {
-            "id": vip_id
-        },
-    )
-
-    if not vip:
-        return jsonify({
-            "error": "VIP user not found"
-        }), 404
-
-    await db_execute(
-        """
-        DELETE FROM vip_picks
-        WHERE number = (
-            SELECT number
-            FROM vip_users
-            WHERE id = :id
-        )
-        """,
-        {
-            "id": vip_id
-        },
-    )
-
-    await db_execute(
-        """
-        DELETE FROM vip_upgrade_requests
-        WHERE vip_id = :id
-        """,
-        {
-            "id": vip_id
-        },
-    )
-
-    await db_execute(
-        """
-        DELETE FROM vip_users
-        WHERE id = :id
-        """,
-        {
-            "id": vip_id
-        },
-    )
-
-    return jsonify({
-        "message": "VIP registration declined"
-    })
+    deleted = await delete_vip_account_completely(vip_id)
+    if not deleted:
+        return jsonify({"error": "VIP user not found"}), 404
+    return jsonify({"message": "VIP registration declined"})
 
 
 # ============================================================
@@ -3002,55 +2958,9 @@ async def admin_decline_vip(vip_id):
 @app.post("/admin/vips/<int:vip_id>/delete")
 @admin_required
 async def admin_delete_vip(vip_id):
-    vip = await db_fetch_one(
-        """
-        SELECT id, number
-        FROM vip_users
-        WHERE id = :id
-        """,
-        {
-            "id": vip_id
-        },
-    )
-
-    if not vip:
-        return jsonify({
-            "error": "VIP user not found"
-        }), 404
-
-    # Delete all VIP picks first
-    await db_execute(
-        """
-        DELETE FROM vip_picks
-        WHERE number = :number
-        """,
-        {
-            "number": vip["number"]
-        },
-    )
-
-    # Delete pending/historical upgrade requests
-    await db_execute(
-        """
-        DELETE FROM vip_upgrade_requests
-        WHERE vip_id = :id
-        """,
-        {
-            "id": vip_id
-        },
-    )
-
-    # Finally delete the VIP account
-    await db_execute(
-        """
-        DELETE FROM vip_users
-        WHERE id = :id
-        """,
-        {
-            "id": vip_id
-        },
-    )
-
+    deleted = await delete_vip_account_completely(vip_id)
+    if not deleted:
+        return jsonify({"error": "VIP user not found"}), 404
     return jsonify({
         "success": True,
         "message": "VIP account deleted successfully"
