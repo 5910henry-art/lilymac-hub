@@ -427,41 +427,129 @@ async def main():
 
         print("[FETCH] Loading accumulator + matches + bookmarks...")
 
-        source_rows = await conn.fetch(
-            """
-            SELECT
-                a.match_id,
-                a.market,
-                a.selection,
-                a.probability,
+        # ----------------------------------------------------
+        # LOAD SOURCE DATA IN SMALL BATCHES
+        #
+        # accumulator.id is the PRIMARY KEY, so paginate by id.
+        # This is safe even when many rows share the same match_id.
+        #
+        # Small result sets are important because large asyncpg
+        # transfers from Neon to Termux are unusually slow.
+        # ----------------------------------------------------
 
-                m.home_team_name,
-                m.away_team_name,
-                m.home_score,
-                m.away_score,
-                m.status,
-                m."utcdate" AS match_time,
+        source_rows = []
+        batch_size = 100
+        last_id = None
 
-                b.home_odds,
-                b.draw_odds,
-                b.away_odds,
-                b.gg_odds,
-                b.ng_odds,
-                b.over15,
-                b.over25,
-                b.over35
+        while True:
 
-            FROM accumulator a
+            if last_id is None:
 
-            INNER JOIN matches m
-                ON m.id = a.match_id
+                rows = await conn.fetch(
+                    """
+                    SELECT
+                        a.id,
+                        a.match_id,
+                        a.market,
+                        a.selection,
+                        a.probability,
 
-            LEFT JOIN bookmark b
-                ON b.match_id = a.match_id
+                        m.home_team_name,
+                        m.away_team_name,
+                        m.home_score,
+                        m.away_score,
+                        m.status,
+                        m."utcdate" AS match_time,
 
-            ORDER BY a.match_id DESC
-            """
-        )
+                        b.home_odds,
+                        b.draw_odds,
+                        b.away_odds,
+                        b.gg_odds,
+                        b.ng_odds,
+                        b.over15,
+                        b.over25,
+                        b.over35
+
+                    FROM accumulator a
+
+                    INNER JOIN matches m
+                        ON m.id = a.match_id
+
+                    LEFT JOIN bookmark b
+                        ON b.match_id = a.match_id
+
+                    ORDER BY a.id DESC
+
+                    LIMIT $1
+                    """,
+                    batch_size,
+                )
+
+            else:
+
+                rows = await conn.fetch(
+                    """
+                    SELECT
+                        a.id,
+                        a.match_id,
+                        a.market,
+                        a.selection,
+                        a.probability,
+
+                        m.home_team_name,
+                        m.away_team_name,
+                        m.home_score,
+                        m.away_score,
+                        m.status,
+                        m."utcdate" AS match_time,
+
+                        b.home_odds,
+                        b.draw_odds,
+                        b.away_odds,
+                        b.gg_odds,
+                        b.ng_odds,
+                        b.over15,
+                        b.over25,
+                        b.over35
+
+                    FROM accumulator a
+
+                    INNER JOIN matches m
+                        ON m.id = a.match_id
+
+                    LEFT JOIN bookmark b
+                        ON b.match_id = a.match_id
+
+                    WHERE a.id < $1
+
+                    ORDER BY a.id DESC
+
+                    LIMIT $2
+                    """,
+                    last_id,
+                    batch_size,
+                )
+
+            if not rows:
+                break
+
+            source_rows.extend(rows)
+
+            last_id = rows[-1]["id"] if "id" in rows[0] else None
+
+            # The SELECT above needs the id for pagination.
+            # If it is missing, stop rather than risk an infinite loop.
+            if last_id is None:
+                raise RuntimeError(
+                    "Accumulator id was not returned for pagination."
+                )
+
+            print(
+                f"      Loaded {len(source_rows)} source rows..."
+            )
+
+            if len(rows) < batch_size:
+                break
 
         print(
             f"[FETCH] Source rows: {len(source_rows)}"

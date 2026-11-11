@@ -105,7 +105,7 @@ def init_app():
     )
 
     # Import models so SQLAlchemy registers them
-    import model  # noqa: F401
+    from virtuals import model  # noqa: F401
 
     with app.app_context():
 

@@ -34,11 +34,11 @@ UTC = timezone.utc
 FINAL_MODEL_NAME = "final"
 
 # PostgreSQL pool settings
-POOL_MIN_SIZE = 2
+POOL_MIN_SIZE = 1
 POOL_MAX_SIZE = max(2, MAX_CONCURRENT)
 
 # PostgreSQL command timeout
-DB_COMMAND_TIMEOUT = 120
+DB_COMMAND_TIMEOUT = 300
 
 
 # ============================================================
@@ -70,36 +70,72 @@ async def ainput(prompt: str = "") -> str:
 async def get_pool() -> asyncpg.Pool:
     global _pool
 
-    if _pool is None:
+    if _pool is not None:
+        return _pool
 
-        print(
-            f"{Fore.CYAN}"
-            f"🔌 Creating PostgreSQL connection pool..."
-            f"{Style.RESET_ALL}"
+    print(
+        f"{Fore.CYAN}"
+        f"🔌 Creating PostgreSQL connection pool..."
+        f"{Style.RESET_ALL}"
+    )
+
+    async def _init_connection(conn):
+        await conn.execute(
+            "SELECT set_config('search_path', $1, false)",
+            "henry_schema,public",
         )
 
-        _pool = await asyncpg.create_pool(
-            DATABASE_URL,
+    last_error = None
 
-            min_size=POOL_MIN_SIZE,
+    for attempt in range(1, 4):
+        try:
+            print(
+                f"   [DATABASE] Pool connection attempt "
+                f"{attempt}/3..."
+            )
 
-            max_size=POOL_MAX_SIZE,
+            _pool = await asyncpg.create_pool(
+                DATABASE_URL,
+                min_size=POOL_MIN_SIZE,
+                max_size=POOL_MAX_SIZE,
+                command_timeout=DB_COMMAND_TIMEOUT,
+                timeout=30,
+                setup=_init_connection,
+            )
 
-            command_timeout=DB_COMMAND_TIMEOUT,
+            print(
+                f"{Fore.GREEN}"
+                f"✅ PostgreSQL pool ready "
+                f"(min={POOL_MIN_SIZE}, max={POOL_MAX_SIZE})"
+                f"{Style.RESET_ALL}"
+            )
 
-            server_settings={
-                "search_path": "henry_schema,public"
-            },
-        )
+            return _pool
 
-        print(
-            f"{Fore.GREEN}"
-            f"✅ PostgreSQL pool ready "
-            f"(min={POOL_MIN_SIZE}, max={POOL_MAX_SIZE})"
-            f"{Style.RESET_ALL}"
-        )
+        except (
+            asyncpg.exceptions.ConnectionDoesNotExistError,
+            asyncpg.exceptions.ConnectionFailureError,
+            ConnectionResetError,
+            OSError,
+        ) as exc:
+            last_error = exc
+            _pool = None
 
-    return _pool
+            print(
+                f"{Fore.YELLOW}"
+                f"   ⚠️ Neon connection failed: {exc}"
+                f"{Style.RESET_ALL}"
+            )
+
+            if attempt < 3:
+                print(
+                    f"{Fore.YELLOW}"
+                    f"   ↻ Retrying in 3 seconds..."
+                    f"{Style.RESET_ALL}"
+                )
+                await asyncio.sleep(3)
+
+    raise last_error
 
 
 async def close_pool() -> None:
@@ -677,6 +713,13 @@ async def save_prediction(
         ensure_ascii=False
     )
 
+    # Final predictions: one row per match.
+    # Model predictions: one row per match and model version.
+    if table == "predictions":
+        conflict_target = "(match_id)"
+    else:
+        conflict_target = "(match_id, model_version)"
+
     sql = f"""
     INSERT INTO {table}
     (
@@ -696,12 +739,12 @@ async def save_prediction(
     )
 
     ON CONFLICT
-    (
-        match_id,
-        model_version
-    )
+    {conflict_target}
 
     DO UPDATE SET
+
+        model_version =
+            EXCLUDED.model_version,
 
         prediction_json =
             EXCLUDED.prediction_json,
@@ -857,24 +900,79 @@ async def show_models_accuracy_per_league():
 
 async def get_matches():
 
-    rows = await qdb(
-        """
-        SELECT *
-        FROM matches
+    all_matches = []
+    batch_size = 500
+    last_id = None
 
-        WHERE
-            home_team_id IS NOT NULL
+    while True:
 
-            AND
+        if last_id is None:
 
-            away_team_id IS NOT NULL
-        """
-    )
+            rows = await qdb(
+                """
+                SELECT
+                    id,
+                    home_team_id,
+                    away_team_id,
+                    competition,
+                    utcdate,
+                    status,
+                    home_score,
+                    away_score
+                FROM matches
+                WHERE
+                    home_team_id IS NOT NULL
+                    AND away_team_id IS NOT NULL
+                ORDER BY id DESC
+                LIMIT $1
+                """,
+                batch_size,
+            )
 
-    return [
-        dict(r)
-        for r in rows
-    ]
+        else:
+
+            rows = await qdb(
+                """
+                SELECT
+                    id,
+                    home_team_id,
+                    away_team_id,
+                    competition,
+                    utcdate,
+                    status,
+                    home_score,
+                    away_score
+                FROM matches
+                WHERE
+                    home_team_id IS NOT NULL
+                    AND away_team_id IS NOT NULL
+                    AND id < $1
+                ORDER BY id DESC
+                LIMIT $2
+                """,
+                last_id,
+                batch_size,
+            )
+
+        if not rows:
+            break
+
+        all_matches.extend(
+            dict(r)
+            for r in rows
+        )
+
+        last_id = rows[-1]["id"]
+
+        print(
+            f"   [FETCH] Matches loaded: "
+            f"{len(all_matches)}"
+        )
+
+        if len(rows) < batch_size:
+            break
+
+    return all_matches
 
 
 # ============================================================

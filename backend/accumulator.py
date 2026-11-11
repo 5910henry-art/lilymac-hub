@@ -127,6 +127,7 @@ def build_rows(row, generated_at):
     """
 
     results = []
+    invalid_3way = False
 
     match_id = row["match_id"]
 
@@ -182,9 +183,9 @@ def build_rows(row, generated_at):
         json.JSONDecodeError,
     ):
 
-        # Invalid prediction data.
-        # Skip only this match.
-        return results
+        # Invalid 3-way prediction.
+        # Continue processing BTTS and Over markets.
+        invalid_3way = True
 
     # ----------------------------------------------
     # BTTS
@@ -253,7 +254,7 @@ def build_rows(row, generated_at):
                 )
             )
 
-    return results
+    return results, invalid_3way
 
 
 # --------------------------------------------------
@@ -414,7 +415,7 @@ async def populate_accumulator():
 
             before = len(accumulator_rows)
 
-            generated_rows = build_rows(
+            generated_rows, invalid_3way = build_rows(
                 row,
                 generated_at,
             )
@@ -422,6 +423,9 @@ async def populate_accumulator():
             accumulator_rows.extend(
                 generated_rows
             )
+
+            if invalid_3way:
+                invalid_predictions += 1
 
             # A row with prediction JSON problems
             # produces no 3-way result, but may still
@@ -468,39 +472,52 @@ async def populate_accumulator():
             if accumulator_rows:
 
                 insert_query = f"""
-                    INSERT INTO {DB_SCHEMA}.accumulator (
-                        match_id,
-                        home_team_id,
-                        away_team_id,
-                        market,
-                        selection,
-                        probability,
-                        prob_btts,
-                        prob_over_1_5,
-                        match_time,
-                        match_status,
-                        home_team_name,
-                        away_team_name,
-                        model_version,
-                        generated_at
-                    )
-                    VALUES (
-                        $1,
-                        $2,
-                        $3,
-                        $4,
-                        $5,
-                        $6,
-                        $7,
-                        $8,
-                        $9,
-                        $10,
-                        $11,
-                        $12,
-                        $13,
-                        $14
-                    )
-                """
+    INSERT INTO {DB_SCHEMA}.accumulator (
+        match_id,
+        home_team_id,
+        away_team_id,
+        market,
+        selection,
+        probability,
+        prob_btts,
+        prob_over_1_5,
+        match_time,
+        match_status,
+        home_team_name,
+        away_team_name,
+        model_version,
+        generated_at
+    )
+    VALUES (
+        $1,
+        $2,
+        $3,
+        $4,
+        $5,
+        $6,
+        $7,
+        $8,
+        $9,
+        $10,
+        $11,
+        $12,
+        $13,
+        $14
+    )
+    ON CONFLICT (match_id, market, selection)
+    DO UPDATE SET
+        home_team_id = EXCLUDED.home_team_id,
+        away_team_id = EXCLUDED.away_team_id,
+        probability = EXCLUDED.probability,
+        prob_btts = EXCLUDED.prob_btts,
+        prob_over_1_5 = EXCLUDED.prob_over_1_5,
+        match_time = EXCLUDED.match_time,
+        match_status = EXCLUDED.match_status,
+        home_team_name = EXCLUDED.home_team_name,
+        away_team_name = EXCLUDED.away_team_name,
+        model_version = EXCLUDED.model_version,
+        generated_at = EXCLUDED.generated_at
+"""
 
                 print(
                     "[DATABASE] Bulk inserting...",

@@ -458,6 +458,25 @@ def get_rank_from_snapshot(
     team_id,
     before_date=None
 ):
+
+    # --------------------------------------------------------
+    # Historical standings override
+    # --------------------------------------------------------
+
+    try:
+        historical_rank = historical_rank_before_match(
+            league,
+            season,
+            team_id,
+            locals().get("matchday"),
+        )
+
+        if historical_rank is not None:
+            return historical_rank
+
+    except Exception:
+        pass
+
     """
     Return the most recent historical/current standings rank
     available BEFORE the target match date.
@@ -3596,3 +3615,140 @@ if __name__ == "__main__":
         logger.exception(
             "Fatal GOALS_FAST_V2 error"
         )
+
+
+# ============================================================
+# HISTORICAL STANDINGS SUPPORT
+# Added automatically by build_historical_standings.py
+# ============================================================
+
+ACTIVE_HISTORICAL_STANDINGS_INDEX = {}
+
+
+def _normalize_historical_league(league):
+    """Normalize competition names/codes for historical lookup."""
+
+    if league is None:
+        return ""
+
+    value = str(league).strip()
+
+    aliases = {
+        "Premier League": "PL",
+        "Primera Division": "PD",
+        "Bundesliga": "BL1",
+        "Ligue 1": "FL1",
+        "Serie A": "SA",
+        "UEFA Champions League": "CL",
+    }
+
+    return aliases.get(
+        value,
+        value.upper().replace(" ", "_")
+    )
+
+
+def build_historical_standings_index(rows):
+    """
+    Build a fast lookup:
+
+        (league_code, season, team_id, matchday)
+            -> standings row
+    """
+
+    index = {}
+
+    for row in rows:
+
+        try:
+            league_code = str(
+                row["league_code"]
+            ).strip()
+
+            season = int(row["season"])
+            team_id = int(row["team_id"])
+            matchday = int(row["matchday"])
+
+        except Exception:
+            continue
+
+        index[
+            (
+                league_code,
+                season,
+                team_id,
+                matchday,
+            )
+        ] = row
+
+    return index
+
+
+def historical_rank_before_match(
+    league,
+    season,
+    team_id,
+    matchday=None,
+):
+    """
+    Return the team's historical rank BEFORE the requested
+    matchday.
+
+    This deliberately uses the previous completed matchday
+    to avoid giving the model information from the match it
+    is trying to predict.
+
+    Example:
+
+        Fixture = Matchday 10
+
+        Use standings after Matchday 9.
+    """
+
+    index = ACTIVE_HISTORICAL_STANDINGS_INDEX
+
+    if not index:
+        return None
+
+    try:
+        league_code = _normalize_historical_league(
+            league
+        )
+
+        season = int(season)
+        team_id = int(team_id)
+
+    except Exception:
+        return None
+
+    if matchday is None:
+        return None
+
+    try:
+        matchday = int(matchday)
+    except Exception:
+        return None
+
+    # Previous completed matchday.
+    previous_matchday = matchday - 1
+
+    if previous_matchday < 1:
+        return None
+
+    key = (
+        league_code,
+        season,
+        team_id,
+        previous_matchday,
+    )
+
+    row = index.get(key)
+
+    if row is None:
+        return None
+
+    try:
+        return int(row["rank"])
+    except Exception:
+        return None
+

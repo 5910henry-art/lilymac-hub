@@ -119,17 +119,47 @@ def normalize_status(match):
 # ============================================================
 # DATABASE
 # ============================================================
-
 async def get_connection():
-    return await asyncpg.connect(
-        DB_CONNECT_URL,
-        server_settings={
-            "search_path": f"{DB_SCHEMA},public"
-        },
-        command_timeout=60,
-    )
+    last_error = None
 
+    for attempt in range(1, 4):
+        try:
+            print(
+                f"[DATABASE] Connecting to Neon "
+                f"(attempt {attempt}/3)..."
+            )
 
+            conn = await asyncpg.connect(
+                DB_CONNECT_URL,
+                command_timeout=60,
+                timeout=30,
+            )
+
+            await conn.execute(
+                "SELECT set_config('search_path', $1, false)",
+                f"{DB_SCHEMA},public",
+            )
+
+            print("[DATABASE] Connected successfully.")
+
+            return conn
+
+        except (
+            asyncpg.exceptions.ConnectionDoesNotExistError,
+            ConnectionResetError,
+            OSError,
+        ) as exc:
+
+            last_error = exc
+
+            print(
+                f"      ⚠️ Database connection failed: {exc}"
+            )
+
+            if attempt < 3:
+                await asyncio.sleep(2)
+
+    raise last_error
 # ============================================================
 # DATETIME
 # ============================================================
@@ -265,30 +295,62 @@ async def fetch_competition_matches(
 
 async def load_existing_matches(conn):
     """
-    Load only current-season matches.
+    Load only current-season matches in small batches.
 
     Key:
         match ID
     """
 
-    rows = await conn.fetch(
-        """
-        SELECT
-            id,
-            competition,
-            status,
-            utcdate,
-            home_score,
-            away_score
-        FROM matches
-        WHERE season = $1
-        """,
-        SEASON,
-    )
+    all_rows = []
+    batch_size = 250
+    last_id = 0
+
+    while True:
+
+        rows = await conn.fetch(
+            """
+            SELECT
+                id,
+                competition,
+                status,
+                utcdate,
+                home_score,
+                away_score
+            FROM matches
+            WHERE season = $1
+              AND (
+                  status IN ('IN_PLAY', 'PAUSED')
+                  OR (
+                      status IN ('SCHEDULED', 'TIMED')
+                      AND utcdate <= NOW() + INTERVAL '1 day'
+                  )
+              )
+              AND id > $2
+            ORDER BY id
+            LIMIT $3
+            """,
+            SEASON,
+            last_id,
+            batch_size,
+        )
+
+        if not rows:
+            break
+
+        all_rows.extend(rows)
+
+        last_id = rows[-1]["id"]
+
+        print(
+            f"      Loaded {len(all_rows)} current-season matches..."
+        )
+
+        if len(rows) < batch_size:
+            break
 
     return {
         row["id"]: row
-        for row in rows
+        for row in all_rows
     }
 
 

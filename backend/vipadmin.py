@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from werkzeug.security import check_password_hash
+from werkzeug.security import check_password_hash, generate_password_hash
 
 from config2 import (
     DATABASE_URL,
@@ -43,6 +43,11 @@ logger = logging.getLogger("vipadmin")
 
 JWT_SECRET = os.getenv("VIP_JWT_SECRET", "change-this-secret")
 JWT_EXPIRY_HOURS = int(os.getenv("VIP_JWT_EXPIRY_HOURS", "24"))
+
+VAPID_PUBLIC_KEY = os.getenv("VAPID_PUBLIC_KEY", "").strip()
+VAPID_PRIVATE_KEY = os.getenv("VAPID_PRIVATE_KEY", "").strip()
+VAPID_SUBJECT = os.getenv("VAPID_SUBJECT", "").strip()
+
 
 # ============================================================
 # VIP PLANS
@@ -243,6 +248,172 @@ def vip_required(fn):
     return wrapper
 
 
+# ============================================================
+# VIP WEB PUSH
+# ============================================================
+
+@app.get("/vip/push/public-key")
+async def vip_push_public_key():
+    if not VAPID_PUBLIC_KEY:
+        return jsonify({
+            "error": "Push notifications are not configured"
+        }), 503
+
+    return jsonify({
+        "success": True,
+        "publicKey": VAPID_PUBLIC_KEY,
+    })
+
+
+@app.post("/vip/push/subscribe")
+@vip_required
+async def vip_push_subscribe():
+    vip = request.vip_user
+    data = request.get_json(silent=True) or {}
+    subscription = data.get("subscription") or data
+
+    endpoint = str(subscription.get("endpoint") or "").strip()
+    keys = subscription.get("keys") or {}
+    p256dh = str(keys.get("p256dh") or "").strip()
+    auth = str(keys.get("auth") or "").strip()
+
+    if (
+        not endpoint.startswith("https://")
+        or not p256dh
+        or not auth
+    ):
+        return jsonify({
+            "error": "Invalid push subscription"
+        }), 400
+
+    await db_execute(
+        """
+        INSERT INTO vip_push_subscriptions (
+            endpoint, number, p256dh, auth, updated_at
+        )
+        VALUES (
+            :endpoint, :number, :p256dh, :auth, CURRENT_TIMESTAMP
+        )
+        ON CONFLICT (endpoint)
+        DO UPDATE SET
+            number = EXCLUDED.number,
+            p256dh = EXCLUDED.p256dh,
+            auth = EXCLUDED.auth,
+            updated_at = CURRENT_TIMESTAMP
+        """,
+        {
+            "endpoint": endpoint,
+            "number": vip["number"],
+            "p256dh": p256dh,
+            "auth": auth,
+        },
+    )
+
+    return jsonify({"success": True})
+
+
+@app.post("/vip/push/unsubscribe")
+@vip_required
+async def vip_push_unsubscribe():
+    vip = request.vip_user
+    data = request.get_json(silent=True) or {}
+    endpoint = str(data.get("endpoint") or "").strip()
+
+    if not endpoint.startswith("https://"):
+        return jsonify({"error": "Invalid endpoint"}), 400
+
+    await db_execute(
+        """
+        DELETE FROM vip_push_subscriptions
+        WHERE endpoint = :endpoint
+          AND number = :number
+        """,
+        {
+            "endpoint": endpoint,
+            "number": vip["number"],
+        },
+    )
+
+    return jsonify({"success": True})
+
+
+async def send_vip_push(number, title, message, link="/vip"):
+    if not all((
+        VAPID_PUBLIC_KEY,
+        VAPID_PRIVATE_KEY,
+        VAPID_SUBJECT,
+    )):
+        logger.warning("VIP push skipped: VAPID environment variables missing")
+        return 0
+
+    try:
+        import json
+        from pywebpush import webpush, WebPushException
+    except ImportError:
+        logger.exception("pywebpush is not installed")
+        return 0
+
+    subscriptions = await db_fetch_all(
+        """
+        SELECT endpoint, p256dh, auth
+        FROM vip_push_subscriptions
+        WHERE number = :number
+        """,
+        {"number": number},
+    )
+
+    sent = 0
+
+    for item in subscriptions:
+        subscription_info = {
+            "endpoint": item["endpoint"],
+            "keys": {
+                "p256dh": item["p256dh"],
+                "auth": item["auth"],
+            },
+        }
+
+        try:
+            await asyncio.to_thread(
+                webpush,
+                subscription_info=subscription_info,
+                data=json.dumps({
+                    "title": title,
+                    "body": message,
+                    "url": link or "/vip",
+                }),
+                vapid_private_key=VAPID_PRIVATE_KEY,
+                vapid_claims={"sub": VAPID_SUBJECT},
+            )
+            sent += 1
+
+        except WebPushException as exc:
+            status = getattr(
+                getattr(exc, "response", None),
+                "status_code",
+                None,
+            )
+
+            if status in (404, 410):
+                await db_execute(
+                    """
+                    DELETE FROM vip_push_subscriptions
+                    WHERE endpoint = :endpoint
+                    """,
+                    {"endpoint": item["endpoint"]},
+                )
+            else:
+                logger.warning(
+                    "VIP push delivery failed with status %s",
+                    status,
+                )
+
+        except Exception:
+            logger.exception("VIP push delivery failed")
+
+    return sent
+
+
 def admin_required(fn):
     @functools.wraps(fn)
     async def wrapper(*args, **kwargs):
@@ -379,8 +550,16 @@ async def init_db_async():
             number TEXT UNIQUE NOT NULL,
             subscription TEXT NOT NULL,
             subscription_expiry TEXT,
-            approved BOOLEAN NOT NULL DEFAULT FALSE
+            approved BOOLEAN NOT NULL DEFAULT FALSE,
+            password_hash TEXT
         )
+        """
+    )
+
+    await db_execute(
+        """
+        ALTER TABLE vip_users
+        ADD COLUMN IF NOT EXISTS password_hash TEXT
         """
     )
 
@@ -397,6 +576,59 @@ async def init_db_async():
             odds DOUBLE PRECISION,
             created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
+        """
+    )
+
+    await db_execute(
+        """
+        CREATE TABLE IF NOT EXISTS vip_notifications (
+            id BIGSERIAL PRIMARY KEY,
+            number TEXT NOT NULL,
+            event_key TEXT NOT NULL,
+            notification_type TEXT NOT NULL,
+            title TEXT NOT NULL,
+            message TEXT NOT NULL,
+            link TEXT NOT NULL DEFAULT '/vip',
+            is_read BOOLEAN NOT NULL DEFAULT FALSE,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(number, event_key)
+        )
+        """
+    )
+
+    await db_execute(
+        """
+        CREATE TABLE IF NOT EXISTS vip_notification_state (
+            number TEXT PRIMARY KEY,
+            last_quota_date DATE NOT NULL
+        )
+        """
+    )
+
+    await db_execute(
+        """
+        CREATE TABLE IF NOT EXISTS vip_push_subscriptions (
+            endpoint TEXT PRIMARY KEY,
+            number TEXT NOT NULL,
+            p256dh TEXT NOT NULL,
+            auth TEXT NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+
+    await db_execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_vip_push_subscriptions_number
+        ON vip_push_subscriptions(number)
+        """
+    )
+
+    await db_execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_vip_notifications_number_created
+        ON vip_notifications(number, created_at DESC)
         """
     )
 
@@ -481,6 +713,7 @@ async def vip_register():
 
     name = str(data.get("name", "")).strip()
     number = str(data.get("number", "")).strip()
+    password = str(data.get("password", ""))
     subscription = str(
         data.get("subscription", "")
     ).strip().lower()
@@ -495,11 +728,18 @@ async def vip_register():
             "error": "number is required"
         }), 400
 
+    if len(password) < 8:
+        return jsonify({
+            "error": "password must be at least 8 characters"
+        }), 400
+
     if subscription not in PLAN_ORDER:
         return jsonify({
             "error": "invalid subscription plan",
             "plans": PLAN_ORDER,
         }), 400
+
+    password_hash = generate_password_hash(password)
 
     try:
         existing = await db_fetch_one(
@@ -533,14 +773,16 @@ async def vip_register():
                 number,
                 subscription,
                 subscription_expiry,
-                approved
+                approved,
+                password_hash
             )
             VALUES (
                 :name,
                 :number,
                 :subscription,
                 :expiry,
-                FALSE
+                FALSE,
+                :password_hash
             )
             RETURNING
                 id,
@@ -555,6 +797,7 @@ async def vip_register():
                 "number": number,
                 "subscription": subscription,
                 "expiry": expiry,
+                "password_hash": password_hash,
             },
         )
 
@@ -584,10 +827,16 @@ async def vip_login():
     data = request.get_json(silent=True) or {}
 
     number = str(data.get("number", "")).strip()
+    password = str(data.get("password", ""))
 
     if not number:
         return jsonify({
             "error": "number is required"
+        }), 400
+
+    if not password:
+        return jsonify({
+            "error": "password is required"
         }), 400
 
     try:
@@ -599,7 +848,8 @@ async def vip_login():
                 number,
                 subscription,
                 subscription_expiry,
-                approved
+                approved,
+                password_hash
             FROM vip_users
             WHERE number = :number
             """,
@@ -610,6 +860,17 @@ async def vip_login():
             return jsonify({
                 "error": "VIP account not found"
             }), 404
+
+        stored_hash = user["password_hash"]
+        if not stored_hash:
+            return jsonify({
+                "error": "Your account needs an initial password. Contact the administrator."
+            }), 403
+
+        if not check_password_hash(stored_hash, password):
+            return jsonify({
+                "error": "invalid phone number or password"
+            }), 401
 
         if not user["approved"]:
             return jsonify({
@@ -623,10 +884,19 @@ async def vip_login():
             }
         )
 
+        safe_user = {
+            "id": user["id"],
+            "name": user["name"],
+            "number": user["number"],
+            "subscription": user["subscription"],
+            "subscription_expiry": user["subscription_expiry"],
+            "approved": user["approved"],
+        }
+
         return jsonify({
             "message": "login successful",
             "token": token,
-            "user": user,
+            "user": safe_user,
         })
 
     except Exception as exc:
@@ -720,6 +990,158 @@ async def vip_quota():
         "used": used,
         "remaining": max(quota - used, 0),
     })
+
+
+# ============================================================
+# VIP NOTIFICATIONS
+# ============================================================
+
+@app.get("/vip/notifications")
+@vip_required
+async def vip_notifications():
+    vip = request.vip_user
+    number = vip["number"]
+
+    today_row = await db_fetch_one(
+        "SELECT CURRENT_DATE AS today"
+    )
+    today = today_row["today"]
+
+    state = await db_fetch_one(
+        """
+        SELECT last_quota_date
+        FROM vip_notification_state
+        WHERE number = :number
+        """,
+        {"number": number},
+    )
+
+    # First visit establishes a baseline without a false renewal alert.
+    if not state:
+        await db_execute(
+            """
+            INSERT INTO vip_notification_state (
+                number,
+                last_quota_date
+            )
+            VALUES (:number, :today)
+            ON CONFLICT (number) DO NOTHING
+            """,
+            {
+                "number": number,
+                "today": today,
+            },
+        )
+
+    elif state["last_quota_date"] < today:
+        renewal_notification = await db_fetch_one(
+            """
+            INSERT INTO vip_notifications (
+                number, event_key, notification_type, title, message, link
+            )
+            VALUES (
+                :number, :event_key, 'quota_renewal',
+                'Your VIP quota has renewed',
+                'Your daily VIP pick quota is available again. Open your VIP picks to see your available picks.',
+                '/vip'
+            )
+            ON CONFLICT (number, event_key) DO NOTHING
+            RETURNING id
+            """,
+            {
+                "number": number,
+                "event_key": "quota-renewal-" + today.isoformat(),
+            },
+        )
+
+        if renewal_notification:
+            await send_vip_push(
+                number,
+                "Your VIP quota has renewed",
+                "Your daily VIP pick quota is available again. Open your VIP picks to see your available picks.",
+                "/vip",
+            )
+
+        await db_execute(
+            """
+            UPDATE vip_notification_state
+            SET last_quota_date = :today
+            WHERE number = :number
+              AND last_quota_date < :today
+            """,
+            {
+                "number": number,
+                "today": today,
+            },
+        )
+
+    rows = await db_fetch_all(
+        """
+        SELECT
+            id,
+            notification_type,
+            title,
+            message,
+            link,
+            is_read,
+            created_at
+        FROM vip_notifications
+        WHERE number = :number
+        ORDER BY created_at DESC
+        LIMIT 50
+        """,
+        {"number": number},
+    )
+
+    unread = sum(1 for row in rows if not row["is_read"])
+
+    return jsonify({
+        "notifications": rows,
+        "unread_count": unread,
+    })
+
+
+@app.post("/vip/notifications/<int:notification_id>/read")
+@vip_required
+async def vip_notification_mark_read(notification_id):
+    vip = request.vip_user
+
+    row = await db_fetch_one(
+        """
+        UPDATE vip_notifications
+        SET is_read = TRUE
+        WHERE id = :id
+          AND number = :number
+        RETURNING id
+        """,
+        {
+            "id": notification_id,
+            "number": vip["number"],
+        },
+    )
+
+    if not row:
+        return jsonify({"error": "Notification not found"}), 404
+
+    return jsonify({"success": True, "id": notification_id})
+
+
+@app.post("/vip/notifications/read-all")
+@vip_required
+async def vip_notifications_mark_all_read():
+    vip = request.vip_user
+
+    await db_execute(
+        """
+        UPDATE vip_notifications
+        SET is_read = TRUE
+        WHERE number = :number
+          AND is_read = FALSE
+        """,
+        {"number": vip["number"]},
+    )
+
+    return jsonify({"success": True})
 
 
 # ============================================================
@@ -963,7 +1385,8 @@ async def admin_vips():
             number,
             subscription,
             subscription_expiry,
-            approved
+            approved,
+            (password_hash IS NOT NULL) AS has_password
         FROM vip_users
         ORDER BY id DESC
         """
@@ -1043,6 +1466,48 @@ async def admin_approve_vip(vip_id):
 
     return jsonify({
         "message": "VIP approved successfully"
+    })
+
+
+# ============================================================
+# ADMIN SET OR RESET VIP PASSWORD
+# ============================================================
+
+@app.post("/admin/vips/<int:vip_id>/password")
+@admin_required
+async def admin_set_vip_password(vip_id):
+    data = request.get_json(silent=True) or {}
+    password = str(data.get("password", ""))
+
+    if len(password) < 8:
+        return jsonify({
+            "error": "password must be at least 8 characters"
+        }), 400
+
+    vip = await db_fetch_one(
+        "SELECT id FROM vip_users WHERE id = :id",
+        {"id": vip_id},
+    )
+
+    if not vip:
+        return jsonify({
+            "error": "VIP user not found"
+        }), 404
+
+    await db_execute(
+        """
+        UPDATE vip_users
+        SET password_hash = :password_hash
+        WHERE id = :id
+        """,
+        {
+            "id": vip_id,
+            "password_hash": generate_password_hash(password),
+        },
+    )
+
+    return jsonify({
+        "message": "VIP password assigned successfully"
     })
 
 
@@ -1518,6 +1983,47 @@ async def admin_distribute_vip_picks():
         )
 
         created.append(row)
+
+    if created:
+        remaining_after = max(
+            quota - used - len(created),
+            0,
+        )
+        first_id = created[0]["id"]
+        last_id = created[-1]["id"]
+
+        picks_message = (
+            f"{len(created)} new VIP pick(s) have been added "
+            f"to your account. You have {remaining_after} "
+            f"pick(s) remaining in today's quota."
+        )
+
+        picks_notification = await db_fetch_one(
+            """
+            INSERT INTO vip_notifications (
+                number, event_key, notification_type, title, message, link
+            )
+            VALUES (
+                :number, :event_key, 'new_picks',
+                'New VIP picks are available', :message, '/vip'
+            )
+            ON CONFLICT (number, event_key) DO NOTHING
+            RETURNING id
+            """,
+            {
+                "number": number,
+                "event_key": f"new-picks-{first_id}-{last_id}",
+                "message": picks_message,
+            },
+        )
+
+        if picks_notification:
+            await send_vip_push(
+                number,
+                "New VIP picks are available",
+                picks_message,
+                "/vip",
+            )
 
     return jsonify({
         "message": "VIP picks distributed successfully",

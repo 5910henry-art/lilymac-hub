@@ -1590,12 +1590,12 @@ async def verify_database():
 
     if (
         row["database"]
-        != "lilymac_db"
+        != "neondb"
     ):
 
         raise RuntimeError(
             "SAFETY STOP: importer is not "
-            "connected to lilymac_db."
+            "connected to the expected Neon database."
         )
 
     if (
