@@ -144,7 +144,95 @@ async def db_execute(sql, params=None):
 
 
 
-async def db_approve_vip_request(request_id, expiry):
+async def _activate_next_vip_entitlement(conn, vip_id):
+    """Activate the oldest queued entitlement if none is currently active."""
+
+    active = await conn.fetchrow(
+        """
+        SELECT id
+        FROM vip_subscription_entitlements
+        WHERE vip_id = $1
+          AND status = 'active'
+        FOR UPDATE
+        """,
+        vip_id,
+    )
+
+    if active:
+        return None
+
+    queued = await conn.fetchrow(
+        """
+        SELECT id, plan, duration_days
+        FROM vip_subscription_entitlements
+        WHERE vip_id = $1
+          AND status = 'queued'
+        ORDER BY queued_at ASC, id ASC
+        LIMIT 1
+        FOR UPDATE
+        """,
+        vip_id,
+    )
+
+    if not queued:
+        return None
+
+    activated_at = datetime.now(UTC)
+    expires_at = activated_at + timedelta(
+        days=int(queued["duration_days"])
+    )
+
+    entitlement_update = await conn.execute(
+        """
+        UPDATE vip_subscription_entitlements
+        SET
+            status = 'active',
+            activated_at = $2,
+            expires_at = $3
+        WHERE id = $1
+          AND status = 'queued'
+        """,
+        queued["id"],
+        activated_at,
+        expires_at,
+    )
+
+    if entitlement_update != "UPDATE 1":
+        raise RuntimeError(
+            "Entitlement activation failed for entitlement "
+            f"{queued['id']}: {entitlement_update}"
+        )
+
+    vip_update = await conn.execute(
+        """
+        UPDATE vip_users
+        SET
+            subscription = $2,
+            subscription_expiry = $3
+        WHERE id = $1
+        """,
+        vip_id,
+        queued["plan"],
+        expires_at.isoformat(),
+    )
+
+    if vip_update != "UPDATE 1":
+        raise RuntimeError(
+            f"VIP subscription update failed for VIP {vip_id}: "
+            f"{vip_update}"
+        )
+
+    return {
+        "id": queued["id"],
+        "plan": queued["plan"],
+        "activated_at": activated_at,
+        "expires_at": expires_at,
+    }
+
+
+async def db_approve_initial_vip(vip_id):
+    """Approve a new VIP and create their first paid entitlement atomically."""
+
     conn = await asyncpg.connect(
         dsn=DATABASE_URL,
         command_timeout=60,
@@ -156,64 +244,225 @@ async def db_approve_vip_request(request_id, expiry):
         )
 
         async with conn.transaction():
-            sql, params = _convert_named_to_positional(
+            vip = await conn.fetchrow(
                 """
-                SELECT id, vip_id, to_plan
-                FROM vip_upgrade_requests
-                WHERE id = :id
-                  AND status = 'pending'
+                SELECT id, subscription, approved
+                FROM vip_users
+                WHERE id = $1
                 FOR UPDATE
                 """,
-                {"id": request_id},
+                vip_id,
             )
 
-            req = await conn.fetchrow(sql, *params)
-
-            if not req:
+            if not vip:
                 return None
 
-            sql, params = _convert_named_to_positional(
+            # Repeated approval must never grant another entitlement.
+            if vip["approved"]:
+                return {
+                    "vip_id": vip_id,
+                    "already_approved": True,
+                }
+
+            existing_entitlement = await conn.fetchval(
                 """
-                UPDATE vip_users
-                SET
-                    subscription = :subscription,
-                    subscription_expiry = :expiry
-                WHERE id = :vip_id
+                SELECT id
+                FROM vip_subscription_entitlements
+                WHERE vip_id = $1
+                LIMIT 1
                 """,
-                {
-                    "subscription": req["to_plan"],
-                    "expiry": expiry,
-                    "vip_id": req["vip_id"],
-                },
+                vip_id,
             )
 
-            result = await conn.execute(sql, *params)
+            if existing_entitlement:
+                return {
+                    "vip_id": vip_id,
+                    "approval_conflict": (
+                        "this VIP already has a subscription entitlement"
+                    ),
+                }
 
-            if result != "UPDATE 1":
-                raise RuntimeError(
-                    f"VIP account update failed: {result}"
+            plan = str(vip["subscription"]).strip().lower()
+
+            if plan not in PLAN_DAYS:
+                raise ValueError(
+                    f"Invalid subscription plan for VIP {vip_id}: {plan}"
                 )
 
-            sql, params = _convert_named_to_positional(
+            approval_update = await conn.execute(
+                """
+                UPDATE vip_users
+                SET approved = TRUE
+                WHERE id = $1
+                """,
+                vip_id,
+            )
+
+            if approval_update != "UPDATE 1":
+                raise RuntimeError(
+                    f"Initial VIP approval failed for VIP {vip_id}: "
+                    f"{approval_update}"
+                )
+
+            await conn.execute(
+                """
+                INSERT INTO vip_subscription_entitlements (
+                    vip_id,
+                    plan,
+                    duration_days,
+                    daily_quota,
+                    total_picks,
+                    delivered_picks,
+                    status
+                )
+                VALUES ($1, $2, $3, $4, $5, 0, 'queued')
+                """,
+                vip_id,
+                plan,
+                PLAN_DAYS[plan],
+                SUBSCRIPTION_QUOTA[plan],
+                PLAN_DAYS[plan] * SUBSCRIPTION_QUOTA[plan],
+            )
+
+            activated = await _activate_next_vip_entitlement(
+                conn,
+                vip_id,
+            )
+
+            return {
+                "vip_id": vip_id,
+                "already_approved": False,
+                "activated": activated,
+            }
+    finally:
+        await conn.close()
+
+
+async def db_approve_vip_request(request_id):
+    """Approve a paid upgrade/renewal and queue its entitlement atomically."""
+
+    conn = await asyncpg.connect(
+        dsn=DATABASE_URL,
+        command_timeout=60,
+    )
+
+    try:
+        await conn.execute(
+            f'SET search_path TO "{DB_SCHEMA}", public'
+        )
+
+        async with conn.transaction():
+            req = await conn.fetchrow(
+                """
+                SELECT id, vip_id, to_plan, status
+                FROM vip_upgrade_requests
+                WHERE id = $1
+                FOR UPDATE
+                """,
+                request_id,
+            )
+
+            if not req or req["status"] != "pending":
+                return None
+
+            vip = await conn.fetchrow(
+                """
+                SELECT id, approved
+                FROM vip_users
+                WHERE id = $1
+                FOR UPDATE
+                """,
+                req["vip_id"],
+            )
+
+            if not vip or not vip["approved"]:
+                raise RuntimeError(
+                    "Cannot approve a subscription request for an unapproved VIP."
+                )
+
+            # Enforce one queued entitlement even if an admin approval
+            # bypasses the customer-facing upgrade/renewal routes.
+            queued_entitlement = await conn.fetchval(
+                """
+                SELECT id
+                FROM vip_subscription_entitlements
+                WHERE vip_id = $1 AND status = 'queued'
+                LIMIT 1
+                """,
+                req["vip_id"],
+            )
+
+            if queued_entitlement:
+                return {
+                    **dict(req),
+                    "approval_conflict": (
+                        "this VIP already has a paid subscription "
+                        "queued to activate"
+                    ),
+                }
+
+            plan = str(req["to_plan"]).strip().lower()
+
+            if plan not in PLAN_DAYS:
+                raise ValueError(
+                    f"Invalid subscription plan on request {request_id}: {plan}"
+                )
+
+            entitlement_id = await conn.fetchval(
+                """
+                INSERT INTO vip_subscription_entitlements (
+                    vip_id,
+                    request_id,
+                    plan,
+                    duration_days,
+                    daily_quota,
+                    total_picks,
+                    delivered_picks,
+                    status
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, 0, 'queued')
+                RETURNING id
+                """,
+                req["vip_id"],
+                request_id,
+                plan,
+                PLAN_DAYS[plan],
+                SUBSCRIPTION_QUOTA[plan],
+                PLAN_DAYS[plan] * SUBSCRIPTION_QUOTA[plan],
+            )
+
+            if entitlement_id is None:
+                raise RuntimeError(
+                    f"Entitlement creation failed for request {request_id}"
+                )
+
+            result = await conn.execute(
                 """
                 UPDATE vip_upgrade_requests
                 SET
                     status = 'approved',
                     approved_at = CURRENT_TIMESTAMP
-                WHERE id = :id
+                WHERE id = $1
                   AND status = 'pending'
                 """,
-                {"id": request_id},
+                request_id,
             )
-
-            result = await conn.execute(sql, *params)
 
             if result != "UPDATE 1":
                 raise RuntimeError(
                     f"Request approval failed: {result}"
                 )
 
-            return dict(req)
+            activated = await _activate_next_vip_entitlement(
+                conn,
+                req["vip_id"],
+            )
+
+            return {
+                **dict(req),
+                "entitlement_id": entitlement_id,
+                "activated": activated,
+            }
     finally:
         await conn.close()
 
@@ -580,16 +829,187 @@ async def admin_vip_expiry_monitor(interval_seconds=300):
             )
             logger.info("Finished-match VIP picks cleanup: %s", deleted)
 
+            # Keep paid entitlements active beyond their original expiry
+            # while picks are still owed. Completed entitlements activate
+            # the next queued paid entitlement immediately.
+            entitlement_vips = await db_fetch_all(
+                """
+                SELECT id
+                FROM vip_users
+                WHERE approved = TRUE
+                ORDER BY id
+                """
+            )
+
+            today = datetime.now(KENYA).date()
+
+            for entitlement_vip in entitlement_vips:
+                conn = await asyncpg.connect(
+                    dsn=DATABASE_URL,
+                    command_timeout=60,
+                )
+                try:
+                    await conn.execute(
+                        f'SET search_path TO "{DB_SCHEMA}", public'
+                    )
+
+                    async with conn.transaction():
+                        vip_row = await conn.fetchrow(
+                            """
+                            SELECT id, subscription_expiry
+                            FROM vip_users
+                            WHERE id = $1 AND approved = TRUE
+                            FOR UPDATE
+                            """,
+                            entitlement_vip["id"],
+                        )
+
+                        if not vip_row:
+                            continue
+
+                        active = await conn.fetchrow(
+                            """
+                            SELECT id, total_picks, delivered_picks, expires_at
+                            FROM vip_subscription_entitlements
+                            WHERE vip_id = $1 AND status = 'active'
+                            FOR UPDATE
+                            """,
+                            vip_row["id"],
+                        )
+
+                        if not active:
+                            await _activate_next_vip_entitlement(
+                                conn, vip_row["id"]
+                            )
+                            active = await conn.fetchrow(
+                                """
+                                SELECT id, total_picks, delivered_picks, expires_at
+                                FROM vip_subscription_entitlements
+                                WHERE vip_id = $1 AND status = 'active'
+                                FOR UPDATE
+                                """,
+                                vip_row["id"],
+                            )
+
+                        if not active:
+                            continue
+
+                        outstanding = max(
+                            int(active["total_picks"])
+                            - int(active["delivered_picks"]),
+                            0,
+                        )
+
+                        if outstanding <= 0:
+                            completion_update = await conn.execute(
+                                """
+                                UPDATE vip_subscription_entitlements
+                                SET status = 'completed',
+                                    completed_at = COALESCE(
+                                        completed_at, CURRENT_TIMESTAMP
+                                    )
+                                WHERE id = $1 AND status = 'active'
+                                """,
+                                active["id"],
+                            )
+
+                            if completion_update != "UPDATE 1":
+                                raise RuntimeError(
+                                    "Entitlement completion failed for "
+                                    f"{active['id']}: {completion_update}"
+                                )
+
+                            await _activate_next_vip_entitlement(
+                                conn, vip_row["id"]
+                            )
+                            continue
+
+                        expiry = active["expires_at"]
+                        if expiry is None:
+                            expiry_text = vip_row["subscription_expiry"]
+                            try:
+                                expiry = datetime.fromisoformat(
+                                    str(expiry_text).replace("Z", "+00:00")
+                                )
+                                if expiry.tzinfo is None:
+                                    expiry = expiry.replace(tzinfo=UTC)
+                            except (ValueError, TypeError):
+                                logger.error(
+                                    "Active VIP entitlement %s has no valid expiry",
+                                    active["id"],
+                                )
+                                continue
+
+                        expiry_date = expiry.astimezone(KENYA).date()
+
+                        if expiry_date < today:
+                            days_to_add = (today - expiry_date).days
+                            extended_expiry = expiry + timedelta(
+                                days=days_to_add
+                            )
+
+                            entitlement_expiry_update = await conn.execute(
+                                """
+                                UPDATE vip_subscription_entitlements
+                                SET expires_at = $2
+                                WHERE id = $1 AND status = 'active'
+                                """,
+                                active["id"],
+                                extended_expiry,
+                            )
+
+                            if entitlement_expiry_update != "UPDATE 1":
+                                raise RuntimeError(
+                                    "Entitlement expiry extension failed for "
+                                    f"{active['id']}: {entitlement_expiry_update}"
+                                )
+
+                            vip_expiry_update = await conn.execute(
+                                """
+                                UPDATE vip_users
+                                SET subscription_expiry = $2
+                                WHERE id = $1
+                                """,
+                                vip_row["id"],
+                                extended_expiry.isoformat(),
+                            )
+
+                            if vip_expiry_update != "UPDATE 1":
+                                raise RuntimeError(
+                                    "VIP expiry extension failed for "
+                                    f"{vip_row['id']}: {vip_expiry_update}"
+                                )
+
+                            logger.info(
+                                "Extended VIP %s entitlement %s by %s day(s); %s picks outstanding",
+                                vip_row["id"],
+                                active["id"],
+                                days_to_add,
+                                outstanding,
+                            )
+                finally:
+                    await conn.close()
+
             vips = await db_fetch_all(
                 """
                 SELECT id, name, number, subscription, subscription_expiry
                 FROM vip_users
                 WHERE approved = TRUE
                   AND subscription_expiry IS NOT NULL
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM vip_subscription_entitlements e
+                      WHERE e.vip_id = vip_users.id
+                        AND (
+                            e.status = 'queued'
+                            OR (
+                                e.status = 'active'
+                                AND e.delivered_picks < e.total_picks
+                            )
+                        )
+                  )
                 """
             )
-
-            today = datetime.now(KENYA).date()
 
             for vip in vips:
                 expiry_text = str(vip["subscription_expiry"])
@@ -1115,6 +1535,157 @@ async def init_db_async():
         """
     )
 
+    # ========================================================
+    # VIP SUBSCRIPTION ENTITLEMENTS
+    # ========================================================
+
+    await db_execute(
+        """
+        CREATE TABLE IF NOT EXISTS vip_subscription_entitlements (
+            id BIGSERIAL PRIMARY KEY,
+            vip_id BIGINT NOT NULL
+                REFERENCES vip_users(id) ON DELETE CASCADE,
+            request_id BIGINT UNIQUE
+                REFERENCES vip_upgrade_requests(id) ON DELETE SET NULL,
+            migration_key TEXT UNIQUE,
+            plan TEXT NOT NULL,
+            duration_days INTEGER NOT NULL CHECK (duration_days > 0),
+            daily_quota INTEGER NOT NULL CHECK (daily_quota > 0),
+            total_picks BIGINT NOT NULL CHECK (total_picks > 0),
+            delivered_picks BIGINT NOT NULL DEFAULT 0
+                CHECK (delivered_picks >= 0),
+            status TEXT NOT NULL
+                CHECK (status IN ('queued', 'active', 'completed')),
+            queued_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            activated_at TIMESTAMPTZ,
+            expires_at TIMESTAMPTZ,
+            completed_at TIMESTAMPTZ
+        )
+        """
+    )
+
+    await db_execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_vip_entitlements_queue
+        ON vip_subscription_entitlements(vip_id, status, queued_at, id)
+        """
+    )
+
+    await db_execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_vip_one_active_entitlement
+        ON vip_subscription_entitlements(vip_id)
+        WHERE status = 'active'
+        """
+    )
+
+    # ========================================================
+    # ONE-TIME LEGACY SUBSCRIBER MIGRATION
+    #
+    # Historical delivered baseline:
+    # GREATEST(total daily-ledger usage, surviving VIP picks).
+    # These sources may overlap, so they must never be added.
+    # ========================================================
+
+    await db_execute(
+        """
+        WITH plan_config(plan, duration_days, daily_quota) AS (
+            VALUES
+                ('daily', 1, 3),
+                ('weekly', 7, 5),
+                ('monthly', 30, 7),
+                ('yearly', 365, 10),
+                ('annual', 365, 10)
+        ),
+        ledger AS (
+            SELECT
+                number,
+                COALESCE(SUM(used), 0)::BIGINT AS ledger_total
+            FROM vip_daily_quota_usage
+            GROUP BY number
+        ),
+        surviving AS (
+            SELECT
+                number,
+                COUNT(*)::BIGINT AS surviving_picks
+            FROM vip_picks
+            GROUP BY number
+        ),
+        legacy AS (
+            SELECT
+                vu.id AS vip_id,
+                LOWER(BTRIM(vu.subscription)) AS plan,
+                pc.duration_days,
+                pc.daily_quota,
+                pc.duration_days::BIGINT
+                    * pc.daily_quota::BIGINT AS total_picks,
+                GREATEST(
+                    COALESCE(l.ledger_total, 0),
+                    COALESCE(s.surviving_picks, 0)
+                )::BIGINT AS delivered_picks,
+                CASE
+                    WHEN pg_input_is_valid(
+                        NULLIF(BTRIM(vu.subscription_expiry), ''),
+                        'timestamptz'
+                    )
+                    THEN NULLIF(
+                        BTRIM(vu.subscription_expiry), ''
+                    )::timestamptz
+                    ELSE NULL
+                END AS existing_expiry
+            FROM vip_users vu
+            JOIN plan_config pc
+              ON pc.plan = LOWER(BTRIM(vu.subscription))
+            LEFT JOIN ledger l
+              ON l.number = vu.number
+            LEFT JOIN surviving s
+              ON s.number = vu.number
+            WHERE vu.approved IS TRUE
+        )
+        INSERT INTO vip_subscription_entitlements (
+            vip_id,
+            migration_key,
+            plan,
+            duration_days,
+            daily_quota,
+            total_picks,
+            delivered_picks,
+            status,
+            queued_at,
+            activated_at,
+            expires_at,
+            completed_at
+        )
+        SELECT
+            legacy.vip_id,
+            'legacy-vip-' || legacy.vip_id::TEXT,
+            legacy.plan,
+            legacy.duration_days,
+            legacy.daily_quota,
+            legacy.total_picks,
+            legacy.delivered_picks,
+            CASE
+                WHEN legacy.delivered_picks >= legacy.total_picks
+                    THEN 'completed'
+                ELSE 'active'
+            END,
+            CURRENT_TIMESTAMP,
+            COALESCE(
+                legacy.existing_expiry
+                    - make_interval(days => legacy.duration_days),
+                CURRENT_TIMESTAMP
+            ),
+            legacy.existing_expiry,
+            CASE
+                WHEN legacy.delivered_picks >= legacy.total_picks
+                    THEN CURRENT_TIMESTAMP
+                ELSE NULL
+            END
+        FROM legacy
+        ON CONFLICT (migration_key) DO NOTHING
+        """
+    )
+
     await db_execute(
         """
         CREATE INDEX IF NOT EXISTS idx_vip_users_number
@@ -1230,11 +1801,6 @@ async def vip_register():
                 "error": "phone number already registered"
             }), 409
 
-        expiry = (
-            datetime.now(UTC)
-            + timedelta(days=PLAN_DAYS[subscription])
-        ).isoformat()
-
         row = await db_fetch_one(
             """
             INSERT INTO vip_users (
@@ -1249,7 +1815,7 @@ async def vip_register():
                 :name,
                 :number,
                 :subscription,
-                :expiry,
+                NULL,
                 FALSE,
                 :password_hash
             )
@@ -1265,7 +1831,6 @@ async def vip_register():
                 "name": name,
                 "number": number,
                 "subscription": subscription,
-                "expiry": expiry,
                 "password_hash": password_hash,
             },
         )
@@ -1287,6 +1852,17 @@ async def vip_register():
             "message": "registration successful. waiting for admin approval.",
             "user": row,
         }), 201
+
+    except asyncpg.UniqueViolationError as exc:
+        log_json(
+            "warning",
+            event="vip_registration_duplicate_number",
+            error=str(exc),
+        )
+
+        return jsonify({
+            "error": "phone number already registered"
+        }), 409
 
     except Exception as exc:
         log_json(
@@ -1440,20 +2016,115 @@ async def vip_picks():
 @vip_required
 async def vip_quota():
     vip = request.vip_user
-    plan = str(vip["subscription"] or "").lower()
-    quota = SUBSCRIPTION_QUOTA.get(plan, 0)
+    today = datetime.now(KENYA).date()
 
-    row = await db_fetch_one(
+    entitlement = await db_fetch_one(
+        """
+        SELECT
+            (
+                SELECT id
+                FROM vip_subscription_entitlements
+                WHERE vip_id = :vip_id
+                  AND status = 'active'
+                ORDER BY id DESC
+                LIMIT 1
+            ) AS active_id,
+            (
+                SELECT plan
+                FROM vip_subscription_entitlements
+                WHERE vip_id = :vip_id
+                  AND status = 'active'
+                ORDER BY id DESC
+                LIMIT 1
+            ) AS active_plan,
+            (
+                SELECT daily_quota
+                FROM vip_subscription_entitlements
+                WHERE vip_id = :vip_id
+                  AND status = 'active'
+                ORDER BY id DESC
+                LIMIT 1
+            ) AS active_quota,
+            (
+                SELECT total_picks
+                FROM vip_subscription_entitlements
+                WHERE vip_id = :vip_id
+                  AND status = 'active'
+                ORDER BY id DESC
+                LIMIT 1
+            ) AS active_total_picks,
+            (
+                SELECT delivered_picks
+                FROM vip_subscription_entitlements
+                WHERE vip_id = :vip_id
+                  AND status = 'active'
+                ORDER BY id DESC
+                LIMIT 1
+            ) AS active_delivered_picks,
+            (
+                SELECT expires_at
+                FROM vip_subscription_entitlements
+                WHERE vip_id = :vip_id
+                  AND status = 'active'
+                ORDER BY id DESC
+                LIMIT 1
+            ) AS active_expires_at,
+            COALESCE((
+                SELECT SUM(total_picks)
+                FROM vip_subscription_entitlements
+                WHERE vip_id = :vip_id
+            ), 0)::BIGINT AS lifetime_total_picks,
+            COALESCE((
+                SELECT SUM(delivered_picks)
+                FROM vip_subscription_entitlements
+                WHERE vip_id = :vip_id
+            ), 0)::BIGINT AS lifetime_delivered_picks,
+            COALESCE((
+                SELECT SUM(GREATEST(total_picks - delivered_picks, 0))
+                FROM vip_subscription_entitlements
+                WHERE vip_id = :vip_id
+            ), 0)::BIGINT AS lifetime_outstanding_picks,
+            (
+                SELECT COUNT(*)
+                FROM vip_subscription_entitlements
+                WHERE vip_id = :vip_id
+                  AND status = 'queued'
+            )::INTEGER AS queued_entitlements,
+            EXISTS (
+                SELECT 1
+                FROM vip_subscription_entitlements
+                WHERE vip_id = :vip_id
+                  AND status = 'queued'
+            ) AS has_queued
+        """,
+        {"vip_id": vip["id"]},
+    )
+
+    plan = (
+        str(entitlement["active_plan"]).lower()
+        if entitlement and entitlement["active_plan"]
+        else str(vip["subscription"] or "").lower()
+    )
+
+    # No active entitlement means no new daily picks can be distributed.
+    quota = (
+        int(entitlement["active_quota"])
+        if entitlement and entitlement["active_quota"] is not None
+        else 0
+    )
+
+    usage = await db_fetch_one(
         """
         SELECT GREATEST(
             COALESCE((
                 SELECT used
                 FROM vip_daily_quota_usage
                 WHERE number = :number
-                  AND quota_date = (CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Nairobi')::date
+                  AND quota_date =
+                      (CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Nairobi')::date
             ), 0),
             COALESCE((
-                SELECT COUNT(*)::int
+                SELECT COUNT(*)::INTEGER
                 FROM vip_picks
                 WHERE number = :number
                   AND (created_at AT TIME ZONE 'Africa/Nairobi')::date =
@@ -1464,27 +2135,88 @@ async def vip_quota():
         {"number": vip["number"]},
     )
 
-    used = int(row["used"]) if row else 0
+    used = int(usage["used"]) if usage else 0
+
+    active_total = (
+        int(entitlement["active_total_picks"])
+        if entitlement and entitlement["active_total_picks"] is not None
+        else 0
+    )
+    active_delivered = (
+        int(entitlement["active_delivered_picks"])
+        if entitlement and entitlement["active_delivered_picks"] is not None
+        else 0
+    )
+    active_outstanding = max(active_total - active_delivered, 0)
+
+    has_queued = bool(entitlement and entitlement["has_queued"])
+    has_active_outstanding = bool(
+        entitlement
+        and entitlement["active_id"] is not None
+        and active_outstanding > 0
+    )
+
+    expiry_value = (
+        entitlement["active_expires_at"]
+        if entitlement and entitlement["active_expires_at"] is not None
+        else vip["subscription_expiry"]
+    )
 
     try:
-        expiry = datetime.fromisoformat(
-            str(vip["subscription_expiry"]).replace("Z", "+00:00")
-        )
+        if isinstance(expiry_value, datetime):
+            expiry = expiry_value
+        else:
+            expiry = datetime.fromisoformat(
+                str(expiry_value).replace("Z", "+00:00")
+            )
+
         if expiry.tzinfo is None:
             expiry = expiry.replace(tzinfo=UTC)
-        expiry_date = expiry.astimezone(KENYA).date()
-        expired = expiry_date < datetime.now(KENYA).date()
-    except (ValueError, TypeError, OverflowError):
-        expired = True
 
-    remaining = 0 if expired else max(quota - used, 0)
+        expiry_date = expiry.astimezone(KENYA).date()
+        calendar_expired = expiry_date < today
+    except (ValueError, TypeError, OverflowError):
+        calendar_expired = True
+
+    # Outstanding or queued paid entitlements preserve access.
+    expired = (
+        calendar_expired
+        and not has_active_outstanding
+        and not has_queued
+    )
+
+    remaining = (
+        min(max(quota - used, 0), active_outstanding)
+        if not expired and entitlement and entitlement["active_id"] is not None
+        else 0
+    )
+
+    extension_active = bool(
+        has_active_outstanding and calendar_expired
+    )
 
     return jsonify({
+        # Existing response fields retained for frontend compatibility.
         "plan": plan,
         "quota": quota,
         "used": used,
         "remaining": remaining,
         "expired": expired,
+
+        # Entitlement and cumulative delivery details.
+        "total_picks": int(entitlement["lifetime_total_picks"]) if entitlement else 0,
+        "delivered_picks": int(entitlement["lifetime_delivered_picks"]) if entitlement else 0,
+        "outstanding_picks": int(entitlement["lifetime_outstanding_picks"]) if entitlement else 0,
+        "active_entitlement_total": active_total,
+        "active_entitlement_delivered": active_delivered,
+        "active_entitlement_outstanding": active_outstanding,
+        "entitlement_expires_at": (
+            expiry.isoformat() if "expiry" in locals() else None
+        ),
+        "extension_active": extension_active,
+        "queued_entitlements": (
+            int(entitlement["queued_entitlements"]) if entitlement else 0
+        ),
     })
 
 
@@ -1648,89 +2380,121 @@ async def vip_notifications_mark_all_read():
 @vip_required
 async def vip_upgrade():
     data = request.get_json(silent=True) or {}
-
-    to_plan = str(
-        data.get("subscription", "")
-    ).strip().lower()
+    to_plan = str(data.get("subscription", "")).strip().lower()
 
     if to_plan not in PLAN_ORDER:
-        return jsonify({
-            "error": "invalid subscription plan"
-        }), 400
+        return jsonify({"error": "invalid subscription plan"}), 400
 
     vip = request.vip_user
+    conn = await asyncpg.connect(dsn=DATABASE_URL, command_timeout=60)
 
-    current_plan = vip["subscription"]
-
-    if PLAN_ORDER.index(to_plan) <= PLAN_ORDER.index(current_plan):
-        return jsonify({
-            "error": "upgrade plan must be higher than current plan"
-        }), 400
-
-    existing = await db_fetch_one(
-        """
-        SELECT id
-        FROM vip_upgrade_requests
-        WHERE vip_id = :vip_id
-          AND status = 'pending'
-        LIMIT 1
-        """,
-        {
-            "vip_id": vip["id"]
-        },
-    )
-
-    if existing:
-        return jsonify({
-            "error": "you already have a pending upgrade request"
-        }), 409
-
-    row = await db_fetch_one(
-        """
-        INSERT INTO vip_upgrade_requests (
-            vip_id,
-            from_plan,
-            to_plan,
-            status,
-            request_type
-        )
-        VALUES (
-            :vip_id,
-            :from_plan,
-            :to_plan,
-            'pending',
-            'upgrade'
-        )
-        RETURNING
-            id,
-            vip_id,
-            from_plan,
-            to_plan,
-            status,
-            created_at
-        """,
-        {
-            "vip_id": vip["id"],
-            "from_plan": current_plan,
-            "to_plan": to_plan,
-        },
-    )
+    failure = None
+    row = None
+    upgrade_from_plan = None
+    vip_name = vip.get("name") or "VIP member"
 
     try:
-        vip_name = await db_fetch_one(
-            """
-            SELECT name
-            FROM vip_users
-            WHERE id = :vip_id
-            """,
-            {"vip_id": vip["id"]},
-        )
+        await conn.execute(f'SET search_path TO "{DB_SCHEMA}", public')
 
-        name = vip_name["name"] if vip_name else "VIP member"
+        async with conn.transaction():
+            # Serialize upgrade and renewal submissions for this VIP.
+            locked_vip = await conn.fetchrow(
+                """
+                SELECT id, name, number, subscription, approved
+                FROM vip_users
+                WHERE id = $1
+                FOR UPDATE
+                """,
+                vip["id"],
+            )
 
+            if not locked_vip:
+                failure = ({"error": "VIP account not found"}, 404)
+
+            elif not locked_vip["approved"]:
+                failure = ({"error": "VIP account is not approved"}, 403)
+
+            else:
+                vip_name = locked_vip["name"] or "VIP member"
+                existing = await conn.fetchval(
+                    """
+                    SELECT id
+                    FROM vip_upgrade_requests
+                    WHERE vip_id = $1 AND status = 'pending'
+                    LIMIT 1
+                    """,
+                    locked_vip["id"],
+                )
+
+                if existing:
+                    failure = ({
+                        "error": "you already have a pending subscription request"
+                    }, 409)
+
+                else:
+                    queued = await conn.fetchval(
+                        """
+                        SELECT id
+                        FROM vip_subscription_entitlements
+                        WHERE vip_id = $1 AND status = 'queued'
+                        LIMIT 1
+                        """,
+                        locked_vip["id"],
+                    )
+
+                    if queued:
+                        failure = ({
+                            "error": (
+                                "you already have a paid subscription "
+                                "queued to activate"
+                            )
+                        }, 409)
+
+                    else:
+                        upgrade_from_plan = locked_vip["subscription"]
+
+                        if (
+                            upgrade_from_plan not in PLAN_ORDER
+                            or PLAN_ORDER.index(to_plan)
+                            <= PLAN_ORDER.index(upgrade_from_plan)
+                        ):
+                            failure = ({
+                                "error": (
+                                    "upgrade plan must be higher than "
+                                    "your current plan"
+                                )
+                            }, 400)
+
+                        else:
+                            inserted = await conn.fetchrow(
+                                """
+                                INSERT INTO vip_upgrade_requests (
+                                    vip_id, from_plan, to_plan,
+                                    status, request_type
+                                )
+                                VALUES ($1, $2, $3, 'pending', 'upgrade')
+                                RETURNING id, vip_id, from_plan, to_plan,
+                                          status, created_at
+                                """,
+                                locked_vip["id"],
+                                upgrade_from_plan,
+                                to_plan,
+                            )
+                            row = dict(inserted)
+
+    finally:
+        await conn.close()
+
+    if failure:
+        return jsonify(failure[0]), failure[1]
+
+    try:
         await send_admin_push(
             "VIP upgrade request",
-            f"{name} ({vip['number']}) requested an upgrade from {current_plan} to {to_plan}.",
+            (
+                f"{vip_name} ({vip['number']}) requested an upgrade "
+                f"from {upgrade_from_plan} to {to_plan}."
+            ),
             "/admin",
         )
     except Exception as push_error:
@@ -1754,87 +2518,97 @@ async def vip_upgrade():
 @vip_required
 async def vip_renew():
     data = request.get_json(silent=True) or {}
-
-    to_plan = str(
-        data.get("subscription", "")
-    ).strip().lower()
+    to_plan = str(data.get("subscription", "")).strip().lower()
 
     if to_plan not in PLAN_ORDER:
-        return jsonify({
-            "error": "invalid subscription plan"
-        }), 400
+        return jsonify({"error": "invalid subscription plan"}), 400
 
     vip = request.vip_user
+    conn = await asyncpg.connect(dsn=DATABASE_URL, command_timeout=60)
 
-    expiry_text = vip.get("subscription_expiry")
+    failure = None
+    row = None
 
-    if expiry_text:
-        try:
-            expiry = datetime.fromisoformat(
-                str(expiry_text).replace("Z", "+00:00")
+    try:
+        await conn.execute(f'SET search_path TO "{DB_SCHEMA}", public')
+
+        async with conn.transaction():
+            # Use the same account lock as the upgrade route.
+            locked_vip = await conn.fetchrow(
+                """
+                SELECT id, subscription, approved
+                FROM vip_users
+                WHERE id = $1
+                FOR UPDATE
+                """,
+                vip["id"],
             )
 
-            if expiry.tzinfo is None:
-                expiry = expiry.replace(tzinfo=UTC)
+            if not locked_vip:
+                failure = ({"error": "VIP account not found"}, 404)
 
-            if expiry > datetime.now(UTC):
-                return jsonify({
-                    "error": "your subscription is still active"
-                }), 400
+            elif not locked_vip["approved"]:
+                failure = ({"error": "VIP account is not approved"}, 403)
 
-        except (ValueError, TypeError):
-            return jsonify({
-                "error": "unable to verify subscription expiry"
-            }), 400
+            else:
+                existing = await conn.fetchval(
+                    """
+                    SELECT id
+                    FROM vip_upgrade_requests
+                    WHERE vip_id = $1 AND status = 'pending'
+                    LIMIT 1
+                    """,
+                    locked_vip["id"],
+                )
 
-    current_plan = vip["subscription"]
+                if existing:
+                    failure = ({
+                        "error": (
+                            "you already have a pending subscription request"
+                        )
+                    }, 409)
 
-    existing = await db_fetch_one(
-        """
-        SELECT id
-        FROM vip_upgrade_requests
-        WHERE vip_id = :vip_id
-          AND status = 'pending'
-        LIMIT 1
-        """,
-        {"vip_id": vip["id"]},
-    )
+                else:
+                    queued = await conn.fetchval(
+                        """
+                        SELECT id
+                        FROM vip_subscription_entitlements
+                        WHERE vip_id = $1 AND status = 'queued'
+                        LIMIT 1
+                        """,
+                        locked_vip["id"],
+                    )
 
-    if existing:
-        return jsonify({
-            "error": "you already have a pending subscription request"
-        }), 409
+                    if queued:
+                        failure = ({
+                            "error": (
+                                "you already have a paid subscription "
+                                "queued to activate"
+                            )
+                        }, 409)
 
-    row = await db_fetch_one(
-        """
-        INSERT INTO vip_upgrade_requests (
-            vip_id,
-            from_plan,
-            to_plan,
-            status,
-            request_type
-        )
-        VALUES (
-            :vip_id,
-            :from_plan,
-            :to_plan,
-            'pending',
-            'renewal'
-        )
-        RETURNING
-            id,
-            vip_id,
-            from_plan,
-            to_plan,
-            status,
-            created_at
-        """,
-        {
-            "vip_id": vip["id"],
-            "from_plan": current_plan,
-            "to_plan": to_plan,
-        },
-    )
+                    else:
+                        inserted = await conn.fetchrow(
+                            """
+                            INSERT INTO vip_upgrade_requests (
+                                vip_id, from_plan, to_plan,
+                                status, request_type
+                            )
+                            VALUES ($1, $2, $3, 'pending', 'renewal')
+                            RETURNING id, vip_id, from_plan, to_plan,
+                                      status, created_at
+                            """,
+                            locked_vip["id"],
+                            locked_vip["subscription"],
+                            to_plan,
+                        )
+                        row = dict(inserted)
+
+    finally:
+        await conn.close()
+
+    if failure:
+        return jsonify(failure[0]), failure[1]
 
     try:
         await send_admin_push(
@@ -2088,20 +2862,34 @@ async def admin_approve_vip(vip_id):
             "error": "VIP user not found"
         }), 404
 
-    await db_execute(
-        """
-        UPDATE vip_users
-        SET approved = TRUE
-        WHERE id = :id
-        """,
-        {
-            "id": vip_id
-        },
-    )
+    try:
+        approved = await db_approve_initial_vip(vip_id)
 
-    return jsonify({
-        "message": "VIP approved successfully"
-    })
+        if not approved:
+            return jsonify({
+                "error": "VIP user not found"
+            }), 404
+
+        if approved.get("approval_conflict"):
+            return jsonify({
+                "error": approved["approval_conflict"]
+            }), 409
+
+        return jsonify({
+            "message": "VIP approved successfully",
+            "already_approved": approved["already_approved"],
+        })
+
+    except Exception as exc:
+        log_json(
+            "error",
+            event="admin_vip_approval_failed",
+            vip_id=vip_id,
+            error=str(exc),
+        )
+        return jsonify({
+            "error": "unable to approve VIP account"
+        }), 500
 
 
 # ============================================================
@@ -2332,19 +3120,16 @@ async def admin_approve_upgrade(request_id):
             "error": "invalid subscription plan on request"
         }), 400
 
-    expiry = (
-        datetime.now(UTC)
-        + timedelta(days=PLAN_DAYS[req["to_plan"]])
-    ).isoformat()
-
-    approved = await db_approve_vip_request(
-        request_id,
-        expiry,
-    )
+    approved = await db_approve_vip_request(request_id)
 
     if not approved:
         return jsonify({
             "error": "subscription request is no longer pending"
+        }), 409
+
+    if approved.get("approval_conflict"):
+        return jsonify({
+            "error": approved["approval_conflict"]
         }), 409
 
     return jsonify({
@@ -2480,198 +3265,346 @@ async def admin_distribute_vip_picks():
                 failure = ({"error": "VIP user is not approved"}, 403)
 
             else:
-                plan = str(vip["subscription"] or "").lower()
-                quota = SUBSCRIPTION_QUOTA.get(plan, 0)
                 today = datetime.now(KENYA).date()
 
-                try:
-                    expiry = datetime.fromisoformat(
-                        str(vip["subscription_expiry"]).replace("Z", "+00:00")
-                    )
-                    if expiry.tzinfo is None:
-                        expiry = expiry.replace(tzinfo=UTC)
-                    expiry_date = expiry.astimezone(KENYA).date()
-                except (ValueError, TypeError, OverflowError):
-                    expiry_date = None
+                # Lock the active paid entitlement for this VIP.
+                entitlement = await conn.fetchrow(
+                    """
+                    SELECT id, plan, daily_quota, total_picks,
+                           delivered_picks, expires_at
+                    FROM vip_subscription_entitlements
+                    WHERE vip_id = $1 AND status = 'active'
+                    FOR UPDATE
+                    """,
+                    vip["id"],
+                )
 
-                if expiry_date is None:
-                    failure = ({
-                        "error": "VIP subscription expiry is invalid"
-                    }, 403)
-
-                elif expiry_date < today:
-                    failure = ({
-                        "error": "VIP subscription has expired. No new picks can be distributed.",
-                        "expiry_date": expiry_date.isoformat(),
-                    }, 403)
-
-                elif quota <= 0:
-                    failure = ({
-                        "error": "VIP subscription plan has no pick quota"
-                    }, 400)
-
-                else:
-                    # Create today's ledger row if this is the first distribution.
-                    await conn.execute(
+                # If no entitlement is active, activate the oldest queued one.
+                if not entitlement:
+                    await _activate_next_vip_entitlement(conn, vip["id"])
+                    entitlement = await conn.fetchrow(
                         """
-                        INSERT INTO vip_daily_quota_usage
-                            (number, quota_date, plan, quota, used)
-                        VALUES ($1, $2, $3, $4, 0)
-                        ON CONFLICT (number, quota_date) DO NOTHING
-                        """,
-                        number, today, plan, quota,
-                    )
-
-                    ledger = await conn.fetchrow(
-                        """
-                        SELECT used
-                        FROM vip_daily_quota_usage
-                        WHERE number = $1 AND quota_date = $2
+                        SELECT id, plan, daily_quota, total_picks,
+                               delivered_picks, expires_at
+                        FROM vip_subscription_entitlements
+                        WHERE vip_id = $1 AND status = 'active'
                         FOR UPDATE
                         """,
-                        number, today,
+                        vip["id"],
                     )
 
-                    used = int(ledger["used"]) if ledger else 0
-
-                    # Reconcile legacy picks created today in Kenya time.
-                    # GREATEST prevents double-counting picks already in the ledger.
-                    existing_today = await conn.fetchval(
+                # Recover safely if an active entitlement was already fulfilled.
+                if entitlement and int(entitlement["delivered_picks"]) >= int(entitlement["total_picks"]):
+                    completion_update = await conn.execute(
                         """
-                        SELECT COUNT(*)::int
-                        FROM vip_picks
-                        WHERE number = $1
-                          AND (created_at AT TIME ZONE 'Africa/Nairobi')::date = $2
+                        UPDATE vip_subscription_entitlements
+                        SET status = 'completed',
+                            completed_at = COALESCE(completed_at, CURRENT_TIMESTAMP)
+                        WHERE id = $1 AND status = 'active'
                         """,
-                        number, today,
+                        entitlement["id"],
                     )
-                    used = max(used, int(existing_today or 0))
 
-                    # Persist reconciled usage before checking remaining quota.
-                    await conn.execute(
+                    if completion_update != "UPDATE 1":
+                        raise RuntimeError(
+                            "Entitlement completion failed for "
+                            f"{entitlement['id']}: {completion_update}"
+                        )
+                    await _activate_next_vip_entitlement(conn, vip["id"])
+                    entitlement = await conn.fetchrow(
                         """
-                        UPDATE vip_daily_quota_usage
-                        SET plan = $3,
-                            quota = $4,
-                            used = $5,
-                            updated_at = CURRENT_TIMESTAMP
-                        WHERE number = $1 AND quota_date = $2
+                        SELECT id, plan, daily_quota, total_picks,
+                               delivered_picks, expires_at
+                        FROM vip_subscription_entitlements
+                        WHERE vip_id = $1 AND status = 'active'
+                        FOR UPDATE
                         """,
-                        number, today, plan, quota, used,
+                        vip["id"],
                     )
 
-                    candidates = []
-                    seen_match_ids = set()
+                if not entitlement:
+                    failure = ({
+                        "error": "No active paid entitlement is available"
+                    }, 403)
 
-                    for item in picks:
-                        if not isinstance(item, dict):
-                            continue
+                else:
+                    entitlement_id = int(entitlement["id"])
+                    plan = str(entitlement["plan"]).lower()
+                    quota = int(entitlement["daily_quota"])
+                    total_picks = int(entitlement["total_picks"])
+                    delivered_picks = int(entitlement["delivered_picks"])
+                    entitlement_remaining = max(
+                        total_picks - delivered_picks, 0
+                    )
 
-                        try:
-                            match_id = int(item.get("match_id"))
-                        except (TypeError, ValueError):
-                            continue
+                    if quota <= 0:
+                        failure = ({
+                            "error": "Active entitlement has no daily pick quota"
+                        }, 400)
 
-                        pick = str(item.get("pick", "")).strip().upper()
+                    elif entitlement_remaining <= 0:
+                        failure = ({
+                            "error": "This paid entitlement has been fully delivered"
+                        }, 403)
 
-                        if not pick or match_id in seen_match_ids:
-                            continue
-
-                        seen_match_ids.add(match_id)
-
-                        match = await conn.fetchrow(
+                    else:
+                        # Outstanding paid picks remain distributable after
+                        # the original expiry date. The expiry monitor handles
+                        # the automatic extension.
+                        #
+                        # Create today's ledger row if this is the first distribution.
+                        await conn.execute(
                             """
-                            SELECT id, home_team_name, away_team_name,
-                                   utcdate, status
-                            FROM matches
-                            WHERE id = $1
+                            INSERT INTO vip_daily_quota_usage
+                                (number, quota_date, plan, quota, used)
+                            VALUES ($1, $2, $3, $4, 0)
+                            ON CONFLICT (number, quota_date) DO NOTHING
                             """,
-                            match_id,
+                            number, today, plan, quota,
                         )
 
-                        if not match:
-                            continue
-
-                        if str(match["status"] or "").upper() == "FINISHED":
-                            continue
-
-                        duplicate = await conn.fetchval(
+                        ledger = await conn.fetchrow(
                             """
-                            SELECT EXISTS(
-                                SELECT 1
-                                FROM vip_picks
-                                WHERE number = $1 AND match_id = $2
-                            )
+                            SELECT used
+                            FROM vip_daily_quota_usage
+                            WHERE number = $1 AND quota_date = $2
+                            FOR UPDATE
                             """,
-                            number, match_id,
+                            number, today,
                         )
 
-                        if duplicate:
-                            continue
+                        used = int(ledger["used"]) if ledger else 0
 
-                        odds = item.get("odds")
-                        if odds is not None:
+                        # Reconcile legacy picks created today in Kenya time.
+                        # GREATEST prevents double-counting picks already in the ledger.
+                        existing_today = await conn.fetchval(
+                            """
+                            SELECT COUNT(*)::int
+                            FROM vip_picks
+                            WHERE number = $1
+                              AND (created_at AT TIME ZONE 'Africa/Nairobi')::date = $2
+                            """,
+                            number, today,
+                        )
+                        used = max(used, int(existing_today or 0))
+
+                        # Persist reconciled usage before checking remaining quota.
+                        await conn.execute(
+                            """
+                            UPDATE vip_daily_quota_usage
+                            SET plan = $3,
+                                quota = $4,
+                                used = $5,
+                                updated_at = CURRENT_TIMESTAMP
+                            WHERE number = $1 AND quota_date = $2
+                            """,
+                            number, today, plan, quota, used,
+                        )
+
+                        candidates = []
+                        seen_match_ids = set()
+
+                        for item in picks:
+                            if not isinstance(item, dict):
+                                continue
+
                             try:
-                                odds = float(odds)
+                                match_id = int(item.get("match_id"))
                             except (TypeError, ValueError):
                                 continue
 
-                        candidates.append((match, pick, odds))
+                            pick = str(item.get("pick", "")).strip().upper()
 
-                    if not candidates:
-                        failure = ({
-                            "error": "No eligible new picks to distribute"
-                        }, 400)
+                            if not pick or match_id in seen_match_ids:
+                                continue
 
-                    remaining = max(quota - used, 0)
+                            seen_match_ids.add(match_id)
 
-                    if failure:
-                        pass
-                    elif len(candidates) > remaining:
-                        failure = ({
-                            "error": "VIP quota exceeded",
-                            "quota": quota,
-                            "used": used,
-                            "remaining": remaining,
-                        }, 400)
-
-                    else:
-                        for match, pick, odds in candidates:
-                            row = await conn.fetchrow(
+                            match = await conn.fetchrow(
                                 """
-                                INSERT INTO vip_picks (
-                                    number, match_id, home_team, away_team,
-                                    match_time, pick, odds
+                                SELECT id, home_team_name, away_team_name,
+                                       utcdate, status
+                                FROM matches
+                                WHERE id = $1
+                                """,
+                                match_id,
+                            )
+
+                            if not match:
+                                continue
+
+                            if str(match["status"] or "").upper() == "FINISHED":
+                                continue
+
+                            duplicate = await conn.fetchval(
+                                """
+                                SELECT EXISTS(
+                                    SELECT 1
+                                    FROM vip_picks
+                                    WHERE number = $1 AND match_id = $2
                                 )
-                                VALUES ($1, $2, $3, $4, $5, $6, $7)
-                                RETURNING id, number, match_id, home_team,
-                                          away_team, match_time, pick, odds,
-                                          created_at
                                 """,
-                                number,
-                                match["id"],
-                                match["home_team_name"],
-                                match["away_team_name"],
-                                match["utcdate"],
-                                pick,
-                                odds,
+                                number, match_id,
                             )
-                            created.append(dict(row))
 
+                            if duplicate:
+                                continue
+
+                            odds = item.get("odds")
+                            if odds is not None:
+                                try:
+                                    odds = float(odds)
+                                except (TypeError, ValueError):
+                                    continue
+
+                            candidates.append((match, pick, odds))
+
+                        if not candidates:
+                            failure = ({
+                                "error": "No eligible new picks to distribute"
+                            }, 400)
+
+                        remaining = min(
+                            max(quota - used, 0),
+                            entitlement_remaining,
+                        )
+
+                        if failure:
+                            pass
+                        elif len(candidates) > remaining:
+                            failure = ({
+                                "error": "VIP entitlement or daily quota exceeded",
+                                "quota": quota,
+                                "used": used,
+                                "remaining": remaining,
+                                "entitlement_remaining": entitlement_remaining,
+                            }, 400)
+
+                        else:
+                            for match, pick, odds in candidates:
+                                row = await conn.fetchrow(
+                                    """
+                                    INSERT INTO vip_picks (
+                                        number, match_id, home_team, away_team,
+                                        match_time, pick, odds
+                                    )
+                                    VALUES ($1, $2, $3, $4, $5, $6, $7)
+                                    RETURNING id, number, match_id, home_team,
+                                              away_team, match_time, pick, odds,
+                                              created_at
+                                    """,
+                                    number,
+                                    match["id"],
+                                    match["home_team_name"],
+                                    match["away_team_name"],
+                                    match["utcdate"],
+                                    pick,
+                                    odds,
+                                )
+                                created.append(dict(row))
+
+                            if created:
+                                used += len(created)
+
+                                await conn.execute(
+                                    """
+                                    UPDATE vip_daily_quota_usage
+                                    SET used = $3,
+                                        updated_at = CURRENT_TIMESTAMP
+                                    WHERE number = $1 AND quota_date = $2
+                                    """,
+                                    number, today, used,
+                                )
+
+                            # Persist cumulative delivery independently of
+                        # vip_picks, whose finished-match rows may be cleaned up.
                         if created:
-                            used += len(created)
-
-                            await conn.execute(
+                            delivery = await conn.fetchrow(
                                 """
-                                UPDATE vip_daily_quota_usage
-                                SET used = $3,
-                                    updated_at = CURRENT_TIMESTAMP
-                                WHERE number = $1 AND quota_date = $2
+                                UPDATE vip_subscription_entitlements
+                                SET delivered_picks = delivered_picks + $2
+                                WHERE id = $1 AND status = 'active'
+                                RETURNING delivered_picks, total_picks
                                 """,
-                                number, today, used,
+                                entitlement_id,
+                                len(created),
                             )
 
-                        remaining_after = max(quota - used, 0)
+                            if not delivery:
+                                raise RuntimeError(
+                                    "Active entitlement disappeared during distribution"
+                                )
+
+                            delivered_picks = int(delivery["delivered_picks"])
+                            total_picks = int(delivery["total_picks"])
+
+                            if delivered_picks >= total_picks:
+                                completion_update = await conn.execute(
+                                    """
+                                    UPDATE vip_subscription_entitlements
+                                    SET status = 'completed',
+                                        completed_at = CURRENT_TIMESTAMP
+                                    WHERE id = $1 AND status = 'active'
+                                    """,
+                                    entitlement_id,
+                                )
+
+                                if completion_update != "UPDATE 1":
+                                    raise RuntimeError(
+                                        "Entitlement completion failed for "
+                                        f"{entitlement_id}: {completion_update}"
+                                    )
+
+                                # Activate the next paid entitlement immediately.
+                                # Do not reset today's Kenya-time quota ledger.
+                                await _activate_next_vip_entitlement(
+                                    conn, vip["id"]
+                                )
+
+                            # Re-read the active entitlement so the response and
+                            # daily ledger reflect the plan now in force.
+                            current_entitlement = await conn.fetchrow(
+                                """
+                                SELECT plan, daily_quota, total_picks,
+                                       delivered_picks
+                                FROM vip_subscription_entitlements
+                                WHERE vip_id = $1 AND status = 'active'
+                                FOR UPDATE
+                                """,
+                                vip["id"],
+                            )
+
+                            if current_entitlement:
+                                current_plan = str(current_entitlement["plan"]).lower()
+                                current_quota = int(current_entitlement["daily_quota"])
+                                current_outstanding = max(
+                                    int(current_entitlement["total_picks"])
+                                    - int(current_entitlement["delivered_picks"]),
+                                    0,
+                                )
+
+                                # Preserve today's used count while recording the
+                                # newly active plan and its daily quota.
+                                await conn.execute(
+                                    """
+                                    UPDATE vip_daily_quota_usage
+                                    SET plan = $3,
+                                        quota = $4,
+                                        used = $5,
+                                        updated_at = CURRENT_TIMESTAMP
+                                    WHERE number = $1 AND quota_date = $2
+                                    """,
+                                    number, today, current_plan, current_quota, used,
+                                )
+
+                                quota = current_quota
+                                remaining_after = min(
+                                    max(current_quota - used, 0),
+                                    current_outstanding,
+                                )
+                            else:
+                                quota = 0
+                                remaining_after = 0
 
     finally:
         await conn.close()

@@ -298,22 +298,30 @@ function SectionTitle({
 
 function VipSummary({
   me,
+  quota,
   onDeregister,
 }) {
   if (!me) return null;
 
+  const quotaSource =
+    quota?.data?.data ||
+    quota?.data ||
+    quota;
+
+  const expiryValue =
+    quotaSource?.entitlement_expires_at ||
+    me.subscription_expiry;
+
   const expired =
-    isSubscriptionExpired(
-      me.subscription_expiry
-    );
+    typeof quotaSource?.expired === "boolean"
+      ? quotaSource.expired
+      : isSubscriptionExpired(expiryValue);
 
   const plan =
     getPlanInfo(me.subscription);
 
   const daysRemaining =
-    getDaysRemaining(
-      me.subscription_expiry
-    );
+    getDaysRemaining(expiryValue);
 
   return (
     <GlassCard className="overflow-hidden">
@@ -412,9 +420,7 @@ function VipSummary({
                   : "text-slate-200"
               }`}
             >
-              {formatExpiry(
-                me.subscription_expiry
-              )}
+              {formatExpiry(expiryValue)}
             </span>
           </div>
         </div>
@@ -1589,11 +1595,6 @@ export default function VIPPortal() {
       return;
     }
 
-    if (!isSubscriptionExpired(me.subscription_expiry)) {
-      push("Your subscription is still active.", "error");
-      return;
-    }
-
     const requestedPlan = getPlanInfo(planName);
 
     if (!requestedPlan) {
@@ -2545,17 +2546,24 @@ export default function VIPPortal() {
               <>
                 <VipSummary
                   me={me}
+                  quota={quota}
                   onDeregister={
                     deregister
                   }
                 />
 
-                {isSubscriptionExpired(me.subscription_expiry) && (
+                {quota && (
+                  Number(quota.queued_entitlements || 0) === 0 &&
+                  (
+                    quota.expired === true ||
+                    Number(quota.active_entitlement_total || 0) > 0
+                  )
+                ) && (
                   <GlassCard className="border-amber-500/20 bg-amber-500/5 p-5">
                     <SectionTitle
                       icon="🔄"
-                      title="Renew Your VIP Subscription"
-                      subtitle="Your subscription has expired. Choose a plan to request renewal."
+                      title="Renew or Queue Your Next VIP Plan"
+                      subtitle="Choose your next plan. If you still have paid-for picks outstanding, the new entitlement will begin after they are delivered."
                     />
 
                     {pendingRenewal ? (
@@ -2600,7 +2608,7 @@ export default function VIPPortal() {
                             >
                               {renewalLoading[plan.key]
                                 ? "Sending..."
-                                : "Renew"}
+                                : "Request"}
                             </button>
                           </div>
                         ))}
