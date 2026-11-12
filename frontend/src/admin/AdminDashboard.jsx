@@ -9,6 +9,7 @@ import {
 
 import {
   adminListVips,
+  adminBettingOverview,
   adminListPendingVips,
   adminListUpgradeRequests,
   adminApproveVip,
@@ -34,6 +35,7 @@ export default function AdminDashboard() {
 
 
   const [vips, setVips] = useState([]);
+  const [bettingOverview, setBettingOverview] = useState(null);
   const [pendingVips, setPendingVips] = useState([]);
   const [upgradeRequests, setUpgradeRequests] = useState([]);
 
@@ -215,6 +217,12 @@ setDistributionSummary([]);
       setPendingVips(safeArray(pendingList));
       setUpgradeRequests(safeArray(upgrades));
       setAllMatches(safeArray(matches));
+
+      // Betting overview is independent of VIP list loading.
+      const overview = await adminBettingOverview(token);
+      setBettingOverview(
+        overview?.success ? safeObj(overview) : null
+      );
 } catch (e) {
       console.error(
         "[ADMIN] fetchAll failed:",
@@ -228,7 +236,7 @@ setDistributionSummary([]);
         setLoadingText("");
       }
     }
-  }, [token, safeArray, showError]);
+  }, [token, safeArray, safeObj, showError]);
 
   useEffect(() => {
     if (!token) return;
@@ -761,63 +769,75 @@ setDistributionSummary([]);
   );
 
   const stats = useMemo(
-    () => [
-      {
-        label: "Total VIPs",
-        value: vips.length,
-        detail: `${
-          vips.filter(
-            (v) => v.approved
-          ).length
-        } approved`,
-        icon: "◆",
-      },
-      {
-        label: "Pending VIPs",
-        value:
-          pendingVips.length,
-        detail:
-          "Awaiting approval",
-        icon: "◷",
-      },
-      {
-        label:
-          "Subscription requests",
-        value:
-          upgradeRequests.filter(
+    () => {
+      const money = (value) =>
+        `KES ${Number(value || 0).toLocaleString("en-KE", {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        })}`;
+
+      const profitLoss = Number(bettingOverview?.profit_loss || 0);
+
+      return [
+        {
+          label: "Total VIPs",
+          value: vips.length,
+          detail: `${vips.filter((v) => v.approved).length} approved`,
+          icon: "◆",
+        },
+        {
+          label: "Pending VIPs",
+          value: pendingVips.length,
+          detail: "Awaiting approval",
+          icon: "◷",
+        },
+        {
+          label: "Subscription requests",
+          value: upgradeRequests.filter(
             (req) => req.status === "pending"
           ).length,
-        detail:
-          "Need review",
-        icon: "↗",
-      },
-      {
-        label: "Users",
-        detail:
-          "Registered users",
-        icon: "●",
-      },
-      {
-        label: "Tickets",
-        detail:
-          "Recent betting tickets",
-        icon: "▣",
-      },
-      {
-        label: "Matches",
-        value:
-          allMatches.length,
-        detail:
-          "Available for picks",
-        icon: "⚽",
-      },
-    ],
-    [
-      vips,
-      pendingVips,
-      upgradeRequests,
-      allMatches,
-    ]
+          detail: "Need review",
+          icon: "↗",
+        },
+        {
+          label: "Betting users",
+          value: bettingOverview?.betting_users ?? "—",
+          detail: "Registered betting accounts",
+          icon: "●",
+        },
+        {
+          label: "Bets today",
+          value: bettingOverview?.bets_today ?? "—",
+          detail: bettingOverview
+            ? `${bettingOverview.single_bets_today} singles · ${bettingOverview.accumulator_tickets_today} accumulators`
+            : "Betting activity today",
+          icon: "▣",
+        },
+        {
+          label: "House balance",
+          value: bettingOverview
+            ? money(bettingOverview.house_balance)
+            : "—",
+          detail: "Current house wallet",
+          icon: "◈",
+        },
+        {
+          label: "Profit / Loss",
+          value: bettingOverview ? money(profitLoss) : "—",
+          detail: bettingOverview
+            ? "Net betting ledger"
+            : "Betting performance",
+          icon: profitLoss >= 0 ? "↗" : "↘",
+        },
+        {
+          label: "Matches",
+          value: allMatches.length,
+          detail: "Available for picks",
+          icon: "⚽",
+        },
+      ];
+    },
+    [vips, pendingVips, upgradeRequests, allMatches, bettingOverview]
   );
 
   const toggleVIP = (
@@ -1023,7 +1043,7 @@ setDistributionSummary([]);
         {activeSection ===
           "overview" && (
           <>
-            <section className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+            <section className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
               {stats.map((stat) => (
                 <StatCard
                   key={stat.label}

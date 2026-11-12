@@ -3637,6 +3637,140 @@ def method_not_allowed(error):
         "error": "method not allowed"
     }), 405
 
+
+# ============================================================
+# BETTING ADMIN OVERVIEW
+# ============================================================
+
+@app.get("/admin/betting/overview")
+@admin_required
+async def admin_betting_overview():
+    try:
+        now_ke = datetime.now(KENYA)
+        day_start_ke = now_ke.replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        day_end_ke = day_start_ke + timedelta(days=1)
+
+        # Betting timestamps are stored as naive UTC datetimes.
+        day_start_utc = day_start_ke.astimezone(UTC).replace(tzinfo=None)
+        day_end_utc = day_end_ke.astimezone(UTC).replace(tzinfo=None)
+
+        counts = await db_fetch_one(
+            """
+            SELECT
+                (
+                    SELECT COUNT(*)
+                    FROM "user"
+                    WHERE COALESCE(is_admin, FALSE) = FALSE
+                ) AS betting_users,
+
+                (
+                    SELECT COUNT(*)
+                    FROM bet
+                    WHERE created >= :day_start
+                      AND created < :day_end
+                ) AS single_bets_today,
+
+                (
+                    SELECT COUNT(*)
+                    FROM bet_slip
+                    WHERE created >= :day_start
+                      AND created < :day_end
+                ) AS accumulator_tickets_today
+            """,
+            {
+                "day_start": day_start_utc,
+                "day_end": day_end_utc,
+            },
+        )
+
+        wallet = await db_fetch_one(
+            """
+            SELECT balance
+            FROM house_wallet
+            WHERE id = 1
+            """
+        )
+
+        ledger = await db_fetch_one(
+            """
+            SELECT
+                COALESCE(
+                    SUM(
+                        CASE
+                            WHEN type = 'bet_stake' THEN amount
+                            WHEN type IN (
+                                'bet_payout',
+                                'cashout',
+                                'bet_refund'
+                            ) THEN -amount
+                            ELSE 0
+                        END
+                    ),
+                    0
+                ) AS profit_loss,
+
+                COALESCE(
+                    SUM(
+                        CASE
+                            WHEN created >= :day_start
+                             AND created < :day_end
+                             AND type = 'bet_stake'
+                                THEN amount
+                            WHEN created >= :day_start
+                             AND created < :day_end
+                             AND type IN (
+                                 'bet_payout',
+                                 'cashout',
+                                 'bet_refund'
+                             )
+                                THEN -amount
+                            ELSE 0
+                        END
+                    ),
+                    0
+                ) AS today_profit_loss
+            FROM house_transaction
+            """,
+            {
+                "day_start": day_start_utc,
+                "day_end": day_end_utc,
+            },
+        )
+
+        single_bets = int(counts["single_bets_today"] or 0)
+        accumulator_tickets = int(
+            counts["accumulator_tickets_today"] or 0
+        )
+
+        return jsonify({
+            "success": True,
+            "data": {
+                "betting_users": int(counts["betting_users"] or 0),
+                "bets_today": single_bets + accumulator_tickets,
+                "single_bets_today": single_bets,
+                "accumulator_tickets_today": accumulator_tickets,
+                "house_balance": float(
+                    wallet["balance"] if wallet else 0
+                ),
+                "profit_loss": float(ledger["profit_loss"] or 0),
+                "today_profit_loss": float(
+                    ledger["today_profit_loss"] or 0
+                ),
+                "currency": "KES",
+                "date": day_start_ke.date().isoformat(),
+            },
+        })
+
+    except Exception as exc:
+        logger.exception("Betting admin overview failed")
+        return jsonify({
+            "success": False,
+            "error": "Could not load betting overview",
+        }), 500
+
+
 @app.errorhandler(500)
 def internal_error(error):
     log_json(

@@ -224,6 +224,12 @@ export const adminListVips = (token) =>
     token,
   });
 
+export const adminBettingOverview = (token) =>
+  vipRequest("/admin/betting/overview", {
+    method: "GET",
+    token,
+  });
+
 export const adminListPendingVips = (token) =>
   vipRequest("/admin/vips/pending", {
     method: "GET",
