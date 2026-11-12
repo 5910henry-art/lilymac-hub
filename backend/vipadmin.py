@@ -4250,6 +4250,189 @@ async def admin_list_bets():
         }), 500
 
 
+
+# ============================================================
+# MATCH SETTLEMENT — MATCH RECORD UPDATES ONLY
+# ============================================================
+
+@app.get("/admin/settlement/statuses")
+@admin_required
+async def admin_settlement_statuses():
+    try:
+        rows = await db_fetch_all(
+            """
+            SELECT DISTINCT status
+            FROM matches
+            WHERE status IS NOT NULL
+              AND BTRIM(status) <> ''
+            ORDER BY status
+            """
+        )
+
+        return jsonify({
+            "success": True,
+            "statuses": [row["status"] for row in rows],
+        })
+
+    except Exception:
+        logger.exception("Could not load match statuses")
+        return jsonify({
+            "success": False,
+            "error": "Could not load match statuses",
+        }), 500
+
+
+@app.get("/admin/settlement/matches")
+@admin_required
+async def admin_settlement_matches():
+    date_text = (request.args.get("date") or "").strip()
+
+    try:
+        selected_date = datetime.strptime(
+            date_text, "%Y-%m-%d"
+        ).date()
+    except ValueError:
+        return jsonify({
+            "success": False,
+            "error": "A valid match date is required",
+        }), 400
+
+    try:
+        rows = await db_fetch_all(
+            """
+            SELECT
+                id,
+                competition,
+                home_team_name,
+                away_team_name,
+                utcdate,
+                status,
+                home_score,
+                away_score
+            FROM matches
+            WHERE utcdate IS NOT NULL
+              AND (
+                  (utcdate AT TIME ZONE 'UTC')
+                  AT TIME ZONE 'Africa/Nairobi'
+              )::date = :match_date
+              AND UPPER(COALESCE(status, '')) <> 'FINISHED'
+            ORDER BY utcdate ASC, id ASC
+            """,
+            {"match_date": selected_date},
+        )
+
+        matches = []
+        for row in rows:
+            item = dict(row)
+            if item.get("utcdate"):
+                item["utcdate"] = item["utcdate"].isoformat()
+            matches.append(item)
+
+        return jsonify({
+            "success": True,
+            "matches": matches,
+        })
+
+    except Exception:
+        logger.exception("Could not load settlement matches")
+        return jsonify({
+            "success": False,
+            "error": "Could not load matches for that date",
+        }), 500
+
+
+@app.post("/admin/grade_match")
+@admin_required
+async def admin_grade_match():
+    payload = request.get_json(silent=True) or {}
+
+    match_id = payload.get("match_id")
+    home_score = payload.get("home_score")
+    away_score = payload.get("away_score")
+    status = str(payload.get("status") or "").strip()
+
+    if (
+        not isinstance(match_id, int)
+        or isinstance(match_id, bool)
+        or match_id <= 0
+    ):
+        return jsonify({
+            "success": False,
+            "error": "Select a valid match",
+        }), 400
+
+    for score in (home_score, away_score):
+        if (
+            not isinstance(score, int)
+            or isinstance(score, bool)
+            or score < 0
+        ):
+            return jsonify({
+                "success": False,
+                "error": "Both scores must be whole numbers, zero or greater",
+            }), 400
+
+    if not status:
+        return jsonify({
+            "success": False,
+            "error": "Select a match status",
+        }), 400
+
+    try:
+        valid_status = await db_fetch_one(
+            """
+            SELECT status
+            FROM matches
+            WHERE status = :status
+            LIMIT 1
+            """,
+            {"status": status},
+        )
+
+        if not valid_status:
+            return jsonify({
+                "success": False,
+                "error": "The selected match status is not available",
+            }), 400
+
+        updated = await db_fetch_one(
+            """
+            UPDATE matches
+            SET
+                home_score = :home_score,
+                away_score = :away_score,
+                status = :status
+            WHERE id = :match_id
+            RETURNING id
+            """,
+            {
+                "home_score": home_score,
+                "away_score": away_score,
+                "status": status,
+                "match_id": match_id,
+            },
+        )
+
+        if not updated:
+            return jsonify({
+                "success": False,
+                "error": "Match not found",
+            }), 404
+
+        return jsonify({
+            "success": True,
+            "message": "Match updated successfully",
+            "match_id": updated["id"],
+        })
+
+    except Exception:
+        logger.exception("Match update failed")
+        return jsonify({
+            "success": False,
+            "error": "Could not update match",
+        }), 500
+
+
 @app.errorhandler(500)
 def internal_error(error):
     log_json(
