@@ -14,6 +14,8 @@ import {
 
 import {
   gradeMatch,
+  getSettlementStatuses,
+  getSettlementMatches,
 } from "../api/betsWallet";
 
 import {
@@ -30,6 +32,7 @@ import {
   adminSendVipPushTest,
   vipPushPublicKey,
   adminPushSubscribe,
+  adminPushUnsubscribe,
   adminApproveUpgrade,
   adminDeclineUpgrade,
   adminPreviewVipPicks,
@@ -57,6 +60,8 @@ export default function AdminDashboard() {
   const pendingUpgradeRequests = upgradeRequests.filter(
     (req) => String(req.status || "").toLowerCase() === "pending"
   );
+  const pendingActionCount =
+    pendingVips.length + pendingUpgradeRequests.length;
   const [allMatches, setAllMatches] = useState([]);
 const [selectedVIPs, setSelectedVIPs] = useState([]);
   const [selectedMatches, setSelectedMatches] = useState([]);
@@ -73,8 +78,27 @@ const [selectedVIPs, setSelectedVIPs] = useState([]);
   const [filterPlan, setFilterPlan] = useState("all");
   const [activeSection, setActiveSection] = useState("overview");
 
-  const [gradeMatchId, setGradeMatchId] = useState("");
-  const [gradeResult, setGradeResult] = useState("");
+  const [settlementDate, setSettlementDate] = useState(() => {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Africa/Nairobi",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(new Date());
+
+    const values = Object.fromEntries(
+      parts.map((part) => [part.type, part.value])
+    );
+
+    return `${values.year}-${values.month}-${values.day}`;
+  });
+  const [settlementMatches, setSettlementMatches] = useState([]);
+  const [settlementStatuses, setSettlementStatuses] = useState([]);
+  const [settlementMatchId, setSettlementMatchId] = useState("");
+  const [homeScore, setHomeScore] = useState("");
+  const [awayScore, setAwayScore] = useState("");
+  const [settlementStatus, setSettlementStatus] = useState("");
+  const [settlementLoading, setSettlementLoading] = useState(false);
 
   // Read-only bet management
   const [betRecords, setBetRecords] = useState([]);
@@ -111,6 +135,7 @@ const [selectedVIPs, setSelectedVIPs] = useState([]);
     if (Array.isArray(payload?.vips)) return payload.vips;
     if (Array.isArray(payload?.requests)) return payload.requests;
     if (Array.isArray(payload?.matches)) return payload.matches;
+    if (Array.isArray(payload?.statuses)) return payload.statuses;
     if (Array.isArray(payload?.users)) return payload.users;
     if (Array.isArray(payload?.tickets)) return payload.tickets;
     if (Array.isArray(payload?.summary)) return payload.summary;
@@ -153,6 +178,45 @@ setDistributionSummary([]);
 
   const [pushLoading, setPushLoading] = useState(false);
   const [pushMessage, setPushMessage] = useState("");
+  const [adminPushEnabled, setAdminPushEnabled] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+
+    const checkAdminPushStatus = async () => {
+      if (
+        !token ||
+        !("serviceWorker" in navigator) ||
+        !("PushManager" in window) ||
+        !("Notification" in window)
+      ) {
+        if (active) setAdminPushEnabled(false);
+        return;
+      }
+
+      try {
+        const registration =
+          await navigator.serviceWorker.getRegistration();
+        const subscription = registration
+          ? await registration.pushManager.getSubscription()
+          : null;
+
+        if (active) {
+          setAdminPushEnabled(
+            Boolean(subscription) && Notification.permission === "granted"
+          );
+        }
+      } catch (error) {
+        console.error("[ADMIN PUSH] Status check failed:", error);
+        if (active) setAdminPushEnabled(false);
+      }
+    };
+
+    checkAdminPushStatus();
+    return () => {
+      active = false;
+    };
+  }, [token]);
 
   const enableAdminNotifications = async () => {
     if (!token) return;
@@ -173,7 +237,11 @@ setDistributionSummary([]);
       const permission = await Notification.requestPermission();
 
       if (permission !== "granted") {
-        throw new Error("Notification permission was not granted.");
+        throw new Error(
+          permission === "denied"
+            ? "Notifications are blocked. Allow them in your browser site settings, then try again."
+            : "Notification permission was not granted."
+        );
       }
 
       const registration = await navigator.serviceWorker.ready;
@@ -182,8 +250,7 @@ setDistributionSummary([]);
       if (!subscription) {
         const keyResponse = await vipPushPublicKey();
         const publicKey =
-          keyResponse?.data?.publicKey ||
-          keyResponse?.publicKey;
+          keyResponse?.data?.publicKey || keyResponse?.publicKey;
 
         if (!keyResponse?.success || !publicKey) {
           throw new Error("Could not load the push notification public key.");
@@ -193,7 +260,6 @@ setDistributionSummary([]);
         const base64 = (publicKey + padding)
           .replace(/-/g, "+")
           .replace(/_/g, "/");
-
         const raw = window.atob(base64);
         const applicationServerKey = Uint8Array.from(
           raw,
@@ -212,10 +278,66 @@ setDistributionSummary([]);
         throw new Error(saved?.error || "Could not save the admin device.");
       }
 
+      setAdminPushEnabled(true);
       setPushMessage("Admin notifications are enabled on this device.");
     } catch (error) {
       console.error("[ADMIN PUSH] Enable failed:", error);
       setPushMessage(error?.message || "Could not enable admin notifications.");
+    } finally {
+      setPushLoading(false);
+    }
+  };
+
+  const disableAdminNotifications = async () => {
+    if (!token) return;
+
+    setPushLoading(true);
+    setPushMessage("");
+
+    try {
+      if (
+        !("serviceWorker" in navigator) ||
+        !("PushManager" in window)
+      ) {
+        setAdminPushEnabled(false);
+        setPushMessage("This browser does not support push notifications.");
+        return;
+      }
+
+      const registration =
+        await navigator.serviceWorker.getRegistration();
+      const subscription = registration
+        ? await registration.pushManager.getSubscription()
+        : null;
+
+      if (!subscription) {
+        setAdminPushEnabled(false);
+        setPushMessage("There is no active push subscription on this device.");
+        return;
+      }
+
+      const removed = await adminPushUnsubscribe(
+        token,
+        subscription.endpoint
+      );
+
+      if (!removed?.success) {
+        throw new Error(
+          removed?.error || "Could not disable admin notifications."
+        );
+      }
+
+      setAdminPushEnabled(false);
+      const browserRemoved = await subscription.unsubscribe();
+
+      setPushMessage(
+        browserRemoved
+          ? "Admin notifications are disabled on this device."
+          : "Server notifications are disabled, but the browser subscription could not be removed."
+      );
+    } catch (error) {
+      console.error("[ADMIN PUSH] Disable failed:", error);
+      setPushMessage(error?.message || "Could not disable admin notifications.");
     } finally {
       setPushLoading(false);
     }
@@ -242,7 +364,18 @@ setDistributionSummary([]);
         adminPreviewVipPicks(token, 50),
 ]);
 
-      setVips(safeArray(vipList));
+      const freshVips = safeArray(vipList);
+      setVips(freshVips);
+      setSelectedVIPs((prev) =>
+        prev.filter((number) =>
+          freshVips.some(
+            (v) =>
+              v.approved &&
+              String(v.number) === String(number) &&
+              Number(v.daily_quota_remaining) > 0
+          )
+        )
+      );
       setPendingVips(safeArray(pendingList));
       setUpgradeRequests(safeArray(upgrades));
       setAllMatches(safeArray(matches));
@@ -281,6 +414,84 @@ setDistributionSummary([]);
 
     return () => clearInterval(interval);
   }, [token, fetchAll]);
+
+  // Load the available match statuses from the database.
+  useEffect(() => {
+    if (!token) return;
+
+    let active = true;
+
+    const loadStatuses = async () => {
+      try {
+        const res = await getSettlementStatuses(token);
+
+        if (!active) return;
+
+        if (!res?.success) {
+          setSettlementStatuses([]);
+          showError(res?.error || res?.message || "Could not load match statuses");
+          return;
+        }
+
+        setSettlementStatuses(safeArray(res));
+      } catch (error) {
+        if (active) {
+          console.error("[ADMIN] Settlement statuses failed:", error);
+          showError(error);
+        }
+      }
+    };
+
+    loadStatuses();
+
+    return () => {
+      active = false;
+    };
+  }, [token, safeArray, showError]);
+
+  // Load unfinished matches for the selected Nairobi calendar date.
+  useEffect(() => {
+    if (!token || !settlementDate) return;
+
+    let active = true;
+
+    setSettlementMatchId("");
+    setHomeScore("");
+    setAwayScore("");
+    setSettlementStatus("");
+    setSettlementLoading(true);
+
+    const loadMatches = async () => {
+      try {
+        const res = await getSettlementMatches(settlementDate, token);
+
+        if (!active) return;
+
+        if (!res?.success) {
+          setSettlementMatches([]);
+          showError(res?.error || res?.message || "Could not load matches");
+          return;
+        }
+
+        setSettlementMatches(safeArray(res));
+      } catch (error) {
+        if (active) {
+          console.error("[ADMIN] Settlement matches failed:", error);
+          setSettlementMatches([]);
+          showError(error);
+        }
+      } finally {
+        if (active) setSettlementLoading(false);
+      }
+    };
+
+    loadMatches();
+
+    return () => {
+      active = false;
+    };
+  }, [token, settlementDate, safeArray, showError]);
+
 
   useEffect(() => {
     if (!token) {
@@ -794,52 +1005,87 @@ setDistributionSummary([]);
   };
 
   const gradeMatchResult = async () => {
-    if (
-      !gradeMatchId ||
-      !gradeResult
-    ) {
+    if (!settlementMatchId || homeScore === "" || awayScore === "" || !settlementStatus) {
       setMsg({
         type: "error",
-        text: "Provide a match ID and result.",
+        text: "Select a match, enter both scores, and choose a status.",
       });
-
       return;
     }
 
+    const home = Number(homeScore);
+    const away = Number(awayScore);
+
+    if (
+      !Number.isInteger(home) ||
+      home < 0 ||
+      !Number.isInteger(away) ||
+      away < 0
+    ) {
+      setMsg({
+        type: "error",
+        text: "Both scores must be whole numbers, zero or greater.",
+      });
+      return;
+    }
+
+    const selectedMatch = settlementMatches.find(
+      (match) => String(match.id) === String(settlementMatchId)
+    );
+
+    const matchName = selectedMatch
+      ? `${selectedMatch.home_team_name} vs ${selectedMatch.away_team_name}`
+      : `Match ${settlementMatchId}`;
+
     if (
       !window.confirm(
-        `Grade match ${gradeMatchId} as "${gradeResult}"?`
+        `Update ${matchName} to ${home} - ${away} with status "${settlementStatus}"?`
       )
     ) {
       return;
     }
 
     setLoading(true);
-    setLoadingText("Grading match…");
+    setLoadingText("Updating match result…");
     setMsg(null);
 
     try {
-      await gradeMatch(
-        gradeMatchId,
-        gradeResult
+      const res = await gradeMatch(
+        Number(settlementMatchId),
+        home,
+        away,
+        settlementStatus,
+        token
       );
+
+      if (!res?.success || res?.data?.success === false) {
+        showError(
+          res?.error ||
+          res?.message ||
+          res?.data?.error ||
+          "Could not update match"
+        );
+        return;
+      }
 
       setMsg({
         type: "success",
-        text: "Match graded successfully.",
+        text: "Match record updated successfully. The scheduler will process it automatically.",
       });
 
-      setGradeMatchId("");
-      setGradeResult("");
+      setSettlementMatchId("");
+      setHomeScore("");
+      setAwayScore("");
+      setSettlementStatus("");
 
-      await fetchAll();
-    } catch (e) {
-      console.error(
-        "[ADMIN] Grade match failed:",
-        e
-      );
+      const refreshed = await getSettlementMatches(settlementDate, token);
 
-      showError(e);
+      if (refreshed?.success) {
+        setSettlementMatches(safeArray(refreshed));
+      }
+    } catch (error) {
+      console.error("[ADMIN] Grade match failed:", error);
+      showError(error);
     } finally {
       setLoading(false);
       setLoadingText("");
@@ -909,10 +1155,18 @@ setDistributionSummary([]);
     [vips]
   );
 
+  const eligibleApprovedVips = useMemo(
+    () =>
+      approvedVips.filter(
+        (v) => Number(v.daily_quota_remaining) > 0
+      ),
+    [approvedVips]
+  );
+
   const stats = useMemo(
     () => {
       const money = (value) =>
-        `KES ${Number(value || 0).toLocaleString("en-KE", {
+        `${Number(value || 0).toLocaleString("en-KE", {
           minimumFractionDigits: 2,
           maximumFractionDigits: 2,
         })}`;
@@ -921,7 +1175,7 @@ setDistributionSummary([]);
         const amount = Number(value || 0);
         const sign = amount > 0 ? "+" : amount < 0 ? "-" : "";
 
-        return `${sign}KES ${Math.abs(amount).toLocaleString("en-KE", {
+        return `${sign}${Math.abs(amount).toLocaleString("en-KE", {
           minimumFractionDigits: 2,
           maximumFractionDigits: 2,
         })}`;
@@ -970,7 +1224,7 @@ setDistributionSummary([]);
         {
           label: "High-stake bets today",
           value: bettingOverview?.high_stake_bets_today ?? "—",
-          detail: "Individual stakes strictly above KES 1,500",
+          detail: "Individual stakes strictly above 1,500",
           icon: "◆",
         },
         {
@@ -1002,7 +1256,7 @@ setDistributionSummary([]);
           value: bettingOverview
             ? signedMoney(bettingOverview.house_capital_profit_loss)
             : "—",
-          detail: "House balance minus original KES 500 capital",
+          detail: "House balance minus original 500 capital",
           icon: bettingOverview?.house_capital_profit_loss >= 0 ? "↗" : "↘",
         },
         {
@@ -1048,13 +1302,19 @@ setDistributionSummary([]);
     number,
     checked
   ) => {
+    const eligible = eligibleApprovedVips.some(
+      (v) => String(v.number) === String(number)
+    );
+
+    if (checked && !eligible) return;
+
     setSelectedVIPs((prev) =>
       checked
-        ? prev.includes(number)
+        ? prev.some((n) => String(n) === String(number))
           ? prev
           : [...prev, number]
         : prev.filter(
-            (n) => n !== number
+            (n) => String(n) !== String(number)
           )
     );
   };
@@ -1083,13 +1343,18 @@ setDistributionSummary([]);
 
   const selectAllApprovedVips =
     () => {
+      const allEligibleSelected =
+        eligibleApprovedVips.length > 0 &&
+        eligibleApprovedVips.every((v) =>
+          selectedVIPs.some(
+            (number) => String(number) === String(v.number)
+          )
+        );
+
       setSelectedVIPs(
-        selectedVIPs.length ===
-          approvedVips.length
+        allEligibleSelected
           ? []
-          : approvedVips.map(
-              (v) => v.number
-            )
+          : eligibleApprovedVips.map((v) => v.number)
       );
     };
 
@@ -1114,10 +1379,10 @@ setDistributionSummary([]);
         <div className="absolute -right-32 top-1/3 h-96 w-96 rounded-full bg-cyan-500/10 blur-3xl" />
       </div>
 
-      <header className="sticky top-0 z-40 border-b border-white/10 bg-[#070b14]/85 backdrop-blur-xl">
-        <div className="mx-auto flex max-w-[1600px] items-center justify-between gap-4 px-4 py-3 sm:px-6">
-          <div className="flex min-w-0 items-center gap-3">
-            <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-indigo-500 to-cyan-400 text-lg font-black text-white shadow-lg shadow-indigo-500/20">
+      <header className="sticky top-0 z-40 border-b border-white/[0.08] bg-[#080e1b]/90 shadow-lg shadow-black/10 backdrop-blur-2xl">
+        <div className="mx-auto flex max-w-[1600px] items-center justify-between gap-1.5 px-2.5 py-2.5 sm:gap-4 sm:px-6 sm:py-3">
+          <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+            <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-white/15 bg-gradient-to-br from-indigo-500 via-indigo-500 to-cyan-400 text-lg font-black text-white shadow-lg shadow-indigo-500/20">
               L
             </div>
 
@@ -1126,7 +1391,7 @@ setDistributionSummary([]);
                 LilyMac Admin
               </p>
 
-              <p className="truncate text-xs text-slate-500">
+              <p className="hidden truncate text-xs text-slate-500 sm:block">
                 Operations control center
               </p>
             </div>
@@ -1135,11 +1400,11 @@ setDistributionSummary([]);
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={fetchAll}
+              onClick={() => fetchAll(false)}
               disabled={loading}
-              className="hidden rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm font-medium text-slate-300 transition hover:bg-white/[0.08] disabled:opacity-50 sm:inline-flex"
+              className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl border border-white/10 bg-white/[0.045] px-2.5 py-2 text-sm font-semibold text-slate-300 transition hover:bg-white/[0.08] disabled:opacity-50 sm:px-3"
             >
-              ↻ Refresh
+              ↻ <span className="hidden sm:inline">Refresh</span>
             </button>
 
             <div className="hidden items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 sm:flex">
@@ -1153,17 +1418,46 @@ setDistributionSummary([]);
 
             <button
               type="button"
-              onClick={enableAdminNotifications}
+              onClick={
+                adminPushEnabled
+                  ? disableAdminNotifications
+                  : enableAdminNotifications
+              }
               disabled={pushLoading || !token}
-              className="rounded-xl border border-cyan-400/20 bg-cyan-400/10 px-3 py-2 text-sm font-semibold text-cyan-300 transition hover:bg-cyan-400/20 disabled:opacity-50"
+              aria-pressed={adminPushEnabled}
+              title={
+                adminPushEnabled
+                  ? "Disable admin push notifications"
+                  : "Enable admin push notifications"
+              }
+              className={`rounded-xl border px-2 py-2 text-xs font-semibold transition disabled:opacity-50 sm:px-3 sm:text-sm ${
+                adminPushEnabled
+                  ? "border-emerald-400/20 bg-emerald-400/10 text-emerald-300 hover:bg-emerald-400/20"
+                  : "border-cyan-400/20 bg-cyan-400/10 text-cyan-300 hover:bg-cyan-400/20"
+              }`}
             >
-              {pushLoading ? "Enabling..." : "Enable notifications"}
+              {pushLoading ? (
+                <>
+                  <span className="sm:hidden">Wait…</span>
+                  <span className="hidden sm:inline">Please wait...</span>
+                </>
+              ) : adminPushEnabled ? (
+                <>
+                  <span className="sm:hidden">Push on</span>
+                  <span className="hidden sm:inline">Disable notifications</span>
+                </>
+              ) : (
+                <>
+                  <span className="sm:hidden">Push</span>
+                  <span className="hidden sm:inline">Enable notifications</span>
+                </>
+              )}
             </button>
 
             <button
               type="button"
               onClick={logout}
-              className="rounded-xl border border-red-400/20 bg-red-400/10 px-3 py-2 text-sm font-semibold text-red-300 transition hover:bg-red-400/20"
+              className="shrink-0 rounded-xl border border-rose-400/20 bg-rose-400/[0.07] px-2.5 py-2 text-xs font-bold text-rose-300 transition hover:bg-red-400/20"
             >
               Logout
             </button>
@@ -1171,19 +1465,19 @@ setDistributionSummary([]);
         </div>
       </header>
 
-      <main className="relative mx-auto max-w-[1600px] px-4 py-5 sm:px-6 lg:py-7">
-        <div className="mb-6">
-          <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
+      <main className="relative mx-auto max-w-[1600px] px-3 py-4 sm:px-6 sm:py-5 lg:py-7">
+        <div className="mb-5 overflow-hidden rounded-2xl border border-cyan-400/[0.12] bg-gradient-to-br from-[#14243a]/90 via-[#101b2d]/85 to-[#0b1422]/90 p-4 shadow-xl shadow-black/20 sm:mb-6 sm:rounded-3xl sm:p-6 lg:p-7">
+          <div className="flex flex-col justify-between gap-5 lg:flex-row lg:items-end">
             <div>
-              <p className="mb-1 text-xs font-semibold uppercase tracking-[0.22em] text-cyan-400">
+              <p className="mb-2 inline-flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.24em] text-cyan-300 sm:text-xs">
                 Command center
               </p>
 
-              <h1 className="text-2xl font-bold tracking-tight text-white sm:text-3xl">
-                Admin Dashboard
+              <h1 className="text-2xl font-extrabold tracking-tight text-white sm:text-3xl lg:text-4xl">
+                LilyMac Command Center
               </h1>
 
-              <p className="mt-1 max-w-2xl text-sm text-slate-400">
+              <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-400 sm:text-[15px]">
                 Manage VIPs, picks,
                 the available data and
                 match settlement from
@@ -1197,7 +1491,7 @@ setDistributionSummary([]);
               )}
             </div>
 
-            <div className="rounded-2xl border border-white/10 bg-white/[0.035] px-4 py-3 text-xs text-slate-400">
+            <div className="inline-flex items-center gap-2 self-start rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-xs text-slate-400 lg:self-auto">
               Auto refresh{" "}
               <span className="font-semibold text-slate-200">
                 30s
@@ -1212,7 +1506,7 @@ setDistributionSummary([]);
           </div>
         )}
 
-        <nav className="mb-6 flex gap-1 overflow-x-auto rounded-2xl border border-white/10 bg-white/[0.025] p-1">
+        <nav className="mb-6 flex gap-1.5 overflow-x-auto rounded-2xl border border-white/[0.08] bg-[#0d1625]/90 p-1.5 shadow-lg shadow-black/10 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {[
             ["overview", "Overview"],
             ["bets", "Bet Management"],
@@ -1225,6 +1519,7 @@ setDistributionSummary([]);
               "settlement",
               "Settlement",
             ],
+            ["transactions", "Transactions"],
           ].map(
             ([id, label]) => (
               <button
@@ -1236,13 +1531,18 @@ setDistributionSummary([]);
                     fetchBets(1);
                   }
                 }}
-                className={`whitespace-nowrap rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
+                className={`whitespace-nowrap rounded-xl px-3.5 py-2.5 text-xs font-bold transition sm:px-4 sm:text-sm ${
                   activeSection === id
-                    ? "bg-white text-slate-950 shadow"
-                    : "text-slate-400 hover:bg-white/[0.06] hover:text-white"
+                    ? "border border-cyan-300/20 bg-gradient-to-r from-cyan-300 to-sky-400 text-slate-950 shadow-md shadow-cyan-500/10"
+                    : "border border-transparent text-slate-400 hover:bg-white/[0.06] hover:text-slate-100"
                 }`}
               >
                 {label}
+                {id === "vip" && pendingActionCount > 0 && (
+                  <span className="ml-2 inline-flex h-5 min-w-5 items-center justify-center rounded-full border border-rose-300/20 bg-rose-500 px-1.5 text-[10px] font-extrabold text-white shadow-md shadow-rose-500/20">
+                    {pendingActionCount > 99 ? "99+" : pendingActionCount}
+                  </span>
+                )}
               </button>
             )
           )}
@@ -1260,10 +1560,10 @@ setDistributionSummary([]);
               ))}
             </section>
 
-            <section className="mt-6 rounded-2xl border border-white/10 bg-white/[0.035] p-4 sm:p-5">
-              <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <section className="mt-6 overflow-hidden rounded-3xl border border-white/[0.09] bg-gradient-to-br from-[#111b2d]/95 via-[#0d1626]/95 to-[#0a1220]/95 p-4 shadow-xl shadow-black/20 sm:p-5">
+              <div className="mb-5 flex flex-col gap-4 border-b border-white/[0.06] pb-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <h2 className="text-base font-bold text-white sm:text-lg">
+                  <h2 className="text-base font-extrabold tracking-tight text-white sm:text-lg">
                     House Balance History
                   </h2>
                   <p className="mt-1 text-xs text-slate-400">
@@ -1282,7 +1582,7 @@ setDistributionSummary([]);
                       key={value}
                       type="button"
                       onClick={() => setHouseBalanceRange(value)}
-                      className={`rounded-lg border px-3 py-2 text-xs font-semibold transition ${
+                      className={`rounded-xl border px-3.5 py-2 text-xs font-bold transition ${
                         houseBalanceRange === value
                           ? "border-cyan-400/50 bg-cyan-400/10 text-cyan-300"
                           : "border-white/10 text-slate-400 hover:bg-white/[0.06] hover:text-white"
@@ -1308,11 +1608,11 @@ setDistributionSummary([]);
 
               {houseBalanceHistory?.points?.length > 0 && (
                 <>
-                  <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
-                    <div className="rounded-xl border border-white/5 bg-black/10 p-3">
+                  <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                    <div className="rounded-2xl border border-cyan-400/15 bg-gradient-to-br from-cyan-400/[0.08] to-transparent p-4 shadow-inner shadow-black/10">
                       <p className="text-xs text-slate-500">Current wallet balance</p>
                       <p className="mt-1 text-base font-bold text-white">
-                        KES {Number(
+                        {Number(
                           houseBalanceHistory.current_balance || 0
                         ).toLocaleString("en-KE", {
                           minimumFractionDigits: 2,
@@ -1321,10 +1621,10 @@ setDistributionSummary([]);
                       </p>
                     </div>
 
-                    <div className="rounded-xl border border-white/5 bg-black/10 p-3">
+                    <div className="rounded-2xl border border-cyan-400/15 bg-gradient-to-br from-cyan-400/[0.08] to-transparent p-4 shadow-inner shadow-black/10">
                       <p className="text-xs text-slate-500">First displayed balance</p>
                       <p className="mt-1 text-base font-bold text-white">
-                        KES {Number(
+                        {Number(
                           houseBalanceHistory.points[0].balance
                         ).toLocaleString("en-KE", {
                           minimumFractionDigits: 2,
@@ -1333,7 +1633,7 @@ setDistributionSummary([]);
                       </p>
                     </div>
 
-                    <div className="col-span-2 rounded-xl border border-white/5 bg-black/10 p-3 sm:col-span-1">
+                    <div className="rounded-2xl border border-emerald-400/15 bg-gradient-to-br from-emerald-400/[0.08] to-transparent p-4 shadow-inner shadow-black/10">
                       <p className="text-xs text-slate-500">Change across displayed points</p>
                       {(() => {
                         const points = houseBalanceHistory.points;
@@ -1345,7 +1645,7 @@ setDistributionSummary([]);
                           <p className={`mt-1 text-base font-bold ${
                             change >= 0 ? "text-emerald-400" : "text-rose-400"
                           }`}>
-                            {change >= 0 ? "+" : "-"}KES {Math.abs(
+                            {change >= 0 ? "+" : "-"}{Math.abs(
                               change
                             ).toLocaleString("en-KE", {
                               minimumFractionDigits: 2,
@@ -1471,193 +1771,6 @@ setDistributionSummary([]);
             </section>
 
 
-            {pendingVips.length > 0 || pendingUpgradeRequests.length > 0 ? (
-              <section className="mt-6 grid gap-5 xl:grid-cols-2">
-                {pendingVips.length > 0 && (
-              <Card
-                title="Pending VIP approvals"
-                subtitle="Quick review queue"
-                action={
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setActiveSection(
-                        "vip"
-                      )
-                    }
-                    className="text-xs font-semibold text-cyan-400 hover:text-cyan-300"
-                  >
-                    View all →
-                  </button>
-                }
-              >
-                <div className="space-y-2">
-                  {pendingVips
-                    .slice(0, 5)
-                    .map((v) => (
-                      <div
-                        key={v.id}
-                        className="flex items-center justify-between gap-3 rounded-xl border border-white/5 bg-white/[0.025] p-3"
-                      >
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-semibold text-white">
-                            {v.name ||
-                              "Unnamed VIP"}
-                          </p>
-
-                          <p className="text-xs text-slate-500">
-                            {v.number ||
-                              "No number"}
-                          </p>
-                        </div>
-
-                        <div className="flex shrink-0 gap-2">
-                          <Btn
-                            success
-                            small
-                            onClick={() =>
-                              vipAction(
-                                v.id,
-                                "approve"
-                              )
-                            }
-                          >
-                            Approve
-                          </Btn>
-
-                          <Btn
-                            danger
-                            small
-                            onClick={() =>
-                              vipAction(
-                                v.id,
-                                "decline"
-                              )
-                            }
-                          >
-                            Decline
-                          </Btn>
-
-                          <Btn
-                            danger
-                            small
-                            onClick={() =>
-                              vipAction(
-                                v.id,
-                                "delete"
-                              )
-                            }
-                          >
-                            Delete
-                          </Btn>
-                        </div>
-                      </div>
-                    ))}
-
-                </div>
-              </Card>
-
-              )}
-                {pendingUpgradeRequests.length > 0 && (
-              <Card
-                title="Subscription requests"
-                subtitle="Latest requests requiring attention"
-                action={
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setActiveSection(
-                        "vip"
-                      )
-                    }
-                    className="text-xs font-semibold text-cyan-400 hover:text-cyan-300"
-                  >
-                    Manage →
-                  </button>
-                }
-              >
-                <div className="space-y-2">
-                  {pendingUpgradeRequests
-                    .slice(0, 5)
-                    .map((req) => (
-                      <div
-                        key={req.id}
-                        className="flex items-center justify-between gap-3 rounded-xl border border-white/5 bg-white/[0.025] p-3"
-                      >
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-semibold text-white">
-                            {req.vip_name ||
-                              req.name ||
-                              req.number ||
-                              "VIP"}
-                          </p>
-
-                          <p className="text-xs text-slate-500">
-                            {req.number ||
-                              "No number"}{" "}
-                            →{" "}
-                            {req.to_plan ||
-                              req.plan ||
-                              req.toPlan ||
-                              "—"}
-                          </p>
-                        </div>
-
-                        <div className="flex shrink-0 items-center gap-2">
-                          {req.status === "pending" ? (
-                            <>
-                              <Btn
-                                success
-                                small
-                                onClick={() =>
-                                  upgradeAction(
-                                    req.id,
-                                    "approve",
-                                    req.request_type
-                                  )
-                                }
-                              >
-                                Approve
-                              </Btn>
-
-                              <Btn
-                                danger
-                                small
-                                onClick={() =>
-                                  upgradeAction(
-                                    req.id,
-                                    "decline",
-                                    req.request_type
-                                  )
-                                }
-                              >
-                                Decline
-                              </Btn>
-                            </>
-                          ) : (
-                            <span
-                              className={`rounded-full px-2.5 py-1 text-[11px] font-bold uppercase ${
-                                req.status === "approved"
-                                  ? "bg-emerald-500/15 text-emerald-400"
-                                  : "bg-red-500/15 text-red-400"
-                              }`}
-                            >
-                              {req.status || "unknown"}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-
-                  {!pendingUpgradeRequests.length && (
-                    <Empty text="No subscription requests." />
-                  )}
-                </div>
-              </Card>
-                )}
-                )}
-              </section>
-            ) : null}
           </>
         )}
 
@@ -1715,7 +1828,7 @@ setDistributionSummary([]);
               <div className="mt-4 overflow-hidden rounded-2xl border border-white/10">
                 <div className="overflow-x-auto">
                   <table className="min-w-[850px] w-full text-left text-sm">
-                    <thead className="bg-white/[0.035] text-xs uppercase tracking-wider text-slate-500">
+                    <thead className="bg-[#162338]/90 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">
                       <tr>
                         <th className="px-4 py-3">
                           VIP
@@ -1748,7 +1861,7 @@ setDistributionSummary([]);
                         (v) => (
                           <tr
                             key={v.id}
-                            className="transition hover:bg-white/[0.025]"
+                            className="transition-colors duration-150 hover:bg-cyan-400/[0.045]"
                           >
                             <td className="px-4 py-3">
                               <div>
@@ -1873,7 +1986,7 @@ setDistributionSummary([]);
                     (v) => (
                       <div
                         key={v.id}
-                        className="flex items-center justify-between gap-3 rounded-xl border border-white/5 bg-white/[0.025] p-3"
+                        className="flex flex-col gap-3 rounded-2xl border border-white/[0.07] bg-gradient-to-r from-white/[0.035] to-white/[0.015] p-4 transition-colors hover:border-cyan-400/20 sm:flex-row sm:items-center sm:justify-between"
                       >
                         <div>
                           <p className="text-sm font-semibold text-white">
@@ -1887,7 +2000,7 @@ setDistributionSummary([]);
                           </p>
                         </div>
 
-                        <div className="flex gap-2">
+                        <div className="flex flex-wrap gap-2">
                           <Btn
                             success
                             small
@@ -1948,7 +2061,7 @@ setDistributionSummary([]);
                     (req) => (
                       <div
                         key={req.id}
-                        className="flex items-center justify-between gap-3 rounded-xl border border-white/5 bg-white/[0.025] p-3"
+                        className="flex flex-col gap-3 rounded-2xl border border-white/[0.07] bg-gradient-to-r from-white/[0.035] to-white/[0.015] p-4 transition-colors hover:border-cyan-400/20 sm:flex-row sm:items-center sm:justify-between"
                       >
                         <div>
                           <p className="text-sm font-semibold text-white">
@@ -1973,7 +2086,7 @@ setDistributionSummary([]);
                           </p>
                         </div>
 
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
                           {req.status === "pending" ? (
                             <>
                               <Btn
@@ -2054,19 +2167,27 @@ setDistributionSummary([]);
                     selectAllApprovedVips
                   }
                   allSelected={
-                    approvedVips.length >
-                      0 &&
-                    selectedVIPs.length ===
-                      approvedVips.length
+                    eligibleApprovedVips.length > 0 &&
+                    eligibleApprovedVips.every((v) =>
+                      selectedVIPs.some(
+                        (number) => String(number) === String(v.number)
+                      )
+                    )
                   }
                 >
                   {approvedVips.map(
                     (v) => (
                       <CheckRow
                         key={v.number}
-                        checked={selectedVIPs.includes(
-                          v.number
+                        checked={selectedVIPs.some(
+                          (number) => String(number) === String(v.number)
                         )}
+                        disabled={Number(v.daily_quota_remaining) <= 0}
+                        status={
+                          Number(v.daily_quota_remaining) <= 0
+                            ? "Daily quota full"
+                            : `${v.daily_quota_remaining} picks remaining`
+                        }
                         onChange={(
                           checked
                         ) =>
@@ -2090,6 +2211,11 @@ setDistributionSummary([]);
                   {!approvedVips.length && (
                     <Empty text="No approved VIPs." />
                   )}
+
+                  {approvedVips.length > 0 &&
+                    eligibleApprovedVips.length === 0 && (
+                      <Empty text="All approved VIPs have used their daily quota." />
+                    )}
 
                   <div className="mt-4 border-t border-white/10 pt-4">
                     <Btn
@@ -2281,8 +2407,8 @@ setDistributionSummary([]);
                 </Btn>
               }
             >
-              <div className="grid gap-3 md:grid-cols-4">
-                <div className="md:col-span-2">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-4">
+                <div className="sm:col-span-2 md:col-span-2">
                   <Input
                     placeholder="Search phone, user ID or bet ID"
                     value={betSearch}
@@ -2368,7 +2494,7 @@ setDistributionSummary([]);
                     return (
                       <div
                         key={recordKey}
-                        className="overflow-hidden rounded-2xl border border-white/10 bg-white/[0.025]"
+                        className="overflow-hidden rounded-2xl border border-white/[0.08] bg-gradient-to-br from-[#142137]/75 to-[#0b1422]/90 shadow-lg shadow-black/10 transition-colors hover:border-cyan-400/20"
                       >
                         <button
                           type="button"
@@ -2377,7 +2503,7 @@ setDistributionSummary([]);
                               isExpanded ? null : recordKey
                             )
                           }
-                          className="w-full p-4 text-left transition hover:bg-white/[0.035]"
+                          className="w-full p-4 text-left transition-colors duration-200 hover:bg-cyan-400/[0.035] sm:p-5"
                         >
                           <div className="flex flex-wrap items-start justify-between gap-3">
                             <div>
@@ -2438,7 +2564,7 @@ setDistributionSummary([]);
                         </button>
 
                         {isExpanded && (
-                          <div className="border-t border-white/10 bg-black/10 p-4">
+                          <div className="border-t border-cyan-400/10 bg-[#081321]/80 p-4 sm:p-5">
                             <div className="mb-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
                               <MiniMetric
                                 label="Bet ID"
@@ -2465,7 +2591,7 @@ setDistributionSummary([]);
                                 {selections.map((selection, index) => (
                                   <div
                                     key={`${recordKey}-selection-${index}`}
-                                    className="rounded-xl border border-white/5 bg-white/[0.025] p-3"
+                                    className="rounded-xl border border-white/[0.07] bg-white/[0.035] p-3 transition-colors hover:border-cyan-400/15"
                                   >
                                     <div className="flex flex-wrap justify-between gap-2">
                                       <p className="text-sm font-semibold text-white">
@@ -2508,7 +2634,7 @@ setDistributionSummary([]);
                 </div>
               )}
 
-              <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-white/10 pt-4">
+              <div className="mt-5 flex flex-col flex-wrap items-start justify-between gap-3 border-t border-white/[0.08] pt-4 sm:flex-row sm:items-center">
                 <p className="text-xs text-slate-500">
                   Showing {betRecords.length} of {formatNumber(betMeta.total)} records
                 </p>
@@ -2549,60 +2675,136 @@ setDistributionSummary([]);
               title="Grade match"
               subtitle="Settle a match result"
             >
-              <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
-                <Input
-                  placeholder="Match ID"
-                  value={gradeMatchId}
-                  onChange={
-                    setGradeMatchId
-                  }
-                />
+              <div className="grid gap-4">
+                <div>
+                  <label className="mb-1.5 block text-xs font-medium text-slate-400">
+                    Match date
+                  </label>
+                  <Input
+                    type="date"
+                    value={settlementDate}
+                    onChange={setSettlementDate}
+                  />
+                </div>
 
-                <Input
-                  placeholder="Result"
-                  value={gradeResult}
-                  onChange={
-                    setGradeResult
-                  }
-                />
+                <div>
+                  <label className="mb-1.5 block text-xs font-medium text-slate-400">
+                    Unfinished match
+                  </label>
+                  <Select
+                    value={settlementMatchId}
+                    onChange={(value) => {
+                      setSettlementMatchId(value);
+                      setHomeScore("");
+                      setAwayScore("");
+                      setSettlementStatus("");
+                    }}
+                  >
+                    <option value="">
+                      {settlementLoading
+                        ? "Loading matches…"
+                        : settlementMatches.length
+                          ? "Select a match"
+                          : "No unfinished matches for this date"}
+                    </option>
+                    {settlementMatches.map((match) => (
+                      <option key={match.id} value={String(match.id)}>
+                        {match.home_team_name} vs {match.away_team_name}
+                        {match.competition ? ` · ${match.competition}` : ""}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="mb-1.5 block text-xs font-medium text-slate-400">
+                      Home score
+                    </label>
+                    <Input
+                      type="number"
+                      placeholder="Home"
+                      value={homeScore}
+                      onChange={setHomeScore}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mb-1.5 block text-xs font-medium text-slate-400">
+                      Away score
+                    </label>
+                    <Input
+                      type="number"
+                      placeholder="Away"
+                      value={awayScore}
+                      onChange={setAwayScore}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="mb-1.5 block text-xs font-medium text-slate-400">
+                    Match status
+                  </label>
+                  <Select
+                    value={settlementStatus}
+                    onChange={setSettlementStatus}
+                  >
+                    <option value="">Select status</option>
+                    {settlementStatuses.map((status) => (
+                      <option key={status} value={status}>
+                        {status}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
 
                 <Btn
                   success
-                  onClick={
-                    gradeMatchResult
-                  }
+                  onClick={gradeMatchResult}
                   disabled={
                     loading ||
-                    !gradeMatchId ||
-                    !gradeResult
+                    settlementLoading ||
+                    !settlementMatchId ||
+                    homeScore === "" ||
+                    awayScore === "" ||
+                    !settlementStatus
                   }
                 >
                   Grade match
                 </Btn>
-              </div>
 
-              <p className="mt-3 text-xs text-slate-500">
-                Confirm the result carefully
-                before grading because
-                settlement may affect user
-                balances.
-              </p>
+                <p className="text-xs text-slate-500">
+                  This updates only the match result and status in the database.
+                  The existing scheduler handles subsequent bet processing.
+                </p>
+              </div>
             </Card>
 
-            <Card
-              title="System status"
-              subtitle="Current dashboard data"
-            >
-              <div className="grid grid-cols-2 gap-3">
-                <MiniMetric
-                  label="VIPs"
-                  value={vips.length}
-                />
+          </section>
+        )}
 
-                <MiniMetric
-                  label="Matches"
-                  value={allMatches.length}
-                />
+        {activeSection === "transactions" && (
+          <section className="grid gap-5">
+            <Card
+              title="Transactions"
+              subtitle="Manage and review financial transactions"
+            >
+              <div className="flex min-h-56 flex-col items-center justify-center rounded-2xl border border-dashed border-cyan-400/20 bg-cyan-400/[0.03] px-5 py-10 text-center">
+                <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl border border-cyan-400/20 bg-cyan-400/10 text-2xl text-cyan-300">
+                  ⇄
+                </div>
+                <h3 className="text-base font-bold text-white">
+                  Transaction Management
+                </h3>
+                <p className="mt-2 max-w-md text-sm leading-relaxed text-slate-400">
+                  Transaction management tools will appear here soon.
+                  You will be able to review and manage transactions from
+                  one place.
+                </p>
+                <span className="mt-4 rounded-full border border-amber-400/20 bg-amber-400/10 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-amber-300">
+                  Coming soon
+                </span>
               </div>
             </Card>
           </section>
@@ -2628,21 +2830,25 @@ function Card({
   children,
 }) {
   return (
-    <section className="rounded-3xl border border-white/10 bg-white/[0.035] p-4 shadow-xl shadow-black/5 backdrop-blur-sm sm:p-5">
-      <div className="mb-4 flex items-start justify-between gap-4">
-        <div>
-          <h2 className="text-base font-bold text-white">
+    <section className="overflow-hidden rounded-3xl border border-white/[0.09] bg-gradient-to-br from-[#111b2d]/95 via-[#0d1626]/95 to-[#0a1220]/95 p-4 shadow-xl shadow-black/20 backdrop-blur-xl sm:p-5">
+      <div className="mb-5 flex items-start justify-between gap-4 border-b border-white/[0.06] pb-4">
+        <div className="min-w-0">
+          <h2 className="text-base font-bold tracking-tight text-white sm:text-lg">
             {title}
           </h2>
 
           {subtitle && (
-            <p className="mt-0.5 text-xs text-slate-500">
+            <p className="mt-1 text-xs leading-relaxed text-slate-400">
               {subtitle}
             </p>
           )}
         </div>
 
-        {action}
+        {action && (
+          <div className="shrink-0">
+            {action}
+          </div>
+        )}
       </div>
 
       {children}
@@ -2656,25 +2862,80 @@ function StatCard({
   detail,
   icon,
 }) {
+  const styles = {
+    "Total VIPs": {
+      accent: "border-indigo-400/25",
+      icon: "bg-indigo-400/10 text-indigo-300",
+      glow: "from-indigo-500/[0.12]",
+    },
+    "Pending VIPs": {
+      accent: "border-amber-400/25",
+      icon: "bg-amber-400/10 text-amber-300",
+      glow: "from-amber-500/[0.12]",
+    },
+    "Subscription requests": {
+      accent: "border-rose-400/25",
+      icon: "bg-rose-400/10 text-rose-300",
+      glow: "from-rose-500/[0.12]",
+    },
+    "Betting users": {
+      accent: "border-cyan-400/25",
+      icon: "bg-cyan-400/10 text-cyan-300",
+      glow: "from-cyan-500/[0.12]",
+    },
+    "Bets today": {
+      accent: "border-sky-400/25",
+      icon: "bg-sky-400/10 text-sky-300",
+      glow: "from-sky-500/[0.12]",
+    },
+    "High-stake bets today": {
+      accent: "border-orange-400/25",
+      icon: "bg-orange-400/10 text-orange-300",
+      glow: "from-orange-500/[0.12]",
+    },
+    "High-stake amount today": {
+      accent: "border-emerald-400/25",
+      icon: "bg-emerald-400/10 text-emerald-300",
+      glow: "from-emerald-500/[0.12]",
+    },
+    "Total bets overall": {
+      accent: "border-violet-400/25",
+      icon: "bg-violet-400/10 text-violet-300",
+      glow: "from-violet-500/[0.12]",
+    },
+  };
+
+  const style = styles[label] || {
+    accent: "border-white/10",
+    icon: "bg-indigo-400/10 text-indigo-300",
+    glow: "from-indigo-500/[0.08]",
+  };
+
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-4">
-      <div className="flex items-center justify-between">
-        <span className="grid h-8 w-8 place-items-center rounded-lg bg-indigo-500/10 text-xs font-bold text-indigo-300">
+    <div className={`group relative overflow-hidden rounded-2xl border ${style.accent} bg-gradient-to-br ${style.glow} via-[#111b2b]/95 to-[#0b1422] p-4 shadow-lg shadow-black/10 transition duration-200 hover:-translate-y-0.5 hover:border-white/20 hover:shadow-xl sm:p-5`}>
+      <div className="pointer-events-none absolute -right-8 -top-8 h-24 w-24 rounded-full bg-white/[0.025] blur-2xl transition group-hover:bg-white/[0.05]" />
+
+      <div className="relative flex items-start justify-between gap-3">
+        <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl text-sm font-bold ${style.icon}`}>
           {icon}
         </span>
 
-        <span className="text-2xl font-bold tracking-tight text-white">
+        <span className="max-w-[70%] break-words text-right text-xl font-extrabold leading-tight tracking-tight text-white sm:text-2xl">
           {formatNumber(value)}
         </span>
       </div>
 
-      <p className="mt-4 text-sm font-semibold text-slate-200">
-        {label}
-      </p>
+      <div className="relative mt-5">
+        <p className="text-sm font-bold text-slate-100">
+          {label}
+        </p>
 
-      <p className="mt-0.5 text-xs text-slate-500">
-        {detail}
-      </p>
+        <p className="mt-1 text-xs leading-relaxed text-slate-400">
+          {detail}
+        </p>
+      </div>
+
+      <div className="absolute bottom-0 left-4 right-4 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
     </div>
   );
 }
@@ -2722,13 +2983,17 @@ function CheckRow({
   onChange,
   title,
   subtitle,
+  disabled = false,
+  status,
 }) {
   return (
     <label
-      className={`flex cursor-pointer items-center gap-3 rounded-xl border p-3 transition ${
-        checked
-          ? "border-cyan-400/30 bg-cyan-400/10"
-          : "border-transparent hover:bg-white/[0.05]"
+      className={`flex items-center gap-3 rounded-xl border p-3 transition ${
+        disabled
+          ? "cursor-not-allowed border-transparent opacity-50"
+          : checked
+            ? "cursor-pointer border-cyan-400/30 bg-cyan-400/10"
+            : "cursor-pointer border-transparent hover:bg-white/[0.05]"
       }`}
     >
       <span
@@ -2744,13 +3009,14 @@ function CheckRow({
       <input
         type="checkbox"
         checked={checked}
+        disabled={disabled}
         onChange={(e) =>
           onChange(e.target.checked)
         }
         className="sr-only"
       />
 
-      <span className="min-w-0">
+      <span className="min-w-0 flex-1">
         <span className="block truncate text-sm font-medium text-slate-200">
           {title}
         </span>
@@ -2759,10 +3025,19 @@ function CheckRow({
           {subtitle}
         </span>
       </span>
+
+      {status && (
+        <span
+          className={`shrink-0 text-right text-[11px] ${
+            disabled ? "text-amber-400" : "text-slate-500"
+          }`}
+        >
+          {status}
+        </span>
+      )}
     </label>
   );
 }
-
 function Input({
   type = "text",
   placeholder,

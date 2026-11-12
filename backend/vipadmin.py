@@ -2795,15 +2795,67 @@ async def admin_vips():
     rows = await db_fetch_all(
         """
         SELECT
-            id,
-            name,
-            number,
-            subscription,
-            subscription_expiry,
-            approved,
-            (password_hash IS NOT NULL) AS has_password
-        FROM vip_users
-        ORDER BY id DESC
+            v.id,
+            v.name,
+            v.number,
+            v.subscription,
+            v.subscription_expiry,
+            v.approved,
+            (v.password_hash IS NOT NULL) AS has_password,
+            COALESCE(active.daily_quota, 0)::INTEGER AS daily_quota,
+            COALESCE(usage.used, 0)::INTEGER AS daily_used,
+            GREATEST(
+                COALESCE(active.total_picks, 0)
+                - COALESCE(active.delivered_picks, 0),
+                0
+            )::INTEGER AS entitlement_remaining,
+            CASE
+                WHEN active.id IS NULL THEN 0
+                ELSE LEAST(
+                    GREATEST(
+                        COALESCE(active.daily_quota, 0)
+                        - COALESCE(usage.used, 0),
+                        0
+                    ),
+                    GREATEST(
+                        COALESCE(active.total_picks, 0)
+                        - COALESCE(active.delivered_picks, 0),
+                        0
+                    )
+                )
+            END::INTEGER AS daily_quota_remaining
+        FROM vip_users v
+        LEFT JOIN LATERAL (
+            SELECT
+                id,
+                daily_quota,
+                total_picks,
+                delivered_picks
+            FROM vip_subscription_entitlements
+            WHERE vip_id = v.id
+              AND status = 'active'
+            ORDER BY id DESC
+            LIMIT 1
+        ) active ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT GREATEST(
+                COALESCE((
+                    SELECT used
+                    FROM vip_daily_quota_usage
+                    WHERE number = v.number
+                      AND quota_date =
+                          (CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Nairobi')::date
+                ), 0),
+                COALESCE((
+                    SELECT COUNT(*)::INTEGER
+                    FROM vip_picks
+                    WHERE number = v.number
+                      AND (created_at AT TIME ZONE 'Africa/Nairobi')::date =
+                          (CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Nairobi')::date
+                ), 0)
+            ) AS used
+        ) usage ON TRUE
+        ORDER BY v.id DESC
         """
     )
 

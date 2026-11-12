@@ -143,8 +143,24 @@ export const getProfitHistory = () => request("/profit_history");
 // --------------------------------------------------
 // ADMIN
 // --------------------------------------------------
-export const gradeMatch = (match_id, result) =>
-  request("/admin/grade_match", "POST", { match_id, result });
+export const getSettlementStatuses = (token) =>
+  request("/admin/settlement/statuses", "GET", null, token);
+
+export const getSettlementMatches = (date, token) =>
+  request(
+    `/admin/settlement/matches?date=${encodeURIComponent(date)}`,
+    "GET",
+    null,
+    token
+  );
+
+export const gradeMatch = (match_id, home_score, away_score, status, token) =>
+  request(
+    "/admin/grade_match",
+    "POST",
+    { match_id, home_score, away_score, status },
+    token
+  );
 
 export const adminTickets = () => request("/admin/tickets");
 export const adminUsers = () => request("/admin/users");
