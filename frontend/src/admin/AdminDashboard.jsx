@@ -221,7 +221,9 @@ setDistributionSummary([]);
       // Betting overview is independent of VIP list loading.
       const overview = await adminBettingOverview(token);
       setBettingOverview(
-        overview?.success ? safeObj(overview) : null
+        overview?.success
+          ? (safeObj(safeObj(overview)) ?? null)
+          : null
       );
 } catch (e) {
       console.error(
@@ -776,7 +778,20 @@ setDistributionSummary([]);
           maximumFractionDigits: 2,
         })}`;
 
+      const signedMoney = (value) => {
+        const amount = Number(value || 0);
+        const sign = amount > 0 ? "+" : amount < 0 ? "-" : "";
+
+        return `${sign}KES ${Math.abs(amount).toLocaleString("en-KE", {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        })}`;
+      };
+
       const profitLoss = Number(bettingOverview?.profit_loss || 0);
+      const houseCapitalProfitLoss = Number(
+        bettingOverview?.house_capital_profit_loss || 0
+      );
 
       return [
         {
@@ -814,6 +829,36 @@ setDistributionSummary([]);
           icon: "▣",
         },
         {
+          label: "High-stake bets today",
+          value: bettingOverview?.high_stake_bets_today ?? "—",
+          detail: "Individual stakes strictly above KES 1,500",
+          icon: "◆",
+        },
+        {
+          label: "High-stake amount today",
+          value: bettingOverview
+            ? money(bettingOverview.high_stake_amount_today)
+            : "—",
+          detail: "Combined qualifying stakes",
+          icon: "◈",
+        },
+        {
+          label: "Total bets overall",
+          value: bettingOverview?.total_bets ?? "—",
+          detail: bettingOverview
+            ? `${bettingOverview.total_single_bets} singles · ${bettingOverview.total_accumulator_tickets} accumulators`
+            : "All-time betting records",
+          icon: "▤",
+        },
+        {
+          label: "Initial house capital",
+          value: bettingOverview
+            ? money(bettingOverview.initial_house_capital)
+            : "—",
+          detail: "Original starting capital",
+          icon: "◉",
+        },
+        {
           label: "House balance",
           value: bettingOverview
             ? money(bettingOverview.house_balance)
@@ -822,11 +867,29 @@ setDistributionSummary([]);
           icon: "◈",
         },
         {
-          label: "Profit / Loss",
-          value: bettingOverview ? money(profitLoss) : "—",
+          label: "House capital Profit / Loss",
+          value: bettingOverview
+            ? signedMoney(houseCapitalProfitLoss)
+            : "—",
+          detail: "House balance minus initial capital",
+          icon: houseCapitalProfitLoss >= 0 ? "↗" : "↘",
+        },
+        {
+          label: "M-PESA reserved",
+          value: bettingOverview
+            ? money(bettingOverview.mpesa_reserved_amount)
+            : "—",
           detail: bettingOverview
-            ? "Net betting ledger"
-            : "Betting performance",
+            ? `${bettingOverview.mpesa_outstanding_count} unfinished house withdrawals`
+            : "Outstanding house B2C payouts",
+          icon: "◷",
+        },
+        {
+          label: "Betting Profit / Loss",
+          value: bettingOverview
+            ? signedMoney(profitLoss)
+            : "—",
+          detail: "Net betting ledger; excludes M-PESA reservations",
           icon: profitLoss >= 0 ? "↗" : "↘",
         },
         {

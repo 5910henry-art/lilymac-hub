@@ -3652,9 +3652,12 @@ async def admin_betting_overview():
         )
         day_end_ke = day_start_ke + timedelta(days=1)
 
-        # Betting timestamps are stored as naive UTC datetimes.
+        # Database timestamps are stored as naive UTC datetimes.
         day_start_utc = day_start_ke.astimezone(UTC).replace(tzinfo=None)
         day_end_utc = day_end_ke.astimezone(UTC).replace(tzinfo=None)
+
+        initial_house_capital = 500.00
+        high_stake_threshold = 1500
 
         counts = await db_fetch_one(
             """
@@ -3677,11 +3680,54 @@ async def admin_betting_overview():
                     FROM bet_slip
                     WHERE created >= :day_start
                       AND created < :day_end
-                ) AS accumulator_tickets_today
+                ) AS accumulator_tickets_today,
+
+                (
+                    SELECT COUNT(*)
+                    FROM bet
+                ) AS total_single_bets,
+
+                (
+                    SELECT COUNT(*)
+                    FROM bet_slip
+                ) AS total_accumulator_tickets,
+
+                (
+                    SELECT COUNT(*)
+                    FROM bet
+                    WHERE created >= :day_start
+                      AND created < :day_end
+                      AND amount > :high_stake_threshold
+                ) AS high_stake_single_bets_today,
+
+                (
+                    SELECT COUNT(*)
+                    FROM bet_slip
+                    WHERE created >= :day_start
+                      AND created < :day_end
+                      AND stake > :high_stake_threshold
+                ) AS high_stake_accumulator_tickets_today,
+
+                (
+                    SELECT COALESCE(SUM(amount), 0)
+                    FROM bet
+                    WHERE created >= :day_start
+                      AND created < :day_end
+                      AND amount > :high_stake_threshold
+                ) AS high_stake_single_amount_today,
+
+                (
+                    SELECT COALESCE(SUM(stake), 0)
+                    FROM bet_slip
+                    WHERE created >= :day_start
+                      AND created < :day_end
+                      AND stake > :high_stake_threshold
+                ) AS high_stake_accumulator_amount_today
             """,
             {
                 "day_start": day_start_utc,
                 "day_end": day_end_utc,
+                "high_stake_threshold": high_stake_threshold,
             },
         )
 
@@ -3690,6 +3736,21 @@ async def admin_betting_overview():
             SELECT balance
             FROM house_wallet
             WHERE id = 1
+            """
+        )
+
+        # Only non-final house withdrawals are still reserved.
+        mpesa = await db_fetch_one(
+            """
+            SELECT
+                COUNT(*) AS outstanding_count,
+                COALESCE(SUM(amount), 0) AS reserved_amount
+            FROM house_mpesa_withdrawal
+            WHERE LOWER(COALESCE(status, '')) NOT IN (
+                'success',
+                'failed',
+                'timeout'
+            )
             """
         )
 
@@ -3744,26 +3805,80 @@ async def admin_betting_overview():
             counts["accumulator_tickets_today"] or 0
         )
 
+        high_stake_single_count = int(
+            counts["high_stake_single_bets_today"] or 0
+        )
+        high_stake_accumulator_count = int(
+            counts["high_stake_accumulator_tickets_today"] or 0
+        )
+
+        house_balance = float(
+            wallet["balance"] if wallet else 0
+        )
+
+        betting_profit_loss = float(
+            ledger["profit_loss"] or 0
+        )
+
         return jsonify({
             "success": True,
             "data": {
                 "betting_users": int(counts["betting_users"] or 0),
+
                 "bets_today": single_bets + accumulator_tickets,
                 "single_bets_today": single_bets,
                 "accumulator_tickets_today": accumulator_tickets,
-                "house_balance": float(
-                    wallet["balance"] if wallet else 0
+
+                "high_stake_threshold": high_stake_threshold,
+                "high_stake_bets_today": (
+                    high_stake_single_count
+                    + high_stake_accumulator_count
                 ),
-                "profit_loss": float(ledger["profit_loss"] or 0),
+                "high_stake_single_bets_today": high_stake_single_count,
+                "high_stake_accumulator_tickets_today": (
+                    high_stake_accumulator_count
+                ),
+                "high_stake_amount_today": float(
+                    counts["high_stake_single_amount_today"] or 0
+                ) + float(
+                    counts["high_stake_accumulator_amount_today"] or 0
+                ),
+
+                "total_single_bets": int(
+                    counts["total_single_bets"] or 0
+                ),
+                "total_accumulator_tickets": int(
+                    counts["total_accumulator_tickets"] or 0
+                ),
+                "total_bets": (
+                    int(counts["total_single_bets"] or 0)
+                    + int(counts["total_accumulator_tickets"] or 0)
+                ),
+
+                "initial_house_capital": initial_house_capital,
+                "house_balance": house_balance,
+                "house_capital_profit_loss": (
+                    house_balance - initial_house_capital
+                ),
+
+                "mpesa_reserved_amount": float(
+                    mpesa["reserved_amount"] or 0
+                ),
+                "mpesa_outstanding_count": int(
+                    mpesa["outstanding_count"] or 0
+                ),
+
+                "profit_loss": betting_profit_loss,
                 "today_profit_loss": float(
                     ledger["today_profit_loss"] or 0
                 ),
+
                 "currency": "KES",
                 "date": day_start_ke.date().isoformat(),
             },
         })
 
-    except Exception as exc:
+    except Exception:
         logger.exception("Betting admin overview failed")
         return jsonify({
             "success": False,
