@@ -3656,7 +3656,6 @@ async def admin_betting_overview():
         day_start_utc = day_start_ke.astimezone(UTC).replace(tzinfo=None)
         day_end_utc = day_end_ke.astimezone(UTC).replace(tzinfo=None)
 
-        initial_house_capital = 500.00
         high_stake_threshold = 1500
 
         counts = await db_fetch_one(
@@ -3735,6 +3734,39 @@ async def admin_betting_overview():
             """
             SELECT balance
             FROM house_wallet
+            WHERE id = 1
+            """
+        )
+
+        # Persist the house balance at the moment this feature is first used.
+        # ON CONFLICT ensures the baseline is never reset by later requests.
+        await db_execute(
+            """
+            CREATE TABLE IF NOT EXISTS house_balance_baseline (
+                id INTEGER PRIMARY KEY,
+                baseline_balance NUMERIC(14, 2) NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            """
+        )
+
+        await db_execute(
+            """
+            INSERT INTO house_balance_baseline (id, baseline_balance)
+            SELECT
+                1,
+                COALESCE(
+                    (SELECT balance FROM house_wallet WHERE id = 1),
+                    0
+                )
+            ON CONFLICT (id) DO NOTHING
+            """
+        )
+
+        baseline = await db_fetch_one(
+            """
+            SELECT baseline_balance
+            FROM house_balance_baseline
             WHERE id = 1
             """
         )
@@ -3820,6 +3852,14 @@ async def admin_betting_overview():
             ledger["profit_loss"] or 0
         )
 
+        house_balance_baseline = float(
+            baseline["baseline_balance"] if baseline else 0
+        )
+
+        house_balance_performance = (
+            house_balance - house_balance_baseline
+        )
+
         return jsonify({
             "success": True,
             "data": {
@@ -3855,11 +3895,9 @@ async def admin_betting_overview():
                     + int(counts["total_accumulator_tickets"] or 0)
                 ),
 
-                "initial_house_capital": initial_house_capital,
                 "house_balance": house_balance,
-                "house_capital_profit_loss": (
-                    house_balance - initial_house_capital
-                ),
+                "house_balance_baseline": house_balance_baseline,
+                "house_balance_performance": house_balance_performance,
 
                 "mpesa_reserved_amount": float(
                     mpesa["reserved_amount"] or 0

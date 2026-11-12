@@ -789,8 +789,8 @@ setDistributionSummary([]);
       };
 
       const profitLoss = Number(bettingOverview?.profit_loss || 0);
-      const houseCapitalProfitLoss = Number(
-        bettingOverview?.house_capital_profit_loss || 0
+      const houseBalancePerformance = Number(
+        bettingOverview?.house_balance_performance || 0
       );
 
       return [
@@ -851,14 +851,6 @@ setDistributionSummary([]);
           icon: "▤",
         },
         {
-          label: "Initial house capital",
-          value: bettingOverview
-            ? money(bettingOverview.initial_house_capital)
-            : "—",
-          detail: "Original starting capital",
-          icon: "◉",
-        },
-        {
           label: "House balance",
           value: bettingOverview
             ? money(bettingOverview.house_balance)
@@ -867,12 +859,14 @@ setDistributionSummary([]);
           icon: "◈",
         },
         {
-          label: "House capital Profit / Loss",
+          label: "House Balance Performance",
           value: bettingOverview
-            ? signedMoney(houseCapitalProfitLoss)
+            ? signedMoney(houseBalancePerformance)
             : "—",
-          detail: "House balance minus initial capital",
-          icon: houseCapitalProfitLoss >= 0 ? "↗" : "↘",
+          detail: bettingOverview
+            ? `Compared with starting balance ${money(bettingOverview.house_balance_baseline)}`
+            : "Progressive house balance profit / loss",
+          icon: houseBalancePerformance >= 0 ? "↗" : "↘",
         },
         {
           label: "M-PESA reserved",
