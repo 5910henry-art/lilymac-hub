@@ -7,7 +7,7 @@ import logging
 import traceback
 import functools
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from flask import Flask, request, jsonify
@@ -3711,6 +3711,14 @@ async def admin_vip_pick_distribution_history():
         limit = max(1, min(int(request.args.get("limit", 500)), 2000))
     except (TypeError, ValueError):
         limit = 500
+
+    try:
+        date_from = date.fromisoformat(date_from) if date_from else None
+        date_to = date.fromisoformat(date_to) if date_to else None
+    except ValueError:
+        return jsonify({
+            "error": "Invalid date filter. Use YYYY-MM-DD."
+        }), 400
 
     conn = await asyncpg.connect(dsn=DATABASE_URL, command_timeout=60)
 
