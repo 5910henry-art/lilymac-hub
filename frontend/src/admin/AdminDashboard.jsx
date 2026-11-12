@@ -2,6 +2,15 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Navigate } from "react-router-dom";
+import {
+  ResponsiveContainer,
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+} from "recharts";
 
 import {
   gradeMatch,
@@ -10,6 +19,7 @@ import {
 import {
   adminListVips,
   adminBettingOverview,
+  adminHouseBalanceHistory,
   adminListBets,
   adminListPendingVips,
   adminListUpgradeRequests,
@@ -37,6 +47,10 @@ export default function AdminDashboard() {
 
   const [vips, setVips] = useState([]);
   const [bettingOverview, setBettingOverview] = useState(null);
+  const [houseBalanceHistory, setHouseBalanceHistory] = useState(null);
+  const [houseBalanceRange, setHouseBalanceRange] = useState("30d");
+  const [houseBalanceHistoryLoading, setHouseBalanceHistoryLoading] = useState(false);
+  const [houseBalanceHistoryError, setHouseBalanceHistoryError] = useState("");
   const [pendingVips, setPendingVips] = useState([]);
   const [upgradeRequests, setUpgradeRequests] = useState([]);
 
@@ -67,7 +81,7 @@ const [selectedVIPs, setSelectedVIPs] = useState([]);
   const [betMeta, setBetMeta] = useState({
     total: 0,
     page: 1,
-    per_page: 20,
+    per_page: 5,
     total_pages: 0,
   });
   const [betSearch, setBetSearch] = useState("");
@@ -268,6 +282,67 @@ setDistributionSummary([]);
     return () => clearInterval(interval);
   }, [token, fetchAll]);
 
+  useEffect(() => {
+    if (!token) {
+      setHouseBalanceHistory(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadHistory = async () => {
+      setHouseBalanceHistoryLoading(true);
+      setHouseBalanceHistoryError("");
+
+      try {
+        const response = await adminHouseBalanceHistory(
+          token,
+          houseBalanceRange
+        );
+
+        const body =
+          response?.data?.success !== undefined
+            ? response.data
+            : response;
+
+        if (!body?.success) {
+          throw new Error(
+            body?.error || body?.message || "Could not load balance history."
+          );
+        }
+
+        const payload = body?.data ?? {};
+
+        if (!cancelled) {
+          setHouseBalanceHistory({
+            ...payload,
+            points: Array.isArray(payload.points) ? payload.points : [],
+          });
+        }
+      } catch (error) {
+        console.error("[ADMIN] House balance history failed:", error);
+
+        if (!cancelled) {
+          setHouseBalanceHistoryError(
+            error?.message || "Could not load balance history."
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setHouseBalanceHistoryLoading(false);
+        }
+      }
+    };
+
+    loadHistory();
+    const interval = setInterval(loadHistory, REFRESH_MS);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [token, houseBalanceRange]);
+
   const fetchBets = async (page = 1) => {
     if (!token || betLoading) return;
 
@@ -279,7 +354,7 @@ setDistributionSummary([]);
         status: betStatus,
         type: betType,
         page,
-        per_page: 20,
+        per_page: 5,
       });
 
       let result = response;
@@ -304,7 +379,7 @@ setDistributionSummary([]);
       setBetMeta({
         total: Number(data.total || 0),
         page: Number(data.page || page),
-        per_page: Number(data.per_page || 20),
+        per_page: Number(data.per_page || 5),
         total_pages: Number(data.total_pages || 0),
       });
 
@@ -1184,6 +1259,217 @@ setDistributionSummary([]);
                 />
               ))}
             </section>
+
+            <section className="mt-6 rounded-2xl border border-white/10 bg-white/[0.035] p-4 sm:p-5">
+              <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h2 className="text-base font-bold text-white sm:text-lg">
+                    House Balance History
+                  </h2>
+                  <p className="mt-1 text-xs text-slate-400">
+                    Recorded wallet balance over time · KES
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    ["7d", "7 days"],
+                    ["30d", "30 days"],
+                    ["90d", "90 days"],
+                    ["all", "All history"],
+                  ].map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => setHouseBalanceRange(value)}
+                      className={`rounded-lg border px-3 py-2 text-xs font-semibold transition ${
+                        houseBalanceRange === value
+                          ? "border-cyan-400/50 bg-cyan-400/10 text-cyan-300"
+                          : "border-white/10 text-slate-400 hover:bg-white/[0.06] hover:text-white"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {houseBalanceHistoryLoading && !houseBalanceHistory && (
+                <div className="flex h-56 items-center justify-center text-sm text-slate-400">
+                  Loading house balance history…
+                </div>
+              )}
+
+              {houseBalanceHistoryError && (
+                <div className="rounded-xl border border-rose-400/20 bg-rose-400/5 p-3 text-sm text-rose-300">
+                  {houseBalanceHistoryError}
+                </div>
+              )}
+
+              {houseBalanceHistory?.points?.length > 0 && (
+                <>
+                  <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
+                    <div className="rounded-xl border border-white/5 bg-black/10 p-3">
+                      <p className="text-xs text-slate-500">Current wallet balance</p>
+                      <p className="mt-1 text-base font-bold text-white">
+                        KES {Number(
+                          houseBalanceHistory.current_balance || 0
+                        ).toLocaleString("en-KE", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl border border-white/5 bg-black/10 p-3">
+                      <p className="text-xs text-slate-500">First displayed balance</p>
+                      <p className="mt-1 text-base font-bold text-white">
+                        KES {Number(
+                          houseBalanceHistory.points[0].balance
+                        ).toLocaleString("en-KE", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
+                      </p>
+                    </div>
+
+                    <div className="col-span-2 rounded-xl border border-white/5 bg-black/10 p-3 sm:col-span-1">
+                      <p className="text-xs text-slate-500">Change across displayed points</p>
+                      {(() => {
+                        const points = houseBalanceHistory.points;
+                        const change =
+                          points[points.length - 1].balance -
+                          points[0].balance;
+
+                        return (
+                          <p className={`mt-1 text-base font-bold ${
+                            change >= 0 ? "text-emerald-400" : "text-rose-400"
+                          }`}>
+                            {change >= 0 ? "+" : "-"}KES {Math.abs(
+                              change
+                            ).toLocaleString("en-KE", {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })}
+                          </p>
+                        );
+                      })()}
+                    </div>
+                  </div>
+
+                  <div className="h-64 w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart
+                        data={houseBalanceHistory.points}
+                        margin={{ top: 8, right: 8, left: 0, bottom: 4 }}
+                      >
+                        <defs>
+                          <linearGradient
+                            id="houseBalanceGradient"
+                            x1="0"
+                            y1="0"
+                            x2="0"
+                            y2="1"
+                          >
+                            <stop offset="0%" stopColor="#22d3ee" stopOpacity={0.30} />
+                            <stop offset="95%" stopColor="#22d3ee" stopOpacity={0.01} />
+                          </linearGradient>
+                        </defs>
+
+                        <CartesianGrid
+                          stroke="#ffffff"
+                          strokeOpacity={0.08}
+                          vertical={false}
+                        />
+
+                        <XAxis
+                          dataKey="timestamp"
+                          tick={{ fill: "#94a3b8", fontSize: 11 }}
+                          tickLine={false}
+                          axisLine={false}
+                          minTickGap={28}
+                          tickFormatter={(value) =>
+                            new Intl.DateTimeFormat("en-KE", {
+                              day: "numeric",
+                              month: "short",
+                              timeZone: "Africa/Nairobi",
+                            }).format(new Date(value))
+                          }
+                        />
+
+                        <YAxis
+                          width={76}
+                          tick={{ fill: "#94a3b8", fontSize: 10 }}
+                          tickLine={false}
+                          axisLine={false}
+                          tickFormatter={(value) =>
+                            `KES ${Number(value).toLocaleString("en-KE", {
+                              maximumFractionDigits: 0,
+                            })}`
+                          }
+                        />
+
+                        <Tooltip
+                          contentStyle={{
+                            background: "#0f172a",
+                            border: "1px solid rgba(255,255,255,0.12)",
+                            borderRadius: 12,
+                            color: "#fff",
+                          }}
+                          labelStyle={{ color: "#94a3b8" }}
+                          labelFormatter={(value) =>
+                            new Intl.DateTimeFormat("en-KE", {
+                              dateStyle: "medium",
+                              timeStyle: "short",
+                              timeZone: "Africa/Nairobi",
+                            }).format(new Date(value))
+                          }
+                          formatter={(value) => [
+                            `KES ${Number(value).toLocaleString("en-KE", {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })}`,
+                            "House balance",
+                          ]}
+                        />
+
+                        <Area
+                          type="monotone"
+                          dataKey="balance"
+                          name="House balance"
+                          stroke="#22d3ee"
+                          strokeWidth={2}
+                          fill="url(#houseBalanceGradient)"
+                          activeDot={{ r: 5, fill: "#22d3ee" }}
+                          dot={false}
+                        />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+
+                  <p className="mt-3 text-xs text-slate-500">
+                    {houseBalanceHistory.transaction_count} recorded balance
+                    points. Chart timestamps use East Africa Time.
+                  </p>
+                </>
+              )}
+
+              {!houseBalanceHistoryLoading &&
+                !houseBalanceHistoryError &&
+                houseBalanceHistory &&
+                houseBalanceHistory.points.length === 0 && (
+                  <div className="flex h-48 items-center justify-center text-sm text-slate-400">
+                    No recorded balance transactions in this period.
+                  </div>
+                )}
+
+              {houseBalanceHistoryLoading && houseBalanceHistory && (
+                <p className="mt-2 text-right text-xs text-slate-500">
+                  Updating history…
+                </p>
+              )}
+            </section>
+
 
             {pendingVips.length > 0 || pendingUpgradeRequests.length > 0 ? (
               <section className="mt-6 grid gap-5 xl:grid-cols-2">

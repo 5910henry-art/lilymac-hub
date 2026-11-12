@@ -230,6 +230,12 @@ export const adminBettingOverview = (token) =>
     token,
   });
 
+export const adminHouseBalanceHistory = (token, range = "30d") =>
+  vipRequest(`/admin/betting/house-balance-history${qsFor({ range })}`, {
+    method: "GET",
+    token,
+  });
+
 export const adminListBets = (token, filters = {}) =>
   vipRequest(`/admin/betting/bets${qsFor(filters)}`, {
     method: "GET",

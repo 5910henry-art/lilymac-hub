@@ -3927,6 +3927,120 @@ async def admin_betting_overview():
 
 
 # ============================================================
+# HOUSE BALANCE HISTORY — READ ONLY
+# ============================================================
+
+@app.get("/admin/betting/house-balance-history")
+@admin_required
+async def admin_house_balance_history():
+    try:
+        selected_range = (
+            request.args.get("range") or "30d"
+        ).strip().lower()
+
+        ranges = {
+            "7d": 7,
+            "30d": 30,
+            "90d": 90,
+            "all": None,
+        }
+
+        if selected_range not in ranges:
+            return jsonify({
+                "success": False,
+                "error": "Invalid history range",
+            }), 400
+
+        days = ranges[selected_range]
+
+        if days is None:
+            rows = await db_fetch_all(
+                """
+                SELECT id, type, balance_after, created
+                FROM house_transaction
+                ORDER BY created ASC, id ASC
+                """
+            )
+        else:
+            cutoff = (
+                datetime.now(UTC).replace(tzinfo=None)
+                - timedelta(days=days)
+            )
+
+            rows = await db_fetch_all(
+                """
+                WITH previous AS (
+                    SELECT id, type, balance_after, created
+                    FROM house_transaction
+                    WHERE created < :cutoff
+                    ORDER BY created DESC, id DESC
+                    LIMIT 1
+                ),
+                selected AS (
+                    SELECT id, type, balance_after, created
+                    FROM house_transaction
+                    WHERE created >= :cutoff
+                )
+                SELECT id, type, balance_after, created
+                FROM (
+                    SELECT * FROM previous
+                    UNION ALL
+                    SELECT * FROM selected
+                ) history
+                ORDER BY created ASC, id ASC
+                """,
+                {"cutoff": cutoff},
+            )
+
+        wallet = await db_fetch_one(
+            """
+            SELECT balance
+            FROM house_wallet
+            WHERE id = 1
+            """
+        )
+
+        points = []
+
+        for row in rows:
+            created = row["created"]
+
+            if created.tzinfo is None:
+                created = created.replace(tzinfo=UTC)
+            else:
+                created = created.astimezone(UTC)
+
+            points.append({
+                "id": int(row["id"]),
+                "timestamp": created.isoformat().replace("+00:00", "Z"),
+                "balance": float(row["balance_after"]),
+                "type": str(row["type"]),
+            })
+
+        return jsonify({
+            "success": True,
+            "data": {
+                "range": selected_range,
+                "points": points,
+                "transaction_count": len(points),
+                "coverage_start": points[0]["timestamp"] if points else None,
+                "coverage_end": points[-1]["timestamp"] if points else None,
+                "current_balance": float(
+                    wallet["balance"] if wallet else 0
+                ),
+                "currency": "KES",
+            },
+        })
+
+    except Exception:
+        logger.exception("House balance history failed")
+        return jsonify({
+            "success": False,
+            "error": "Could not load house balance history",
+        }), 500
+
+
+# ============================================================
 # ADMIN BET MANAGEMENT — READ ONLY
 # ============================================================
 
@@ -3944,9 +4058,9 @@ async def admin_list_bets():
             page = 1
 
         try:
-            per_page = min(50, max(10, int(request.args.get("per_page", 20))))
+            per_page = min(5, max(1, int(request.args.get("per_page", 5))))
         except (TypeError, ValueError):
-            per_page = 20
+            per_page = 5
 
         allowed_statuses = {
             "all", "pending", "won", "lost", "void",
@@ -4096,7 +4210,22 @@ async def admin_list_bets():
         bets = []
         for row in rows:
             item = dict(row)
-            item["selections"] = item.get("selections") or []
+            selections = item.get("selections") or []
+
+            # asyncpg may return PostgreSQL JSONB values as JSON strings.
+            if isinstance(selections, str):
+                try:
+                    selections = json.loads(selections)
+                except (TypeError, ValueError):
+                    selections = []
+
+            # Keep the API response consistent for the frontend.
+            if isinstance(selections, dict):
+                selections = [selections]
+            if not isinstance(selections, list):
+                selections = []
+
+            item["selections"] = selections
             bets.append(item)
 
         total = int(count_row["total"] or 0) if count_row else 0
