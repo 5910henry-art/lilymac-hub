@@ -3712,7 +3712,6 @@ async def admin_betting_overview():
                     FROM bet
                     WHERE created >= :day_start
                       AND created < :day_end
-                      AND amount > :high_stake_threshold
                 ) AS high_stake_single_amount_today,
 
                 (
@@ -3720,7 +3719,6 @@ async def admin_betting_overview():
                     FROM bet_slip
                     WHERE created >= :day_start
                       AND created < :day_end
-                      AND stake > :high_stake_threshold
                 ) AS high_stake_accumulator_amount_today
             """,
             {
@@ -3848,6 +3846,8 @@ async def admin_betting_overview():
             wallet["balance"] if wallet else 0
         )
 
+        house_capital_profit_loss = house_balance - 500.00
+
         betting_profit_loss = float(
             ledger["profit_loss"] or 0
         )
@@ -3896,6 +3896,7 @@ async def admin_betting_overview():
                 ),
 
                 "house_balance": house_balance,
+                "house_capital_profit_loss": house_capital_profit_loss,
                 "house_balance_baseline": house_balance_baseline,
                 "house_balance_performance": house_balance_performance,
 

@@ -839,7 +839,7 @@ setDistributionSummary([]);
           value: bettingOverview
             ? money(bettingOverview.high_stake_amount_today)
             : "—",
-          detail: "Combined qualifying stakes",
+          detail: "All single-bet and accumulator stakes placed today",
           icon: "◈",
         },
         {
@@ -857,6 +857,14 @@ setDistributionSummary([]);
             : "—",
           detail: "Current house wallet",
           icon: "◈",
+        },
+        {
+          label: "House Capital Profit / Loss",
+          value: bettingOverview
+            ? signedMoney(bettingOverview.house_capital_profit_loss)
+            : "—",
+          detail: "House balance minus original KES 500 capital",
+          icon: bettingOverview?.house_capital_profit_loss >= 0 ? "↗" : "↘",
         },
         {
           label: "House Balance Performance",
