@@ -10,6 +10,7 @@ import {
 import {
   adminListVips,
   adminBettingOverview,
+  adminListBets,
   adminListPendingVips,
   adminListUpgradeRequests,
   adminApproveVip,
@@ -60,6 +61,20 @@ const [selectedVIPs, setSelectedVIPs] = useState([]);
 
   const [gradeMatchId, setGradeMatchId] = useState("");
   const [gradeResult, setGradeResult] = useState("");
+
+  // Read-only bet management
+  const [betRecords, setBetRecords] = useState([]);
+  const [betMeta, setBetMeta] = useState({
+    total: 0,
+    page: 1,
+    per_page: 20,
+    total_pages: 0,
+  });
+  const [betSearch, setBetSearch] = useState("");
+  const [betStatus, setBetStatus] = useState("all");
+  const [betType, setBetType] = useState("all");
+  const [betLoading, setBetLoading] = useState(false);
+  const [expandedBet, setExpandedBet] = useState(null);
 
   useEffect(() => {
     document.documentElement.classList.add("dark");
@@ -252,6 +267,55 @@ setDistributionSummary([]);
 
     return () => clearInterval(interval);
   }, [token, fetchAll]);
+
+  const fetchBets = async (page = 1) => {
+    if (!token || betLoading) return;
+
+    setBetLoading(true);
+
+    try {
+      const response = await adminListBets(token, {
+        search: betSearch.trim(),
+        status: betStatus,
+        type: betType,
+        page,
+        per_page: 20,
+      });
+
+      let result = response;
+
+      // Support both direct and wrapped API response formats.
+      if (result?.data?.success !== undefined) {
+        result = result.data;
+      }
+
+      if (result?.success === false) {
+        throw new Error(
+          result.error || result.message || "Could not load bet records."
+        );
+      }
+
+      const data = result?.data ?? result ?? {};
+
+      setBetRecords(
+        Array.isArray(data.bets) ? data.bets : []
+      );
+
+      setBetMeta({
+        total: Number(data.total || 0),
+        page: Number(data.page || page),
+        per_page: Number(data.per_page || 20),
+        total_pages: Number(data.total_pages || 0),
+      });
+
+      setExpandedBet(null);
+    } catch (error) {
+      console.error("[ADMIN] Bet management load failed:", error);
+      showError(error);
+    } finally {
+      setBetLoading(false);
+    }
+  };
 
   const vipAction = async (id, action) => {
     const verb =
@@ -1076,6 +1140,7 @@ setDistributionSummary([]);
         <nav className="mb-6 flex gap-1 overflow-x-auto rounded-2xl border border-white/10 bg-white/[0.025] p-1">
           {[
             ["overview", "Overview"],
+            ["bets", "Bet Management"],
             ["vip", "VIP Management"],
             [
               "distribution",
@@ -1090,9 +1155,12 @@ setDistributionSummary([]);
               <button
                 key={id}
                 type="button"
-                onClick={() =>
-                  setActiveSection(id)
-                }
+                onClick={() => {
+                  setActiveSection(id);
+                  if (id === "bets") {
+                    fetchBets(1);
+                  }
+                }}
                 className={`whitespace-nowrap rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
                   activeSection === id
                     ? "bg-white text-slate-950 shadow"
@@ -1911,6 +1979,282 @@ setDistributionSummary([]);
         
 
         
+
+        {activeSection === "bets" && (
+          <section className="space-y-5">
+            <Card
+              title="Bet Management"
+              subtitle="Review single bets and accumulator tickets. This section is read-only."
+              action={
+                <Btn
+                  small
+                  onClick={() => fetchBets(betMeta.page || 1)}
+                  disabled={betLoading}
+                >
+                  {betLoading ? "Loading…" : "Refresh"}
+                </Btn>
+              }
+            >
+              <div className="grid gap-3 md:grid-cols-4">
+                <div className="md:col-span-2">
+                  <Input
+                    placeholder="Search phone, user ID or bet ID"
+                    value={betSearch}
+                    onChange={setBetSearch}
+                  />
+                </div>
+
+                <Select
+                  value={betType}
+                  onChange={setBetType}
+                  options={[
+                    { value: "all", label: "All bet types" },
+                    { value: "single", label: "Single bets" },
+                    { value: "accumulator", label: "Accumulators" },
+                  ]}
+                />
+
+                <Select
+                  value={betStatus}
+                  onChange={setBetStatus}
+                  options={[
+                    { value: "all", label: "All statuses" },
+                    { value: "pending", label: "Pending" },
+                    { value: "won", label: "Won" },
+                    { value: "lost", label: "Lost" },
+                    { value: "void", label: "Void" },
+                    { value: "cancelled", label: "Cancelled" },
+                    { value: "cashed_out", label: "Cashed out" },
+                  ]}
+                />
+              </div>
+
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                <p className="text-xs text-slate-500">
+                  {formatNumber(betMeta.total)} matching records
+                </p>
+
+                <div className="flex gap-2">
+                  <Btn
+                    small
+                    onClick={() => {
+                      setBetSearch("");
+                      setBetStatus("all");
+                      setBetType("all");
+                      setTimeout(() => fetchBets(1), 0);
+                    }}
+                    disabled={betLoading}
+                  >
+                    Reset
+                  </Btn>
+
+                  <Btn
+                    small
+                    success
+                    onClick={() => fetchBets(1)}
+                    disabled={betLoading}
+                  >
+                    Apply filters
+                  </Btn>
+                </div>
+              </div>
+            </Card>
+
+            <Card
+              title="Bet records"
+              subtitle={`Page ${betMeta.page} of ${Math.max(1, betMeta.total_pages)}`}
+            >
+              {betLoading ? (
+                <div className="py-10 text-center text-sm text-slate-400">
+                  Loading bet records…
+                </div>
+              ) : !betRecords.length ? (
+                <Empty text="No bet records found for these filters." />
+              ) : (
+                <div className="space-y-3">
+                  {betRecords.map((bet) => {
+                    const recordKey = `${bet.bet_type}-${bet.bet_id}`;
+                    const isExpanded = expandedBet === recordKey;
+                    const selections = Array.isArray(bet.selections)
+                      ? bet.selections
+                      : [];
+
+                    return (
+                      <div
+                        key={recordKey}
+                        className="overflow-hidden rounded-2xl border border-white/10 bg-white/[0.025]"
+                      >
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setExpandedBet(
+                              isExpanded ? null : recordKey
+                            )
+                          }
+                          className="w-full p-4 text-left transition hover:bg-white/[0.035]"
+                        >
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="font-bold text-white">
+                                  #{bet.bet_id}
+                                </span>
+
+                                <Badge>
+                                  {bet.bet_type === "single"
+                                    ? "Single"
+                                    : "Accumulator"}
+                                </Badge>
+
+                                <span className="rounded-lg bg-white/5 px-2 py-1 text-xs text-slate-300">
+                                  {String(bet.status || "unknown").replaceAll("_", " ")}
+                                </span>
+                              </div>
+
+                              <p className="mt-2 text-sm text-slate-300">
+                                {bet.phone || "Phone unavailable"}
+                                <span className="mx-2 text-slate-600">•</span>
+                                User ID: {bet.user_id}
+                              </p>
+
+                              <p className="mt-1 text-xs text-slate-500">
+                                {formatDate(bet.created)} · {formatTime(bet.created)}
+                              </p>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-x-5 gap-y-2 text-right sm:grid-cols-3">
+                              <div>
+                                <p className="text-[11px] text-slate-500">Stake</p>
+                                <p className="font-semibold text-white">
+                                  KSh {formatNumber(bet.stake)}
+                                </p>
+                              </div>
+
+                              <div>
+                                <p className="text-[11px] text-slate-500">Odds</p>
+                                <p className="font-semibold text-white">
+                                  {formatNumber(bet.total_odds)}
+                                </p>
+                              </div>
+
+                              <div>
+                                <p className="text-[11px] text-slate-500">Potential</p>
+                                <p className="font-semibold text-cyan-300">
+                                  KSh {formatNumber(bet.potential)}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+
+                          <p className="mt-3 text-xs font-semibold text-cyan-400">
+                            {isExpanded ? "Hide selections ▲" : `View ${selections.length} selection(s) ▼`}
+                          </p>
+                        </button>
+
+                        {isExpanded && (
+                          <div className="border-t border-white/10 bg-black/10 p-4">
+                            <div className="mb-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
+                              <MiniMetric
+                                label="Bet ID"
+                                value={bet.bet_id}
+                              />
+                              <MiniMetric
+                                label="Current cashout"
+                                value={`KSh ${formatNumber(bet.current_cashout)}`}
+                              />
+                              <MiniMetric
+                                label="Cashed out"
+                                value={bet.cashed_out ? "Yes" : "No"}
+                              />
+                            </div>
+
+                            <h3 className="mb-2 text-sm font-bold text-white">
+                              Selections
+                            </h3>
+
+                            {!selections.length ? (
+                              <Empty text="No selection details available." />
+                            ) : (
+                              <div className="space-y-2">
+                                {selections.map((selection, index) => (
+                                  <div
+                                    key={`${recordKey}-selection-${index}`}
+                                    className="rounded-xl border border-white/5 bg-white/[0.025] p-3"
+                                  >
+                                    <div className="flex flex-wrap justify-between gap-2">
+                                      <p className="text-sm font-semibold text-white">
+                                        {selection.home_team || "Home team"}
+                                        {" vs "}
+                                        {selection.away_team || "Away team"}
+                                      </p>
+                                      <span className="text-xs text-cyan-300">
+                                        Odds: {formatNumber(selection.odds)}
+                                      </span>
+                                    </div>
+
+                                    <p className="mt-1 text-sm text-slate-300">
+                                      Pick: {selection.selection || "—"}
+                                    </p>
+
+                                    <p className="mt-1 text-xs text-slate-500">
+                                      {selection.league || "Competition unavailable"}
+                                      {" · "}
+                                      {formatDate(selection.match_time)}
+                                      {selection.status
+                                        ? ` · ${selection.status}`
+                                        : ""}
+                                    </p>
+
+                                    {selection.match_id && (
+                                      <p className="mt-1 text-xs text-slate-600">
+                                        Match ID: {selection.match_id}
+                                      </p>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-white/10 pt-4">
+                <p className="text-xs text-slate-500">
+                  Showing {betRecords.length} of {formatNumber(betMeta.total)} records
+                </p>
+
+                <div className="flex items-center gap-2">
+                  <Btn
+                    small
+                    onClick={() => fetchBets(betMeta.page - 1)}
+                    disabled={betLoading || betMeta.page <= 1}
+                  >
+                    Previous
+                  </Btn>
+
+                  <span className="px-2 text-xs text-slate-400">
+                    {betMeta.page} / {Math.max(1, betMeta.total_pages)}
+                  </span>
+
+                  <Btn
+                    small
+                    onClick={() => fetchBets(betMeta.page + 1)}
+                    disabled={
+                      betLoading ||
+                      betMeta.page >= betMeta.total_pages
+                    }
+                  >
+                    Next
+                  </Btn>
+                </div>
+              </div>
+            </Card>
+          </section>
+        )}
 
         {activeSection ===
           "settlement" && (

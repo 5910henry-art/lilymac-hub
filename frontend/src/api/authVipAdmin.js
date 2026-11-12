@@ -230,6 +230,12 @@ export const adminBettingOverview = (token) =>
     token,
   });
 
+export const adminListBets = (token, filters = {}) =>
+  vipRequest(`/admin/betting/bets${qsFor(filters)}`, {
+    method: "GET",
+    token,
+  });
+
 export const adminListPendingVips = (token) =>
   vipRequest("/admin/vips/pending", {
     method: "GET",

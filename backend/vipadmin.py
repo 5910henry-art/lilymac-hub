@@ -3925,6 +3925,201 @@ async def admin_betting_overview():
         }), 500
 
 
+
+# ============================================================
+# ADMIN BET MANAGEMENT — READ ONLY
+# ============================================================
+
+@app.get("/admin/betting/bets")
+@admin_required
+async def admin_list_bets():
+    try:
+        search = (request.args.get("search") or "").strip()[:100]
+        status = (request.args.get("status") or "all").strip().lower()
+        bet_type = (request.args.get("type") or "all").strip().lower()
+
+        try:
+            page = max(1, int(request.args.get("page", 1)))
+        except (TypeError, ValueError):
+            page = 1
+
+        try:
+            per_page = min(50, max(10, int(request.args.get("per_page", 20))))
+        except (TypeError, ValueError):
+            per_page = 20
+
+        allowed_statuses = {
+            "all", "pending", "won", "lost", "void",
+            "cancelled", "cashed_out", "cashout",
+        }
+        allowed_types = {"all", "single", "accumulator"}
+
+        if status not in allowed_statuses:
+            status = "all"
+        if bet_type not in allowed_types:
+            bet_type = "all"
+
+        params = {
+            "search": search,
+            "status": status,
+            "bet_type": bet_type,
+            "limit": per_page,
+            "offset": (page - 1) * per_page,
+        }
+
+        rows = await db_fetch_all(
+            """
+            WITH combined_bets AS (
+                SELECT
+                    'single'::text AS bet_type,
+                    b.id AS bet_id,
+                    b.user_id,
+                    u.phone,
+                    b.amount::float8 AS stake,
+                    b.odds::float8 AS total_odds,
+                    b.potential::float8 AS potential,
+                    b.status,
+                    b.cashed_out,
+                    b.current_cashout::float8 AS current_cashout,
+                    b.created,
+                    jsonb_build_array(
+                        jsonb_build_object(
+                            'selection', b.selection,
+                            'odds', b.odds::float8,
+                            'league', m.competition,
+                            'home_team', m.home_team_name,
+                            'away_team', m.away_team_name,
+                            'match_time', m.utcdate,
+                            'match_id', m.id
+                        )
+                    ) AS selections
+                FROM bet b
+                JOIN "user" u ON u.id = b.user_id
+                LEFT JOIN matches m ON m.id = b.match_id
+
+                UNION ALL
+
+                SELECT
+                    'accumulator'::text AS bet_type,
+                    s.id AS bet_id,
+                    s.user_id,
+                    u.phone,
+                    s.stake::float8 AS stake,
+                    s.total_odds::float8 AS total_odds,
+                    s.potential::float8 AS potential,
+                    s.status,
+                    s.cashed_out,
+                    s.current_cashout::float8 AS current_cashout,
+                    s.created,
+                    COALESCE(
+                        (
+                            SELECT jsonb_agg(
+                                jsonb_build_object(
+                                    'selection', bs.selection,
+                                    'odds', bs.odds::float8,
+                                    'status', bs.status,
+                                    'league', bs.league,
+                                    'home_team', bs.home_team,
+                                    'away_team', bs.away_team,
+                                    'match_time', bs.match_time,
+                                    'match_id', bs.bookmark_id
+                                )
+                                ORDER BY bs.id
+                            )
+                            FROM bet_selection bs
+                            WHERE bs.betslip_id = s.id
+                        ),
+                        '[]'::jsonb
+                    ) AS selections
+                FROM bet_slip s
+                JOIN "user" u ON u.id = s.user_id
+            )
+            SELECT *
+            FROM combined_bets
+            WHERE
+                (:status = 'all' OR LOWER(COALESCE(status, '')) = :status)
+                AND (:bet_type = 'all' OR bet_type = :bet_type)
+                AND (
+                    :search = ''
+                    OR phone ILIKE '%' || :search || '%'
+                    OR user_id::text = :search
+                    OR bet_id::text = :search
+                )
+            ORDER BY created DESC NULLS LAST, bet_id DESC
+            LIMIT :limit OFFSET :offset
+            """,
+            params,
+        )
+
+        count_row = await db_fetch_one(
+            """
+            WITH combined_bets AS (
+                SELECT
+                    'single'::text AS bet_type,
+                    b.id AS bet_id,
+                    b.user_id,
+                    u.phone,
+                    b.status
+                FROM bet b
+                JOIN "user" u ON u.id = b.user_id
+
+                UNION ALL
+
+                SELECT
+                    'accumulator'::text AS bet_type,
+                    s.id AS bet_id,
+                    s.user_id,
+                    u.phone,
+                    s.status
+                FROM bet_slip s
+                JOIN "user" u ON u.id = s.user_id
+            )
+            SELECT COUNT(*)::int AS total
+            FROM combined_bets
+            WHERE
+                (:status = 'all' OR LOWER(COALESCE(status, '')) = :status)
+                AND (:bet_type = 'all' OR bet_type = :bet_type)
+                AND (
+                    :search = ''
+                    OR phone ILIKE '%' || :search || '%'
+                    OR user_id::text = :search
+                    OR bet_id::text = :search
+                )
+            """,
+            {
+                "search": search,
+                "status": status,
+                "bet_type": bet_type,
+            },
+        )
+
+        bets = []
+        for row in rows:
+            item = dict(row)
+            item["selections"] = item.get("selections") or []
+            bets.append(item)
+
+        total = int(count_row["total"] or 0) if count_row else 0
+
+        return jsonify({
+            "success": True,
+            "data": {
+                "bets": bets,
+                "total": total,
+                "page": page,
+                "per_page": per_page,
+                "total_pages": (total + per_page - 1) // per_page,
+            },
+        })
+
+    except Exception:
+        logger.exception("Admin bet management list failed")
+        return jsonify({
+            "success": False,
+            "error": "Could not load bet records",
+        }), 500
+
+
 @app.errorhandler(500)
 def internal_error(error):
     log_json(
