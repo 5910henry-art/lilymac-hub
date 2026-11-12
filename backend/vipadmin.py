@@ -1472,6 +1472,27 @@ async def init_db_async():
 
     await db_execute(
         """
+        CREATE TABLE IF NOT EXISTS vip_pick_distribution_history (
+            id BIGSERIAL PRIMARY KEY,
+            vip_id BIGINT,
+            vip_name TEXT NOT NULL,
+            number TEXT NOT NULL,
+            entitlement_id BIGINT,
+            plan TEXT,
+            match_id BIGINT NOT NULL,
+            competition TEXT,
+            home_team TEXT NOT NULL,
+            away_team TEXT NOT NULL,
+            match_time TIMESTAMPTZ,
+            selection TEXT NOT NULL,
+            odds DOUBLE PRECISION,
+            delivered_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+
+    await db_execute(
+        """
         CREATE TABLE IF NOT EXISTS vip_notifications (
             id BIGSERIAL PRIMARY KEY,
             number TEXT NOT NULL,
@@ -1741,6 +1762,20 @@ async def init_db_async():
         """
         CREATE INDEX IF NOT EXISTS idx_vip_picks_match_id
         ON vip_picks(match_id)
+        """
+    )
+
+    await db_execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_vip_pick_history_number
+        ON vip_pick_distribution_history(number, delivered_at DESC)
+        """
+    )
+
+    await db_execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_vip_pick_history_match
+        ON vip_pick_distribution_history(match_id)
         """
     )
 
@@ -3386,7 +3421,7 @@ async def admin_distribute_vip_picks():
                             match = await conn.fetchrow(
                                 """
                                 SELECT id, home_team_name, away_team_name,
-                                       utcdate, status
+                                       competition, utcdate, status
                                 FROM matches
                                 WHERE id = $1
                                 """,
@@ -3465,6 +3500,36 @@ async def admin_distribute_vip_picks():
                                     odds,
                                 )
                                 created.append(dict(row))
+
+                                await conn.execute(
+                                    """
+                                    INSERT INTO vip_pick_distribution_history (
+                                        vip_id, vip_name, number,
+                                        entitlement_id, plan,
+                                        match_id, competition,
+                                        home_team, away_team, match_time,
+                                        selection, odds, delivered_at
+                                    )
+                                    VALUES (
+                                        $1, $2, $3, $4, $5,
+                                        $6, $7, $8, $9, $10,
+                                        $11, $12, $13
+                                    )
+                                    """,
+                                    int(vip["id"]),
+                                    str(vip["name"] or ""),
+                                    number,
+                                    entitlement_id,
+                                    plan,
+                                    int(match["id"]),
+                                    str(match["competition"] or ""),
+                                    str(match["home_team_name"] or ""),
+                                    str(match["away_team_name"] or ""),
+                                    match["utcdate"],
+                                    pick,
+                                    odds,
+                                    row["created_at"],
+                                )
 
                             if created:
                                 used += len(created)
@@ -3628,6 +3693,161 @@ async def admin_distribute_vip_picks():
         "used": used,
         "remaining": remaining_after,
     })
+
+
+# ============================================================
+# ADMIN VIP PICK DISTRIBUTION HISTORY
+# ============================================================
+
+@app.get("/admin/vip-picks/history")
+@admin_required
+async def admin_vip_pick_distribution_history():
+    number = request.args.get("number", "").strip() or None
+    plan_filter = request.args.get("plan", "").strip().lower() or None
+    date_from = request.args.get("from", "").strip() or None
+    date_to = request.args.get("to", "").strip() or None
+
+    try:
+        limit = max(1, min(int(request.args.get("limit", 500)), 2000))
+    except (TypeError, ValueError):
+        limit = 500
+
+    conn = await asyncpg.connect(dsn=DATABASE_URL, command_timeout=60)
+
+    try:
+        await conn.execute(f'SET search_path TO "{DB_SCHEMA}", public')
+
+        rows = await conn.fetch(
+            """
+            SELECT
+                h.id,
+                h.vip_id,
+                h.vip_name,
+                h.number,
+                h.entitlement_id,
+                h.plan,
+                h.match_id,
+                h.competition,
+                h.home_team,
+                h.away_team,
+                h.match_time,
+                h.selection,
+                h.odds,
+                h.delivered_at,
+                m.status AS match_status,
+                m.home_score,
+                m.away_score
+            FROM vip_pick_distribution_history h
+            LEFT JOIN matches m ON m.id = h.match_id
+            WHERE ($1::text IS NULL OR h.number = $1)
+              AND ($2::text IS NULL OR LOWER(h.plan) = $2)
+              AND (
+                    $3::date IS NULL
+                    OR (h.delivered_at AT TIME ZONE 'Africa/Nairobi')::date >= $3
+              )
+              AND (
+                    $4::date IS NULL
+                    OR (h.delivered_at AT TIME ZONE 'Africa/Nairobi')::date <= $4
+              )
+            ORDER BY h.delivered_at DESC, h.id DESC
+            LIMIT $5
+            """,
+            number,
+            plan_filter,
+            date_from,
+            date_to,
+            limit,
+        )
+
+        history = []
+        totals = {
+            "total": 0,
+            "won": 0,
+            "lost": 0,
+            "pending": 0,
+            "ungraded": 0,
+        }
+
+        for row in rows:
+            item = dict(row)
+            status = str(item.get("match_status") or "").upper()
+            selection = str(item.get("selection") or "").strip().lower()
+
+            result = "pending"
+
+            if status == "FINISHED":
+                home_score = item.get("home_score")
+                away_score = item.get("away_score")
+
+                if home_score is None or away_score is None:
+                    result = "ungraded"
+                else:
+                    normalized = {
+                        "1": "home",
+                        "X": "draw",
+                        "2": "away",
+                        "BTTS YES": "btts",
+                        "BTTS NO": "no_btts",
+                    }.get(selection.upper(), selection)
+
+                    home = int(home_score)
+                    away = int(away_score)
+                    total_goals = home + away
+                    won = None
+
+                    if normalized in ("home", "home_odds"):
+                        won = home > away
+                    elif normalized in ("draw", "draw_odds"):
+                        won = home == away
+                    elif normalized in ("away", "away_odds"):
+                        won = away > home
+                    elif normalized in ("btts", "gg_odds"):
+                        won = home > 0 and away > 0
+                    elif normalized in ("no_btts", "ng_odds"):
+                        won = home == 0 or away == 0
+                    elif normalized.startswith(("over", "under")):
+                        import re as _re
+                        match_line = _re.search(
+                            r"(\d+(?:\.\d+)?)", normalized
+                        )
+                        if match_line:
+                            threshold = float(match_line.group(1))
+                            if normalized.startswith("over"):
+                                won = total_goals > threshold
+                            else:
+                                won = total_goals < threshold
+
+                    if won is None:
+                        result = "ungraded"
+                    else:
+                        result = "won" if won else "lost"
+
+            item["result"] = result
+            item["delivered_at_kenya"] = (
+                item["delivered_at"]
+                .astimezone(KENYA)
+                .isoformat()
+                if item.get("delivered_at")
+                else None
+            )
+
+            totals["total"] += 1
+            totals[result] += 1
+            history.append(item)
+
+        return jsonify({
+            "history": history,
+            "count": len(history),
+            "totals": totals,
+            "timezone": "Africa/Nairobi",
+        })
+
+    except Exception:
+        logger.exception("Failed to load VIP pick distribution history")
+        return jsonify({"error": "Unable to load VIP pick history"}), 500
+
+    finally:
+        await conn.close()
 
 
 # ============================================================

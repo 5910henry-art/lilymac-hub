@@ -37,9 +37,23 @@ import {
   adminDeclineUpgrade,
   adminPreviewVipPicks,
   adminDistributeVipPicks,
+  adminGetVipPickHistory,
 } from "../api/authVipAdmin";
 
 const REFRESH_MS = 30_000;
+
+function formatVipHistoryDate(value) {
+  if (!value) return "—";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+
+  return new Intl.DateTimeFormat("en-KE", {
+    timeZone: "Africa/Nairobi",
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+}
 
 export default function AdminDashboard() {
   const [token, setToken] = useState(() => localStorage.getItem("admin_token"));
@@ -68,6 +82,21 @@ const [selectedVIPs, setSelectedVIPs] = useState([]);
   const [pick, setPick] = useState("1X2");
   const [odds, setOdds] = useState(1.5);
   const [distributionSummary, setDistributionSummary] = useState([]);
+
+  const [vipHistory, setVipHistory] = useState([]);
+  const [vipHistoryTotals, setVipHistoryTotals] = useState({
+    total: 0,
+    won: 0,
+    lost: 0,
+    pending: 0,
+    ungraded: 0,
+  });
+  const [vipHistoryNumber, setVipHistoryNumber] = useState("");
+  const [vipHistoryPlan, setVipHistoryPlan] = useState("all");
+  const [vipHistoryFrom, setVipHistoryFrom] = useState("");
+  const [vipHistoryTo, setVipHistoryTo] = useState("");
+  const [vipHistoryLoading, setVipHistoryLoading] = useState(false);
+  const [vipHistoryError, setVipHistoryError] = useState("");
 
   const [loading, setLoading] = useState(false);
   const [loadingText, setLoadingText] = useState("");
@@ -144,6 +173,60 @@ const [selectedVIPs, setSelectedVIPs] = useState([]);
   }, []);
 
   const safeObj = useCallback((res) => res?.data ?? res ?? null, []);
+
+  const fetchVipPickHistory = useCallback(async () => {
+    if (!token) return;
+
+    setVipHistoryLoading(true);
+    setVipHistoryError("");
+
+    try {
+      const filters = {
+        number: vipHistoryNumber.trim(),
+        plan: vipHistoryPlan === "all" ? "" : vipHistoryPlan,
+        from: vipHistoryFrom,
+        to: vipHistoryTo,
+        limit: 500,
+      };
+
+      const res = await adminGetVipPickHistory(token, filters);
+
+      if (res?.success === false) {
+        throw new Error(
+          res?.error || res?.message || "Could not load VIP pick history."
+        );
+      }
+
+      const payload = safeObj(res) || {};
+
+      setVipHistory(
+        Array.isArray(payload.history) ? payload.history : []
+      );
+
+      setVipHistoryTotals(
+        payload.totals || {
+          total: 0,
+          won: 0,
+          lost: 0,
+          pending: 0,
+          ungraded: 0,
+        }
+      );
+    } catch (error) {
+      setVipHistoryError(
+        error?.message || "Could not load VIP pick history."
+      );
+    } finally {
+      setVipHistoryLoading(false);
+    }
+  }, [
+    token,
+    safeObj,
+    vipHistoryNumber,
+    vipHistoryPlan,
+    vipHistoryFrom,
+    vipHistoryTo,
+  ]);
 
   const showError = useCallback(
     (error, fallback = "Something went wrong") => {
@@ -991,6 +1074,10 @@ setDistributionSummary([]);
       setSelectedMatches([]);
 
       await fetchAll();
+
+      if (successful > 0) {
+        await fetchVipPickHistory();
+      }
     } catch (e) {
       console.error(
         "[ADMIN] Distribution failed:",
@@ -1529,6 +1616,9 @@ setDistributionSummary([]);
                   setActiveSection(id);
                   if (id === "bets") {
                     fetchBets(1);
+                  }
+                  if (id === "distribution") {
+                    fetchVipPickHistory();
                   }
                 }}
                 className={`whitespace-nowrap rounded-xl px-3.5 py-2.5 text-xs font-bold transition sm:px-4 sm:text-sm ${
@@ -2385,12 +2475,218 @@ setDistributionSummary([]);
                 </div>
               )}
             </Card>
+
+            <Card
+              title="VIP distribution history"
+              subtitle="Permanent delivery records · Times shown in East Africa Time"
+              action={
+                <Btn
+                  small
+                  onClick={fetchVipPickHistory}
+                  disabled={vipHistoryLoading}
+                >
+                  {vipHistoryLoading ? "Refreshing…" : "Refresh history"}
+                </Btn>
+              }
+            >
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <Input
+                  type="text"
+                  placeholder="Search VIP phone number"
+                  value={vipHistoryNumber}
+                  onChange={setVipHistoryNumber}
+                />
+
+                <Select
+                  value={vipHistoryPlan}
+                  onChange={setVipHistoryPlan}
+                >
+                  <option value="all">All plans</option>
+                  <option value="daily">Daily</option>
+                  <option value="weekly">Weekly</option>
+                  <option value="monthly">Monthly</option>
+                  <option value="yearly">Yearly</option>
+                </Select>
+
+                <Input
+                  type="date"
+                  value={vipHistoryFrom}
+                  onChange={setVipHistoryFrom}
+                />
+
+                <Input
+                  type="date"
+                  value={vipHistoryTo}
+                  onChange={setVipHistoryTo}
+                />
+              </div>
+
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <Btn
+                  small
+                  onClick={fetchVipPickHistory}
+                  disabled={vipHistoryLoading}
+                >
+                  Apply filters
+                </Btn>
+
+                <Btn
+                  small
+                  onClick={() => {
+                    setVipHistoryNumber("");
+                    setVipHistoryPlan("all");
+                    setVipHistoryFrom("");
+                    setVipHistoryTo("");
+                  }}
+                  disabled={vipHistoryLoading}
+                >
+                  Clear filters
+                </Btn>
+
+                <span className="text-xs text-slate-500">
+                  Showing up to 500 records per request
+                </span>
+              </div>
+
+              {vipHistoryError && (
+                <div className="mt-4 rounded-xl border border-red-400/20 bg-red-500/10 p-3 text-sm text-red-300">
+                  {vipHistoryError}
+                </div>
+              )}
+
+              <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-5">
+                {[
+                  ["Delivered", vipHistoryTotals.total],
+                  ["Won", vipHistoryTotals.won],
+                  ["Lost", vipHistoryTotals.lost],
+                  ["Pending", vipHistoryTotals.pending],
+                  ["Ungraded", vipHistoryTotals.ungraded],
+                ].map(([label, value]) => (
+                  <div
+                    key={label}
+                    className="rounded-xl border border-white/10 bg-white/[0.025] p-3"
+                  >
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                      {label}
+                    </p>
+                    <p className="mt-1 text-xl font-extrabold text-slate-100">
+                      {Number(value || 0).toLocaleString()}
+                    </p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-4 overflow-hidden rounded-2xl border border-white/10">
+                <div className="overflow-x-auto">
+                  <table className="min-w-[1150px] w-full text-left text-xs">
+                    <thead className="bg-[#162338]/90 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                      <tr>
+                        <th className="px-3 py-3">Delivered</th>
+                        <th className="px-3 py-3">VIP</th>
+                        <th className="px-3 py-3">Plan</th>
+                        <th className="px-3 py-3">Match / Competition</th>
+                        <th className="px-3 py-3">Kick-off</th>
+                        <th className="px-3 py-3">Selection</th>
+                        <th className="px-3 py-3">Odds</th>
+                        <th className="px-3 py-3">Score</th>
+                        <th className="px-3 py-3">Result</th>
+                      </tr>
+                    </thead>
+
+                    <tbody className="divide-y divide-white/5">
+                      {vipHistory.map((item) => {
+                        const result = String(
+                          item.result || "pending"
+                        ).toLowerCase();
+
+                        const resultClass =
+                          result === "won"
+                            ? "bg-emerald-500/15 text-emerald-400"
+                            : result === "lost"
+                              ? "bg-red-500/15 text-red-400"
+                              : result === "pending"
+                                ? "bg-amber-500/15 text-amber-300"
+                                : "bg-slate-500/15 text-slate-300";
+
+                        return (
+                          <tr
+                            key={item.id}
+                            className="text-slate-300 hover:bg-white/[0.025]"
+                          >
+                            <td className="whitespace-nowrap px-3 py-3">
+                              {formatVipHistoryDate(
+                                item.delivered_at_kenya || item.delivered_at
+                              )}
+                            </td>
+                            <td className="px-3 py-3">
+                              <div className="font-semibold text-slate-100">
+                                {item.vip_name || "Unnamed VIP"}
+                              </div>
+                              <div className="text-slate-500">
+                                {item.number || "—"}
+                              </div>
+                            </td>
+                            <td className="px-3 py-3 capitalize">
+                              {item.plan || "—"}
+                            </td>
+                            <td className="px-3 py-3">
+                              <div className="font-semibold text-slate-100">
+                                {item.home_team || "Home"} vs {item.away_team || "Away"}
+                              </div>
+                              <div className="mt-1 text-slate-500">
+                                {item.competition || "Competition unavailable"}
+                              </div>
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-3">
+                              {formatVipHistoryDate(item.match_time)}
+                            </td>
+                            <td className="px-3 py-3 font-semibold text-cyan-300">
+                              {item.selection || "—"}
+                            </td>
+                            <td className="px-3 py-3 tabular-nums">
+                              {item.odds == null
+                                ? "—"
+                                : Number(item.odds).toFixed(2)}
+                            </td>
+                            <td className="px-3 py-3 font-bold tabular-nums">
+                              {item.home_score == null || item.away_score == null
+                                ? "—"
+                                : `${item.home_score} - ${item.away_score}`}
+                            </td>
+                            <td className="px-3 py-3">
+                              <span
+                                className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase ${resultClass}`}
+                              >
+                                {result}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+
+                      {!vipHistory.length && (
+                        <tr>
+                          <td
+                            colSpan={9}
+                            className="px-4 py-8 text-center text-sm text-slate-500"
+                          >
+                            {vipHistoryLoading
+                              ? "Loading distribution history…"
+                              : "No distribution history found for these filters."}
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </Card>
           </section>
         )}
 
-        
 
-        
+
+
 
         {activeSection === "bets" && (
           <section className="space-y-5">

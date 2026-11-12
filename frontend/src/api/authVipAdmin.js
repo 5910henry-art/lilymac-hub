@@ -325,6 +325,16 @@ export const adminDistributeVipPicks = (
   });
 
 // ============================================================
+// VIP PICK DISTRIBUTION HISTORY
+// ============================================================
+
+export const adminGetVipPickHistory = (token, filters = {}) =>
+  vipRequest(`/admin/vip-picks/history${qsFor(filters)}`, {
+    method: "GET",
+    token,
+  });
+
+// ============================================================
 // CLEAR ALL VIP PICKS
 // ============================================================
 
