@@ -230,9 +230,16 @@ function useToast() {
     []
   );
 
+  const dismiss = useCallback((id) => {
+    setToasts((current) =>
+      current.filter((toast) => toast.id !== id)
+    );
+  }, []);
+
   return {
     toasts,
     push,
+    dismiss,
   };
 }
 
@@ -406,6 +413,67 @@ function VipSummary({
             </p>
           </div>
         </div>
+
+        <div className="mt-4">
+          <p className="mb-2 text-xs font-bold uppercase tracking-widest text-blue-600">
+            Paid picks overview
+          </p>
+
+          <div className="grid grid-cols-3 gap-2">
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <p className="text-[10px] uppercase tracking-wide text-slate-500">
+                Purchased
+              </p>
+              <p className="mt-1 text-xl font-bold text-slate-900">
+                {Number(quotaSource?.total_picks || 0).toLocaleString()}
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <p className="text-[10px] uppercase tracking-wide text-slate-500">
+                Delivered
+              </p>
+              <p className="mt-1 text-xl font-bold text-emerald-600">
+                {Number(quotaSource?.delivered_picks || 0).toLocaleString()}
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <p className="text-[10px] uppercase tracking-wide text-slate-500">
+                Outstanding
+              </p>
+              <p className="mt-1 text-xl font-bold text-blue-600">
+                {Number(quotaSource?.outstanding_picks || 0).toLocaleString()}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {quotaSource?.extension_active === true && (
+          <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-3">
+            <p className="text-sm font-semibold text-emerald-800">
+              Paid-picks extension active
+            </p>
+            <p className="mt-1 text-xs text-emerald-700">
+              Your subscription period has ended, but you still have
+              paid picks outstanding. We will continue delivering
+              those picks without requiring another payment.
+            </p>
+          </div>
+        )}
+
+        {Number(quotaSource?.queued_entitlements || 0) > 0 && (
+          <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50 px-3 py-3">
+            <p className="text-sm font-semibold text-blue-800">
+              Future subscription queued
+            </p>
+            <p className="mt-1 text-xs text-blue-700">
+              {Number(quotaSource.queued_entitlements)} paid
+              entitlement{Number(quotaSource.queued_entitlements) === 1 ? "" : "s"}
+              {" "}waiting to activate after your current entitlement is completed.
+            </p>
+          </div>
+        )}
 
         <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 p-3">
           <div className="flex items-center justify-between gap-3">
@@ -882,7 +950,7 @@ export default function VIPPortal() {
     setPendingRenewal,
   ] = useState(null);
 
-  const { toasts, push } =
+  const { toasts, push, dismiss } =
     useToast();
 
   /* ==========================================================
@@ -1602,6 +1670,16 @@ export default function VIPPortal() {
       return;
     }
 
+    const currentPlan = getPlanInfo(me.subscription);
+
+    if (!currentPlan || requestedPlan.key !== currentPlan.key) {
+      push(
+        "You can only renew your current VIP plan. Use Upgrade to choose a higher plan.",
+        "error"
+      );
+      return;
+    }
+
     setRenewalLoading((current) => ({
       ...current,
       [requestedPlan.key]: true,
@@ -2029,9 +2107,14 @@ export default function VIPPortal() {
                 <div className="relative">
                   <button
                     type="button"
-                    onClick={() =>
-                      setNotificationsOpen((current) => !current)
-                    }
+                    onClick={async () => {
+                      const opening = !notificationsOpen;
+                      setNotificationsOpen(opening);
+
+                      if (opening) {
+                        await markAllNotificationsRead();
+                      }
+                    }}
                     aria-label="Notifications"
                     aria-expanded={notificationsOpen}
                     className="
@@ -2562,8 +2645,8 @@ export default function VIPPortal() {
                   <GlassCard className="border-amber-500/20 bg-amber-500/5 p-5">
                     <SectionTitle
                       icon="🔄"
-                      title="Renew or Queue Your Next VIP Plan"
-                      subtitle="Choose your next plan. If you still have paid-for picks outstanding, the new entitlement will begin after they are delivered."
+                      title="Renew Your Current Plan"
+                      subtitle="Extend your existing plan. If you still have paid-for picks outstanding, the renewed entitlement will begin after they are delivered."
                     />
 
                     {pendingRenewal ? (
@@ -2582,7 +2665,10 @@ export default function VIPPortal() {
                       </div>
                     ) : (
                       <div className="mt-4 space-y-3">
-                        {PLANS.map((plan) => (
+                        {PLANS.filter(
+                          (plan) =>
+                            plan.key === normalizePlan(me.subscription)
+                        ).map((plan) => (
                           <div
                             key={plan.key}
                             className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3"
@@ -2608,7 +2694,7 @@ export default function VIPPortal() {
                             >
                               {renewalLoading[plan.key]
                                 ? "Sending..."
-                                : "Request"}
+                                : "Renew current plan"}
                             </button>
                           </div>
                         ))}
@@ -2924,34 +3010,42 @@ export default function VIPPortal() {
       ====================================================== */}
 
       <div className="fixed bottom-4 right-4 z-50 flex max-w-[calc(100vw-2rem)] flex-col gap-2">
-        {toasts.map(
-          (toast) => (
-            <div
-              key={
-                toast.id
+        {toasts.map((toast) => (
+          <div
+            key={toast.id}
+            role="alert"
+            className={`
+              flex items-start gap-3
+              rounded-2xl
+              border
+              px-4 py-3
+              text-sm font-semibold
+              shadow-2xl
+              backdrop-blur-xl
+              ${
+                toast.type === "success"
+                  ? "border-emerald-500/20 bg-emerald-500/90 text-white"
+                  : toast.type === "error"
+                  ? "border-red-500/20 bg-red-500/90 text-white"
+                  : "border-slate-200 bg-slate-200/95 text-slate-900"
               }
-              className={`
-                rounded-2xl
-                border
-                px-4 py-3
-                text-sm font-semibold
-                shadow-2xl
-                backdrop-blur-xl
-                ${
-                  toast.type ===
-                  "success"
-                    ? "border-emerald-500/20 bg-emerald-500/90 text-white"
-                    : toast.type ===
-                      "error"
-                    ? "border-red-500/20 bg-red-500/90 text-white"
-                    : "border-slate-200 bg-slate-200/95 text-slate-900"
-                }
-              `}
-            >
+            `}
+          >
+            <span className="min-w-0 flex-1 break-words">
               {toast.msg}
-            </div>
-          )
-        )}
+            </span>
+
+            <button
+              type="button"
+              onClick={() => dismiss(toast.id)}
+              aria-label="Close notification"
+              title="Close"
+              className="ml-1 shrink-0 rounded-md px-1 text-xl font-bold leading-none opacity-80 transition hover:bg-black/10 hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-current"
+            >
+              ×
+            </button>
+          </div>
+        ))}
       </div>
     </div>
   );
