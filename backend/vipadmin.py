@@ -2138,7 +2138,15 @@ async def vip_picks():
         SELECT
             vp.id, vp.number, vp.match_id,
             vp.home_team, vp.away_team, vp.match_time,
-            vp.pick, vp.odds, vp.created_at
+            vp.pick, vp.odds, vp.created_at,
+            (
+                SELECT h.delivered_at
+                FROM vip_pick_distribution_history h
+                WHERE h.number = vp.number
+                  AND h.match_id = vp.match_id
+                ORDER BY h.delivered_at DESC, h.id DESC
+                LIMIT 1
+            ) AS delivered_at
         FROM vip_picks vp
         LEFT JOIN matches m ON m.id = vp.match_id
         WHERE vp.number = :number

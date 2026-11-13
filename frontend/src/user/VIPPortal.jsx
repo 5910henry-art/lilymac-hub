@@ -124,6 +124,40 @@ function formatExpiry(value) {
   return date.toLocaleString();
 }
 
+function getDeliveryDateKey(value) {
+  if (!value) return "undated";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "undated";
+
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Africa/Nairobi",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+
+  const values = Object.fromEntries(
+    parts.map((part) => [part.type, part.value])
+  );
+
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+function formatDeliveryDateLabel(key) {
+  if (key === "undated") {
+    return "Delivery date not recorded";
+  }
+
+  return new Intl.DateTimeFormat("en-KE", {
+    timeZone: "Africa/Nairobi",
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  }).format(new Date(`${key}T12:00:00Z`));
+}
+
 function isSubscriptionExpired(expiry) {
   if (!expiry) return true;
 
@@ -529,6 +563,9 @@ function VipQuotaCard({
   onUpgrade,
   upgradeLoading,
   upgradeOptions,
+  onDowngrade,
+  downgradeLoading,
+  downgradeOptions,
 }) {
   if (!me || !quota) {
     return null;
@@ -761,8 +798,75 @@ function VipQuotaCard({
         </div>
       )}
 
+      {downgradeOptions.length > 0 && (
+        <div className="mt-6 border-t border-slate-200 pt-5">
+          <div className="mb-3">
+            <h3 className="font-semibold text-slate-900">
+              Downgrade your plan
+            </h3>
+            <p className="mt-1 text-xs text-slate-500">
+              Your current paid picks and entitlement will be preserved.
+              The lower plan starts only after your existing entitlement
+              is completed and expires.
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            {downgradeOptions.map((plan) => (
+              <button
+                key={plan.key}
+                type="button"
+                onClick={() => {
+                  if (window.confirm(
+                    `Request a downgrade to ${plan.name}? Your current paid picks will be preserved.`
+                  )) {
+                    onDowngrade(plan.name);
+                  }
+                }}
+                disabled={!!downgradeLoading[plan.name]}
+                className="
+                  flex w-full items-center justify-between gap-3
+                  rounded-2xl border border-amber-200
+                  bg-amber-50 p-3 text-left transition
+                  hover:border-amber-400 hover:bg-amber-100
+                  disabled:cursor-not-allowed disabled:opacity-50
+                "
+              >
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-100 text-xl">
+                    {plan.icon}
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">
+                      {plan.name}
+                    </p>
+                    <p className="text-[11px] text-slate-500">
+                      {plan.quota} picks/day · {plan.days} day
+                      {plan.days === 1 ? "" : "s"}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="text-right">
+                  <p className="text-sm font-bold text-amber-700">
+                    {downgradeLoading[plan.name]
+                      ? "Sending..."
+                      : plan.display}
+                  </p>
+                  {!downgradeLoading[plan.name] && (
+                    <p className="text-[10px] text-slate-500">
+                      Request downgrade →
+                    </p>
+                  )}
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {upgradeOptions.length ===
-        0 && (
+        0 && downgradeOptions.length === 0 && (
         <div className="mt-5 rounded-2xl border border-blue-600/10 bg-blue-600/5 p-3 text-center">
           <p className="text-sm font-semibold text-blue-600">
             💎 You are on the highest plan
@@ -941,6 +1045,16 @@ export default function VIPPortal() {
   ] = useState(null);
 
   const [
+    downgradeLoading,
+    setDowngradeLoading,
+  ] = useState({});
+
+  const [
+    pendingDowngrade,
+    setPendingDowngrade,
+  ] = useState(null);
+
+  const [
     renewalLoading,
     setRenewalLoading,
   ] = useState({});
@@ -990,6 +1104,17 @@ export default function VIPPortal() {
       return PLANS.filter(
         (_, index) =>
           index > currentPlanIndex
+      );
+    }, [currentPlanIndex]);
+
+  const downgradeOptions =
+    useMemo(() => {
+      if (currentPlanIndex === -1) {
+        return [];
+      }
+
+      return PLANS.filter(
+        (_, index) => index < currentPlanIndex
       );
     }, [currentPlanIndex]);
 
@@ -1654,6 +1779,95 @@ export default function VIPPortal() {
     };
 
   /* ==========================================================
+     DOWNGRADE
+  ========================================================== */
+
+  const handleDowngrade = async (planName) => {
+    if (!me) {
+      push("Please log in first", "error");
+      return;
+    }
+
+    const requestedPlan = getPlanInfo(planName);
+
+    if (!requestedPlan) {
+      push("Invalid downgrade plan", "error");
+      return;
+    }
+
+    const currentIndex = PLAN_ORDER.indexOf(
+      normalizePlan(me.subscription)
+    );
+    const requestedIndex = PLAN_ORDER.indexOf(
+      requestedPlan.key
+    );
+
+    if (
+      currentIndex === -1 ||
+      requestedIndex < 0 ||
+      requestedIndex >= currentIndex
+    ) {
+      push("You can only downgrade to a lower plan.", "error");
+      return;
+    }
+
+    setDowngradeLoading((current) => ({
+      ...current,
+      [planName]: true,
+    }));
+
+    try {
+      const token = localStorage.getItem("vip_token");
+
+      if (!token) {
+        throw new Error(
+          "VIP session expired. Please log in again."
+        );
+      }
+
+      const res = await api.vipDowngrade(
+        token,
+        requestedPlan.key
+      );
+
+      if (res && res.success) {
+        setPendingDowngrade({
+          to_plan: requestedPlan.key,
+          requested_at: new Date().toISOString(),
+        });
+
+        push(
+          `Downgrade request for ${requestedPlan.name} sent to admin.`,
+          "success",
+          6000
+        );
+
+        await fetchVipDataOnce(token);
+      } else {
+        push(
+          typeof res?.error === "string"
+            ? res.error
+            : "Downgrade request failed",
+          "error"
+        );
+      }
+    } catch (err) {
+      console.error("handleDowngrade error:", err);
+      push(
+        typeof err?.message === "string"
+          ? err.message
+          : "Downgrade request failed",
+        "error"
+      );
+    } finally {
+      setDowngradeLoading((current) => ({
+        ...current,
+        [planName]: false,
+      }));
+    }
+  };
+
+  /* ==========================================================
      VIP SUBSCRIPTION RENEWAL
   ========================================================== */
 
@@ -1829,6 +2043,26 @@ export default function VIPPortal() {
     logged
       ? picks
       : picks.slice(0, 2);
+
+  const visiblePickGroups = [];
+  const pickGroupMap = new Map();
+
+  visiblePicks.forEach((pick) => {
+    const key = getDeliveryDateKey(pick?.delivered_at);
+
+    if (!pickGroupMap.has(key)) {
+      const group = {
+        key,
+        label: formatDeliveryDateLabel(key),
+        picks: [],
+      };
+
+      pickGroupMap.set(key, group);
+      visiblePickGroups.push(group);
+    }
+
+    pickGroupMap.get(key).picks.push(pick);
+  });
 
   /* ==========================================================
      WEB PUSH CONTROLS
@@ -2039,7 +2273,7 @@ export default function VIPPortal() {
         <div className="absolute bottom-0 left-1/3 h-80 w-80 rounded-full bg-red-500/5 blur-3xl" />
       </div>
 
-      <div className="relative mx-auto max-w-7xl px-4 py-5 sm:px-6 lg:px-8">
+      <div className="relative mx-auto w-full min-w-0 max-w-7xl px-3 py-4 sm:px-6 sm:py-5 lg:px-8">
         {/* ====================================================
             HEADER
         ==================================================== */}
@@ -2280,7 +2514,7 @@ export default function VIPPortal() {
             MAIN GRID
         ==================================================== */}
 
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[360px_1fr]">
+        <div className="grid min-w-0 grid-cols-1 gap-4 sm:gap-6 lg:grid-cols-[360px_minmax(0,1fr)]">
           {/* ==================================================
               LEFT
           ================================================== */}
@@ -2716,6 +2950,15 @@ export default function VIPPortal() {
                     upgradeOptions={
                       upgradeOptions
                     }
+                    onDowngrade={
+                      handleDowngrade
+                    }
+                    downgradeLoading={
+                      downgradeLoading
+                    }
+                    downgradeOptions={
+                      downgradeOptions
+                    }
                   />
                 )}
 
@@ -2740,6 +2983,30 @@ export default function VIPPortal() {
                               pendingUpgrade.to_plan}
                           </span>{" "}
                           is waiting for admin approval.
+                        </p>
+                      </div>
+                    </div>
+                  </GlassCard>
+                )}
+
+                {pendingDowngrade && (
+                  <GlassCard className="border-amber-300/40 bg-amber-50 p-4">
+                    <div className="flex items-start gap-3">
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-100">
+                        ⏳
+                      </div>
+                      <div>
+                        <p className="text-sm font-semibold text-amber-800">
+                          Downgrade request pending
+                        </p>
+                        <p className="mt-1 text-xs leading-5 text-slate-600">
+                          Your request to move to{" "}
+                          <span className="font-semibold text-slate-800">
+                            {getPlanInfo(pendingDowngrade.to_plan)?.name ||
+                              pendingDowngrade.to_plan}
+                          </span>{" "}
+                          is waiting for admin approval. Your current paid
+                          entitlement remains protected.
                         </p>
                       </div>
                     </div>
@@ -2828,7 +3095,7 @@ export default function VIPPortal() {
           ================================================== */}
 
           {logged && (
-          <div>
+          <div className="min-w-0">
             <GlassCard className="overflow-hidden">
               <div className="border-b border-slate-200 bg-gradient-to-r from-blue-600/10 via-transparent to-transparent p-5 sm:p-6">
                 <div className="flex items-center justify-between gap-3">
@@ -2839,7 +3106,7 @@ export default function VIPPortal() {
                       </span>
 
                       <h2 className="text-xl font-black text-slate-900">
-                        Today's VIP Picks
+                        Your VIP Picks
                       </h2>
                     </div>
 
@@ -2884,7 +3151,7 @@ export default function VIPPortal() {
                       </h3>
 
                       <p className="mt-1 text-xs text-slate-500">
-                        Check back later for today's VIP
+                        Check back later for new VIP
                         predictions.
                       </p>
                     </div>
@@ -2893,8 +3160,20 @@ export default function VIPPortal() {
                 {!loading &&
                   picks.length >
                     0 && (
-                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                      {visiblePicks.map(
+                    <div className="space-y-6">
+                      {visiblePickGroups.map((group) => (
+                        <section key={group.key} className="min-w-0">
+                          <div className="mb-3 flex flex-wrap items-center gap-2">
+                            <span className="h-2 w-2 rounded-full bg-blue-600" />
+                            <h3 className="text-sm font-black text-slate-800">
+                              {group.label}
+                            </h3>
+                            <span className="rounded-full bg-blue-600/10 px-2 py-0.5 text-[10px] font-bold text-blue-700">
+                              {group.picks.length} {group.picks.length === 1 ? "pick" : "picks"}
+                            </span>
+                          </div>
+                          <div className="grid min-w-0 grid-cols-1 gap-3 sm:gap-4 md:grid-cols-2">
+                            {group.picks.map(
                         (
                           pick,
                           index
@@ -2927,6 +3206,7 @@ export default function VIPPortal() {
                               className="
                                 group
                                 relative
+                                min-w-0
                                 overflow-hidden
                                 rounded-2xl
                                 border border-slate-200
@@ -2943,7 +3223,7 @@ export default function VIPPortal() {
                               <div className="relative">
                                 <div className="flex items-start justify-between gap-3">
                                   <div className="min-w-0">
-                                    <p className="text-sm font-bold leading-5 text-slate-900">
+                                    <p className="break-words text-sm font-bold leading-5 text-slate-900">
                                       {
                                         matchName
                                       }
@@ -2980,7 +3260,10 @@ export default function VIPPortal() {
                             </div>
                           );
                         }
-                      )}
+                            )}
+                          </div>
+                        </section>
+                      ))}
                     </div>
                   )}
 
