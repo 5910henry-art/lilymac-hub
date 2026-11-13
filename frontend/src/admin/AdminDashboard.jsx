@@ -39,6 +39,7 @@ import {
   adminPreviewVipPicks,
   adminDistributeVipPicks,
   adminGetVipPickHistory,
+  adminDeleteCompletedVipPickHistory,
 } from "../api/authVipAdmin";
 
 const REFRESH_MS = 30_000;
@@ -97,6 +98,7 @@ const [selectedVIPs, setSelectedVIPs] = useState([]);
   const [vipHistoryFrom, setVipHistoryFrom] = useState("");
   const [vipHistoryTo, setVipHistoryTo] = useState("");
   const [vipHistoryLoading, setVipHistoryLoading] = useState(false);
+  const [vipHistoryDeleting, setVipHistoryDeleting] = useState(false);
   const [vipHistoryError, setVipHistoryError] = useState("");
 
   const [loading, setLoading] = useState(false);
@@ -246,6 +248,59 @@ const [selectedVIPs, setSelectedVIPs] = useState([]);
     vipHistoryPlan,
     vipHistoryFrom,
     vipHistoryTo,
+  ]);
+
+  const deleteCompletedVipPickHistory = useCallback(async () => {
+    if (!token || vipHistoryDeleting) return;
+
+    const confirmMessage =
+      "Delete all completed VIP pick history records matching the current filters?\n\n" +
+      "Only records linked to FINISHED matches will be deleted. Pending records will remain.";
+
+    if (!window.confirm(confirmMessage)) return;
+
+    setVipHistoryDeleting(true);
+
+    try {
+      const filters = {
+        number: vipHistoryNumber.trim(),
+        plan: vipHistoryPlan === "all" ? "" : vipHistoryPlan,
+        from: vipHistoryFrom,
+        to: vipHistoryTo,
+      };
+
+      const res = await adminDeleteCompletedVipPickHistory(token, filters);
+
+      if (res?.success === false) {
+        throw new Error(
+          res?.error || res?.message || "Could not delete completed history."
+        );
+      }
+
+      const payload = safeObj(res) || {};
+      const deletedCount = Number(payload.deleted_count || 0);
+
+      setMsg({
+        type: "success",
+        text: `${deletedCount} completed history record(s) deleted.`,
+      });
+
+      await fetchVipPickHistory();
+    } catch (error) {
+      showError(error, "Could not delete completed VIP pick history.");
+    } finally {
+      setVipHistoryDeleting(false);
+    }
+  }, [
+    token,
+    vipHistoryDeleting,
+    vipHistoryNumber,
+    vipHistoryPlan,
+    vipHistoryFrom,
+    vipHistoryTo,
+    safeObj,
+    fetchVipPickHistory,
+    showError,
   ]);
 
   const showError = useCallback(
@@ -1212,7 +1267,11 @@ setDistributionSummary([]);
     }
 
     setLoading(true);
-    setLoadingText("Updating match result…");
+    setLoadingText(
+      settlementStatus === "IN_PLAY" || settlementStatus === "PAUSED"
+        ? "Updating live score…"
+        : "Saving match result…"
+    );
     setMsg(null);
 
     try {
@@ -2588,13 +2647,22 @@ setDistributionSummary([]);
               title="VIP distribution history"
               subtitle="Permanent delivery records · Times shown in East Africa Time"
               action={
-                <Btn
-                  small
-                  onClick={fetchVipPickHistory}
-                  disabled={vipHistoryLoading}
-                >
-                  {vipHistoryLoading ? "Refreshing…" : "Refresh history"}
-                </Btn>
+                <div className="flex flex-wrap gap-2">
+                  <Btn
+                    small
+                    onClick={fetchVipPickHistory}
+                    disabled={vipHistoryLoading || vipHistoryDeleting}
+                  >
+                    {vipHistoryLoading ? "Refreshing…" : "Refresh history"}
+                  </Btn>
+                  <Btn
+                    small
+                    onClick={deleteCompletedVipPickHistory}
+                    disabled={vipHistoryLoading || vipHistoryDeleting}
+                  >
+                    {vipHistoryDeleting ? "Deleting…" : "Delete completed"}
+                  </Btn>
+                </div>
               }
             >
               <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
@@ -3076,8 +3144,8 @@ setDistributionSummary([]);
           "settlement" && (
           <section className="grid gap-5 xl:grid-cols-2">
             <Card
-              title="Grade match"
-              subtitle="Settle a match result"
+              title="Match Score & Settlement"
+              subtitle="Update a live score or save a final match result"
             >
               <div className="grid gap-4">
                 <div>
@@ -3175,12 +3243,14 @@ setDistributionSummary([]);
                     !settlementStatus
                   }
                 >
-                  Grade match
+                  {["IN_PLAY", "PAUSED"].includes(settlementStatus)
+                    ? "Update Live Score"
+                    : "Save Match Result"}
                 </Btn>
 
                 <p className="text-xs text-slate-500">
-                  This updates only the match result and status in the database.
-                  The existing scheduler handles subsequent bet processing.
+                  IN_PLAY and PAUSED update the live score without settling bets.
+                  Bets are processed when the match is marked FINISHED.
                 </p>
               </div>
             </Card>

@@ -340,6 +340,12 @@ export const adminGetVipPickHistory = (token, filters = {}) =>
     token,
   });
 
+export const adminDeleteCompletedVipPickHistory = (token, filters = {}) =>
+  vipRequest(`/admin/vip-picks/history/completed${qsFor(filters)}`, {
+    method: "DELETE",
+    token,
+  });
+
 // ============================================================
 // CLEAR ALL VIP PICKS
 // ============================================================

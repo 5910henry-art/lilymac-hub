@@ -3987,6 +3987,75 @@ async def admin_vip_pick_distribution_history():
         await conn.close()
 
 
+
+# ============================================================
+# DELETE COMPLETED VIP PICK DISTRIBUTION HISTORY
+# ============================================================
+
+@app.delete("/admin/vip-picks/history/completed")
+@admin_required
+async def admin_delete_completed_vip_pick_history():
+    number = request.args.get("number", "").strip() or None
+    plan_filter = request.args.get("plan", "").strip().lower() or None
+    date_from = request.args.get("from", "").strip() or None
+    date_to = request.args.get("to", "").strip() or None
+
+    try:
+        date_from = date.fromisoformat(date_from) if date_from else None
+        date_to = date.fromisoformat(date_to) if date_to else None
+    except ValueError:
+        return jsonify({
+            "error": "Invalid date filter. Use YYYY-MM-DD."
+        }), 400
+
+    conn = await asyncpg.connect(dsn=DATABASE_URL, command_timeout=60)
+
+    try:
+        await conn.execute(f'SET search_path TO "{DB_SCHEMA}", public')
+
+        deleted_count = await conn.fetchval(
+            """
+            WITH deleted AS (
+                DELETE FROM vip_pick_distribution_history h
+                USING matches m
+                WHERE m.id = h.match_id
+                  AND UPPER(COALESCE(m.status, '')) = 'FINISHED'
+                  AND ($1::text IS NULL OR h.number = $1)
+                  AND ($2::text IS NULL OR LOWER(h.plan) = $2)
+                  AND (
+                        $3::date IS NULL
+                        OR (h.delivered_at AT TIME ZONE 'Africa/Nairobi')::date >= $3
+                  )
+                  AND (
+                        $4::date IS NULL
+                        OR (h.delivered_at AT TIME ZONE 'Africa/Nairobi')::date <= $4
+                  )
+                RETURNING 1
+            )
+            SELECT COUNT(*) FROM deleted
+            """,
+            number,
+            plan_filter,
+            date_from,
+            date_to,
+        )
+
+        return jsonify({
+            "success": True,
+            "deleted_count": int(deleted_count or 0),
+            "message": "Completed VIP pick history deleted.",
+        })
+
+    except Exception:
+        logger.exception("Failed to delete completed VIP pick history")
+        return jsonify({
+            "error": "Unable to delete completed VIP pick history"
+        }), 500
+
+    finally:
+        await conn.close()
+
+
 # ============================================================
 # CLEAR ALL VIP PICKS
 # ============================================================
