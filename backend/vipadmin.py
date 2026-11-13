@@ -1770,6 +1770,11 @@ async def init_db_async():
             LEFT JOIN surviving s
               ON s.number = vu.number
             WHERE vu.approved IS TRUE
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM vip_subscription_entitlements existing
+                  WHERE existing.vip_id = vu.id
+              )
         )
         INSERT INTO vip_subscription_entitlements (
             vip_id,
