@@ -4383,13 +4383,29 @@ async def admin_transactions():
         sources = {
             "wallet": {
                 "table": '"transaction"',
+                "join": """
+                    LEFT JOIN mpesa_withdrawal mw
+                      ON mw.reference = t.reference
+                     AND mw.user_id = t.user_id
+                     AND t.type = 'mpesa_withdrawal'
+                """,
                 "select": """
                     t.id, t.user_id, u.phone AS user_phone,
                     t.type, t.amount, t.balance_after, t.description,
-                    t.reference, t.status, t.created
+                    t.reference, t.status, t.created,
+                    mw.phone AS mpesa_phone,
+                    mw.mpesa_receipt AS mpesa_receipt,
+                    mw.result_description AS mpesa_result_description,
+                    mw.conversation_id AS mpesa_conversation_id,
+                    mw.originator_conversation_id AS mpesa_originator_conversation_id,
+                    mw.result_code AS mpesa_result_code,
+                    mw.updated AS mpesa_updated
                 """,
                 "search_fields": [
                     "u.phone", "t.type", "t.description", "t.reference",
+                    "mw.phone", "mw.mpesa_receipt",
+                    "mw.conversation_id", "mw.originator_conversation_id",
+                    "mw.result_description",
                 ],
                 "where": [],
             },
@@ -4453,6 +4469,7 @@ async def admin_transactions():
                 SELECT COUNT(*) AS total
                 FROM {config["table"]} t
                 JOIN "user" u ON u.id = t.user_id
+                {config.get("join", "")}
                 {where_sql}
                 """,
                 params,
@@ -4464,6 +4481,7 @@ async def admin_transactions():
                 SELECT {config["select"]}
                 FROM {config["table"]} t
                 JOIN "user" u ON u.id = t.user_id
+                {config.get("join", "")}
                 {where_sql}
                 ORDER BY t.created DESC NULLS LAST, t.id DESC
                 LIMIT :fetch_limit
@@ -4492,23 +4510,32 @@ async def admin_transactions():
                         "type": row.get("type") or "wallet",
                         "amount": amount,
                         "balance_after": str(row["balance_after"]),
-                        "phone": None,
+                        "phone": row.get("mpesa_phone"),
                         "status": row.get("status"),
                         "description": row.get("description"),
                         "reference": row.get("reference"),
                         "receipt": (
-                            row.get("reference")
-                            if row.get("type") == "mpesa_deposit"
-                            else None
+                            row.get("mpesa_receipt")
+                            or (
+                                row.get("reference")
+                                if row.get("type") == "mpesa_deposit"
+                                else None
+                            )
                         ),
-                        "result_description": None,
+                        "result_description": row.get("mpesa_result_description"),
                         "credited": None,
                         "merchant_request_id": None,
                         "checkout_request_id": None,
-                        "conversation_id": None,
-                        "originator_conversation_id": None,
-                        "result_code": None,
-                        "updated": None,
+                        "conversation_id": row.get("mpesa_conversation_id"),
+                        "originator_conversation_id": row.get(
+                            "mpesa_originator_conversation_id"
+                        ),
+                        "result_code": row.get("mpesa_result_code"),
+                        "updated": (
+                            row["mpesa_updated"].isoformat()
+                            if row.get("mpesa_updated")
+                            else None
+                        ),
                     }
 
                 elif source_name == "deposit_attempt":
