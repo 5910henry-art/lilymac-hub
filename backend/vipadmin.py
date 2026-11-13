@@ -2654,6 +2654,139 @@ async def vip_upgrade():
 
 
 # ============================================================
+# ============================================================
+# VIP SUBSCRIPTION DOWNGRADE REQUEST
+# ============================================================
+
+@app.post("/vip/downgrade")
+@vip_required
+async def vip_downgrade():
+    data = request.get_json(silent=True) or {}
+    to_plan = str(data.get("subscription", "")).strip().lower()
+
+    if to_plan not in PLAN_ORDER:
+        return jsonify({"error": "invalid subscription plan"}), 400
+
+    vip = request.vip_user
+    conn = await asyncpg.connect(dsn=DATABASE_URL, command_timeout=60)
+
+    failure = None
+    row = None
+    from_plan = None
+    vip_name = vip.get("name") or "VIP member"
+
+    try:
+        await conn.execute(f'SET search_path TO "{DB_SCHEMA}", public')
+
+        async with conn.transaction():
+            locked_vip = await conn.fetchrow(
+                """
+                SELECT id, name, number, subscription, approved
+                FROM vip_users
+                WHERE id = $1
+                FOR UPDATE
+                """,
+                vip["id"],
+            )
+
+            if not locked_vip:
+                failure = ({"error": "VIP account not found"}, 404)
+            elif not locked_vip["approved"]:
+                failure = ({"error": "VIP account is not approved"}, 403)
+            else:
+                vip_name = locked_vip["name"] or "VIP member"
+
+                existing = await conn.fetchval(
+                    """
+                    SELECT id
+                    FROM vip_upgrade_requests
+                    WHERE vip_id = $1 AND status = 'pending'
+                    LIMIT 1
+                    """,
+                    locked_vip["id"],
+                )
+
+                if existing:
+                    failure = ({
+                        "error": "you already have a pending subscription request"
+                    }, 409)
+                else:
+                    queued = await conn.fetchval(
+                        """
+                        SELECT id
+                        FROM vip_subscription_entitlements
+                        WHERE vip_id = $1 AND status = 'queued'
+                        LIMIT 1
+                        """,
+                        locked_vip["id"],
+                    )
+
+                    if queued:
+                        failure = ({
+                            "error": (
+                                "you already have a paid subscription "
+                                "queued to activate"
+                            )
+                        }, 409)
+                    else:
+                        from_plan = locked_vip["subscription"]
+
+                        if (
+                            from_plan not in PLAN_ORDER
+                            or PLAN_ORDER.index(to_plan)
+                            >= PLAN_ORDER.index(from_plan)
+                        ):
+                            failure = ({
+                                "error": (
+                                    "downgrade plan must be lower than "
+                                    "your current plan"
+                                )
+                            }, 400)
+                        else:
+                            inserted = await conn.fetchrow(
+                                """
+                                INSERT INTO vip_upgrade_requests (
+                                    vip_id, from_plan, to_plan,
+                                    status, request_type
+                                )
+                                VALUES ($1, $2, $3, 'pending', 'downgrade')
+                                RETURNING id, vip_id, from_plan, to_plan,
+                                          status, created_at
+                                """,
+                                locked_vip["id"],
+                                from_plan,
+                                to_plan,
+                            )
+                            row = dict(inserted)
+
+    finally:
+        await conn.close()
+
+    if failure:
+        return jsonify(failure[0]), failure[1]
+
+    try:
+        await send_admin_push(
+            "VIP downgrade request",
+            (
+                f"{vip_name} ({vip['number']}) requested a downgrade "
+                f"from {from_plan} to {to_plan}."
+            ),
+            "/admin",
+        )
+    except Exception as push_error:
+        log_json(
+            "error",
+            event="admin_vip_downgrade_push_failed",
+            error=str(push_error),
+        )
+
+    return jsonify({
+        "message": "downgrade request submitted",
+        "request": row,
+    }), 201
+
+
 # VIP SUBSCRIPTION RENEWAL REQUEST
 # ============================================================
 
