@@ -446,6 +446,26 @@ def prepare_updates(
         )
 
         # ----------------------------------------------------
+        # PRESERVE MANUAL LIVE UPDATES
+        # ----------------------------------------------------
+
+        # Do not let an empty provider score erase a score
+        # entered manually by an administrator.
+        if new_home_score is None:
+            new_home_score = old["home_score"]
+
+        if new_away_score is None:
+            new_away_score = old["away_score"]
+
+        # Do not let a stale pre-match API status undo a
+        # manually activated live or paused match.
+        if (
+            old["status"] in ("IN_PLAY", "PAUSED")
+            and new_status in ("SCHEDULED", "TIMED")
+        ):
+            new_status = old["status"]
+
+        # ----------------------------------------------------
         # Detect individual changes
         # ----------------------------------------------------
 

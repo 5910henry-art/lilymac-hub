@@ -4845,10 +4845,17 @@ async def admin_settlement_statuses():
     try:
         rows = await db_fetch_all(
             """
-            SELECT DISTINCT status
-            FROM matches
-            WHERE status IS NOT NULL
-              AND BTRIM(status) <> ''
+            SELECT status
+            FROM (
+                SELECT DISTINCT status
+                FROM matches
+                WHERE status IS NOT NULL
+                  AND BTRIM(status) <> ''
+
+                UNION
+
+                SELECT 'IN_PLAY' AS status
+            ) available_statuses
             ORDER BY status
             """
         )
@@ -4965,10 +4972,13 @@ async def admin_grade_match():
     try:
         valid_status = await db_fetch_one(
             """
-            SELECT status
-            FROM matches
-            WHERE status = :status
-            LIMIT 1
+            SELECT :status AS status
+            WHERE :status = 'IN_PLAY'
+               OR EXISTS (
+                   SELECT 1
+                   FROM matches
+                   WHERE status = :status
+               )
             """,
             {"status": status},
         )
