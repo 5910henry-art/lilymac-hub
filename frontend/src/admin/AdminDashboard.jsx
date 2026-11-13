@@ -86,6 +86,7 @@ const [selectedVIPs, setSelectedVIPs] = useState([]);
   const [distributionSummary, setDistributionSummary] = useState([]);
 
   const [vipHistory, setVipHistory] = useState([]);
+  const [vipHistoryPage, setVipHistoryPage] = useState(1);
   const [vipHistoryTotals, setVipHistoryTotals] = useState({
     total: 0,
     won: 0,
@@ -100,6 +101,7 @@ const [selectedVIPs, setSelectedVIPs] = useState([]);
   const [vipHistoryLoading, setVipHistoryLoading] = useState(false);
   const [vipHistoryDeleting, setVipHistoryDeleting] = useState(false);
   const [vipHistoryError, setVipHistoryError] = useState("");
+  const [vipHistoryVipBreakdown, setVipHistoryVipBreakdown] = useState([]);
 
   const [loading, setLoading] = useState(false);
   const [loadingText, setLoadingText] = useState("");
@@ -109,6 +111,7 @@ const [selectedVIPs, setSelectedVIPs] = useState([]);
   const [filterApproved, setFilterApproved] = useState("all");
   const [filterPlan, setFilterPlan] = useState("all");
   const [activeSection, setActiveSection] = useState("overview");
+  const [overviewRefreshKey, setOverviewRefreshKey] = useState(0);
 
   const [settlementDate, setSettlementDate] = useState(() => {
     const parts = new Intl.DateTimeFormat("en-CA", {
@@ -201,6 +204,7 @@ const [selectedVIPs, setSelectedVIPs] = useState([]);
 
     setVipHistoryLoading(true);
     setVipHistoryError("");
+    setVipHistoryPage(1);
 
     try {
       const filters = {
@@ -234,6 +238,11 @@ const [selectedVIPs, setSelectedVIPs] = useState([]);
           ungraded: 0,
         }
       );
+      setVipHistoryVipBreakdown(
+        Array.isArray(payload.vip_breakdown)
+          ? payload.vip_breakdown
+          : []
+      );
     } catch (error) {
       setVipHistoryError(
         error?.message || "Could not load VIP pick history."
@@ -249,6 +258,28 @@ const [selectedVIPs, setSelectedVIPs] = useState([]);
     vipHistoryFrom,
     vipHistoryTo,
   ]);
+
+  const VIP_HISTORY_PAGE_SIZE = 8;
+  const vipHistoryPageCount = Math.max(
+    1,
+    Math.ceil(vipHistory.length / VIP_HISTORY_PAGE_SIZE)
+  );
+  const paginatedVipHistory = vipHistory.slice(
+    (vipHistoryPage - 1) * VIP_HISTORY_PAGE_SIZE,
+    vipHistoryPage * VIP_HISTORY_PAGE_SIZE
+  );
+
+  const vipPerformanceGraded =
+    Number(vipHistoryTotals.won || 0) +
+    Number(vipHistoryTotals.lost || 0);
+
+  const vipPerformanceRate = vipPerformanceGraded
+    ? (Number(vipHistoryTotals.won || 0) / vipPerformanceGraded) * 100
+    : 0;
+
+  const sortedVipPerformance = [...vipHistoryVipBreakdown].sort(
+    (a, b) => Number(b.total || 0) - Number(a.total || 0)
+  );
 
   const deleteCompletedVipPickHistory = useCallback(async () => {
     if (!token || vipHistoryDeleting) return;
@@ -287,7 +318,10 @@ const [selectedVIPs, setSelectedVIPs] = useState([]);
 
       await fetchVipPickHistory();
     } catch (error) {
-      showError(error, "Could not delete completed VIP pick history.");
+      setMsg({
+        type: "error",
+        text: error?.message || "Could not delete completed VIP pick history.",
+      });
     } finally {
       setVipHistoryDeleting(false);
     }
@@ -300,7 +334,6 @@ const [selectedVIPs, setSelectedVIPs] = useState([]);
     vipHistoryTo,
     safeObj,
     fetchVipPickHistory,
-    showError,
   ]);
 
   const showError = useCallback(
@@ -501,28 +534,25 @@ setDistributionSummary([]);
     }
   };
 
-  const fetchAll = useCallback(async (silent = false) => {
+  // VIP accounts and requests are the only dashboard data
+  // refreshed automatically in the background.
+  const fetchVipData = useCallback(async (silent = false) => {
     if (!token) return;
 
     if (!silent) {
       setLoading(true);
-      setLoadingText("Refreshing dashboard…");
+      setLoadingText("Refreshing VIP data…");
     }
 
     try {
-      const [
-        vipList,
-        pendingList,
-        upgrades,
-        matches,
-] = await Promise.all([
+      const [vipList, pendingList, upgrades] = await Promise.all([
         adminListVips(token),
         adminListPendingVips(token),
         adminListUpgradeRequests(token),
-        adminPreviewVipPicks(token, 50),
-]);
+      ]);
 
       const freshVips = safeArray(vipList);
+
       setVips(freshVips);
       setSelectedVIPs((prev) =>
         prev.filter((number) =>
@@ -534,44 +564,66 @@ setDistributionSummary([]);
           )
         )
       );
+
       setPendingVips(safeArray(pendingList));
       setUpgradeRequests(safeArray(upgrades));
-      setAllMatches(safeArray(matches));
-
-      // Betting overview is independent of VIP list loading.
-      const overview = await adminBettingOverview(token);
-      setBettingOverview(
-        overview?.success
-          ? (safeObj(safeObj(overview)) ?? null)
-          : null
-      );
-} catch (e) {
-      console.error(
-        "[ADMIN] fetchAll failed:",
-        e
-      );
-
-      showError(e);
+    } catch (error) {
+      console.error("[ADMIN] VIP data load failed:", error);
+      showError(error);
     } finally {
       if (!silent) {
         setLoading(false);
         setLoadingText("");
       }
     }
-  }, [token, safeArray, safeObj, showError]);
+  }, [token, safeArray, showError]);
 
+  // Match preview is used by Pick Distribution.
+  const fetchDistributionData = useCallback(async () => {
+    if (!token) return;
+
+    try {
+      const matches = await adminPreviewVipPicks(token, 50);
+      setAllMatches(safeArray(matches));
+    } catch (error) {
+      console.error("[ADMIN] Distribution matches load failed:", error);
+      showError(error);
+    }
+  }, [token, safeArray, showError]);
+
+  // Betting overview supplies the Overview dashboard statistics.
+  const fetchOverviewData = useCallback(async () => {
+    if (!token) return;
+
+    try {
+      const overview = await adminBettingOverview(token);
+
+      setBettingOverview(
+        overview?.success
+          ? (safeObj(safeObj(overview)) ?? null)
+          : null
+      );
+    } catch (error) {
+      console.error("[ADMIN] Betting overview load failed:", error);
+      showError(error);
+    }
+  }, [token, safeObj, showError]);
+
+  // Initial dashboard load; only VIP data continues polling.
   useEffect(() => {
     if (!token) return;
 
-    fetchAll();
+    fetchVipData();
+    fetchDistributionData();
+    fetchOverviewData();
 
     const interval = setInterval(
-      () => fetchAll(true),
+      () => fetchVipData(true),
       REFRESH_MS
     );
 
     return () => clearInterval(interval);
-  }, [token, fetchAll]);
+  }, [token, fetchVipData, fetchDistributionData, fetchOverviewData]);
 
   // Load the available match statuses from the database.
   useEffect(() => {
@@ -704,13 +756,11 @@ setDistributionSummary([]);
     };
 
     loadHistory();
-    const interval = setInterval(loadHistory, REFRESH_MS);
 
     return () => {
       cancelled = true;
-      clearInterval(interval);
     };
-  }, [token, houseBalanceRange]);
+  }, [token, houseBalanceRange, overviewRefreshKey]);
 
   const fetchBets = async (page = 1) => {
     if (!token || betLoading) return;
@@ -820,6 +870,53 @@ setDistributionSummary([]);
     }
   };
 
+  const refreshActiveSection = async () => {
+    if (!token || loading) return;
+
+    setLoading(true);
+    setLoadingText("Refreshing current section…");
+
+    try {
+      if (activeSection === "overview") {
+        await Promise.all([
+          fetchVipData(true),
+          fetchDistributionData(),
+          fetchOverviewData(),
+        ]);
+        setOverviewRefreshKey((value) => value + 1);
+      } else if (activeSection === "vip") {
+        await fetchVipData(true);
+      } else if (activeSection === "distribution") {
+        await Promise.all([
+          fetchVipData(true),
+          fetchDistributionData(),
+        ]);
+      } else if (activeSection === "vip-performance") {
+        await fetchVipPickHistory();
+      } else if (activeSection === "bets") {
+        await fetchBets(1);
+      } else if (activeSection === "transactions") {
+        await fetchTransactions(1);
+      } else if (activeSection === "settlement") {
+        const [statuses, matches] = await Promise.all([
+          getSettlementStatuses(token),
+          getSettlementMatches(settlementDate, token),
+        ]);
+
+        if (statuses?.success) {
+          setSettlementStatuses(safeArray(statuses));
+        }
+
+        if (matches?.success) {
+          setSettlementMatches(safeArray(matches));
+        }
+      }
+    } finally {
+      setLoading(false);
+      setLoadingText("");
+    }
+  };
+
   const vipAction = async (id, action) => {
     const verb =
       action === "approve"
@@ -874,7 +971,7 @@ setDistributionSummary([]);
             : `VIP ${action}d successfully.`,
       });
 
-      await fetchAll();
+      await fetchVipData(true);
     } catch (e) {
       console.error(
         `[ADMIN] VIP ${action} failed:`,
@@ -924,7 +1021,7 @@ setDistributionSummary([]);
         text: "VIP password updated successfully.",
       });
 
-      await fetchAll();
+      await fetchVipData(true);
     } catch (e) {
       console.error("[ADMIN] VIP password update failed:", e);
       showError(e);
@@ -944,9 +1041,16 @@ setDistributionSummary([]);
         ? "approve"
         : "decline";
 
+    const requestLabel =
+      requestType === "renewal"
+        ? "renewal"
+        : requestType === "downgrade"
+          ? "downgrade"
+          : "upgrade";
+
     if (
       !window.confirm(
-        `Are you sure you want to ${verb} this ${requestType === "renewal" ? "renewal" : "upgrade"} request?`
+        `Are you sure you want to ${verb} this ${requestLabel} request?`
       )
     ) {
       return;
@@ -984,10 +1088,10 @@ setDistributionSummary([]);
 
       setMsg({
         type: "success",
-        text: `${requestType === "renewal" ? "Renewal" : "Upgrade"} ${action}d successfully.`,
+        text: `${requestLabel.charAt(0).toUpperCase() + requestLabel.slice(1)} ${action}d successfully.`,
       });
 
-      await fetchAll();
+      await fetchVipData(true);
     } catch (e) {
       console.error(
         `[ADMIN] Upgrade ${action} failed:`,
@@ -1207,7 +1311,7 @@ setDistributionSummary([]);
       setSelectedVIPs([]);
       setSelectedMatches([]);
 
-      await fetchAll();
+      await Promise.all([fetchVipData(true), fetchDistributionData()]);
 
       if (successful > 0) {
         await fetchVipPickHistory();
@@ -1625,7 +1729,7 @@ setDistributionSummary([]);
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={() => fetchAll(false)}
+              onClick={refreshActiveSection}
               disabled={loading}
               className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl border border-white/10 bg-white/[0.045] px-2.5 py-2 text-sm font-semibold text-slate-300 transition hover:bg-white/[0.08] disabled:opacity-50 sm:px-3"
             >
@@ -1745,6 +1849,7 @@ setDistributionSummary([]);
               "Settlement",
             ],
             ["transactions", "Transactions"],
+            ["vip-performance", "VIP Performance"],
           ].map(
             ([id, label]) => (
               <button
@@ -1758,7 +1863,7 @@ setDistributionSummary([]);
                   if (id === "transactions") {
                     fetchTransactions(1);
                   }
-                  if (id === "distribution") {
+                  if (id === "distribution" || id === "vip-performance") {
                     fetchVipPickHistory();
                   }
                 }}
@@ -2293,7 +2398,7 @@ setDistributionSummary([]);
               {pendingUpgradeRequests.length > 0 && (
               <Card
                 title="Subscription requests"
-                subtitle="Approve or decline renewals and upgrades"
+                subtitle="Approve or decline renewals, upgrades and downgrades"
               >
                 <div className="space-y-2">
                   {pendingUpgradeRequests.map(
@@ -2312,7 +2417,11 @@ setDistributionSummary([]);
 
                           <p className="text-xs text-slate-500">
                             <span className="font-semibold text-amber-400">
-                              {req.request_type === "renewal" ? "Renewal" : "Upgrade"}
+                              {req.request_type === "renewal"
+                                ? "Renewal"
+                                : req.request_type === "downgrade"
+                                  ? "Downgrade"
+                                  : "Upgrade"}
                             </span>
                             {" · "}
                             {req.number ||
@@ -2334,7 +2443,8 @@ setDistributionSummary([]);
                                 onClick={() =>
                                   upgradeAction(
                                     req.id,
-                                    "approve"
+                                    "approve",
+                                    req.request_type || "upgrade"
                                   )
                                 }
                               >
@@ -2347,7 +2457,8 @@ setDistributionSummary([]);
                                 onClick={() =>
                                   upgradeAction(
                                     req.id,
-                                    "decline"
+                                    "decline",
+                                    req.request_type || "upgrade"
                                   )
                                 }
                               >
@@ -2770,7 +2881,7 @@ setDistributionSummary([]);
                     </thead>
 
                     <tbody className="divide-y divide-white/5">
-                      {vipHistory.map((item) => {
+                      {paginatedVipHistory.map((item) => {
                         const result = String(
                           item.result || "pending"
                         ).toLowerCase();
@@ -2856,6 +2967,43 @@ setDistributionSummary([]);
                   </table>
                 </div>
               </div>
+
+              {vipHistory.length > 0 && (
+                <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                  <p className="text-xs text-slate-400">
+                    Showing {(vipHistoryPage - 1) * VIP_HISTORY_PAGE_SIZE + 1}
+                    {"–"}
+                    {Math.min(vipHistoryPage * VIP_HISTORY_PAGE_SIZE, vipHistory.length)}
+                    {" of "}
+                    {vipHistory.length} records
+                  </p>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setVipHistoryPage((page) => Math.max(1, page - 1))}
+                      disabled={vipHistoryPage <= 1 || vipHistoryLoading}
+                      className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-semibold text-slate-300 disabled:opacity-40"
+                    >
+                      Previous
+                    </button>
+
+                    <span className="min-w-[90px] text-center text-xs text-slate-300">
+                      Page {vipHistoryPage} of {vipHistoryPageCount}
+                    </span>
+
+                    <button
+                      type="button"
+                      onClick={() => setVipHistoryPage((page) => Math.min(vipHistoryPageCount, page + 1))}
+                      disabled={vipHistoryPage >= vipHistoryPageCount || vipHistoryLoading}
+                      className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-semibold text-slate-300 disabled:opacity-40"
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              )}
+
             </Card>
           </section>
         )}
@@ -2863,6 +3011,198 @@ setDistributionSummary([]);
 
 
 
+
+        {activeSection === "vip-performance" && (
+          <section className="space-y-5">
+            <Card
+              title="VIP Pick Performance"
+              subtitle="Win rate is calculated from graded picks only. Pending and ungraded picks are excluded."
+              action={
+                <Btn
+                  small
+                  onClick={fetchVipPickHistory}
+                  disabled={vipHistoryLoading}
+                >
+                  {vipHistoryLoading ? "Refreshing…" : "Refresh"}
+                </Btn>
+              }
+            >
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <Select
+                  value={vipHistoryNumber}
+                  onChange={setVipHistoryNumber}
+                >
+                  <option value="">All VIPs</option>
+                  {vips.map((vip) => (
+                    <option key={vip.number} value={String(vip.number)}>
+                      {(vip.name || "Unnamed VIP") + " · " + vip.number}
+                    </option>
+                  ))}
+                </Select>
+
+                <Select
+                  value={vipHistoryPlan}
+                  onChange={setVipHistoryPlan}
+                >
+                  <option value="all">All plans</option>
+                  <option value="daily">Daily</option>
+                  <option value="weekly">Weekly</option>
+                  <option value="monthly">Monthly</option>
+                  <option value="yearly">Yearly</option>
+                  <option value="annual">Annual</option>
+                </Select>
+
+                <Input
+                  type="date"
+                  value={vipHistoryFrom}
+                  onChange={setVipHistoryFrom}
+                />
+
+                <Input
+                  type="date"
+                  value={vipHistoryTo}
+                  onChange={setVipHistoryTo}
+                />
+              </div>
+
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <Btn
+                  small
+                  onClick={fetchVipPickHistory}
+                  disabled={vipHistoryLoading}
+                >
+                  Apply filters
+                </Btn>
+                <Btn
+                  small
+                  onClick={() => {
+                    setVipHistoryNumber("");
+                    setVipHistoryPlan("all");
+                    setVipHistoryFrom("");
+                    setVipHistoryTo("");
+                  }}
+                  disabled={vipHistoryLoading}
+                >
+                  Clear filters
+                </Btn>
+                <span className="text-xs text-slate-500">
+                  {vipHistoryNumber
+                    ? "Individual VIP performance"
+                    : "Overall performance across all VIPs"}
+                </span>
+              </div>
+
+              {vipHistoryError && (
+                <div className="mt-4 rounded-xl border border-red-400/20 bg-red-500/10 p-3 text-sm text-red-300">
+                  {vipHistoryError}
+                </div>
+              )}
+
+              <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
+                {[
+                  ["Picks delivered", vipHistoryTotals.total, "text-white"],
+                  ["Graded picks", vipPerformanceGraded, "text-cyan-300"],
+                  ["Win rate", `${vipPerformanceRate.toFixed(1)}%`, "text-emerald-300"],
+                  ["Wins", vipHistoryTotals.won, "text-emerald-300"],
+                  ["Losses", vipHistoryTotals.lost, "text-rose-300"],
+                  ["Pending", vipHistoryTotals.pending, "text-amber-300"],
+                  ["Ungraded", vipHistoryTotals.ungraded, "text-slate-300"],
+                ].map(([label, value, color]) => (
+                  <div
+                    key={label}
+                    className="rounded-xl border border-white/10 bg-white/[0.025] p-4"
+                  >
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                      {label}
+                    </p>
+                    <p className={`mt-2 text-2xl font-extrabold ${color}`}>
+                      {value}
+                    </p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-4 rounded-xl border border-white/10 bg-white/[0.025] p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-bold text-white">Graded pick success rate</p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {vipHistoryTotals.won || 0} wins out of {vipPerformanceGraded} graded picks
+                    </p>
+                  </div>
+                  <p className="text-xl font-extrabold text-emerald-300">
+                    {vipPerformanceRate.toFixed(1)}%
+                  </p>
+                </div>
+                <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10">
+                  <div
+                    className="h-full rounded-full bg-emerald-400 transition-all"
+                    style={{ width: `${Math.min(100, vipPerformanceRate)}%` }}
+                  />
+                </div>
+              </div>
+            </Card>
+
+            {!vipHistoryNumber && (
+              <Card
+                title="Performance by VIP"
+                subtitle="Subscribers ranked by total delivered picks in the selected period."
+              >
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[620px] text-left text-sm">
+                    <thead>
+                      <tr className="border-b border-white/10 text-[10px] uppercase tracking-wider text-slate-500">
+                        <th className="px-3 py-3">VIP</th>
+                        <th className="px-3 py-3">Delivered</th>
+                        <th className="px-3 py-3">Wins</th>
+                        <th className="px-3 py-3">Losses</th>
+                        <th className="px-3 py-3">Pending</th>
+                        <th className="px-3 py-3">Win rate</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sortedVipPerformance.map((vip) => {
+                        const graded =
+                          Number(vip.won || 0) + Number(vip.lost || 0);
+                        const rate = graded
+                          ? (Number(vip.won || 0) / graded) * 100
+                          : 0;
+
+                        return (
+                          <tr
+                            key={vip.number}
+                            className="border-b border-white/[0.06] text-slate-300"
+                          >
+                            <td className="px-3 py-3">
+                              <p className="font-bold text-white">{vip.vip_name}</p>
+                              <p className="text-xs text-slate-500">{vip.number}</p>
+                            </td>
+                            <td className="px-3 py-3">{vip.total}</td>
+                            <td className="px-3 py-3 text-emerald-300">{vip.won}</td>
+                            <td className="px-3 py-3 text-rose-300">{vip.lost}</td>
+                            <td className="px-3 py-3 text-amber-300">{vip.pending}</td>
+                            <td className="px-3 py-3 font-bold text-emerald-300">
+                              {rate.toFixed(1)}%
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {!sortedVipPerformance.length && (
+                        <tr>
+                          <td colSpan={6} className="px-3 py-8 text-center text-slate-500">
+                            {vipHistoryLoading
+                              ? "Loading VIP performance…"
+                              : "No VIP performance records found for these filters."}
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
+            )}
+          </section>
+        )}
 
         {activeSection === "bets" && (
           <section className="space-y-5">

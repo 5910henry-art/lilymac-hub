@@ -233,6 +233,7 @@ def login():
         user = (
             db.session
             .query(User)
+            .options(db.lazyload("*"))
             .filter_by(phone=phone)
             .first()
         )

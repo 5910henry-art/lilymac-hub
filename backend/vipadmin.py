@@ -4028,13 +4028,11 @@ async def admin_vip_pick_distribution_history():
                     OR (h.delivered_at AT TIME ZONE 'Africa/Nairobi')::date <= $4
               )
             ORDER BY h.delivered_at DESC, h.id DESC
-            LIMIT $5
             """,
             number,
             plan_filter,
             date_from,
             date_to,
-            limit,
         )
 
         history = []
@@ -4045,6 +4043,7 @@ async def admin_vip_pick_distribution_history():
             "pending": 0,
             "ungraded": 0,
         }
+        vip_breakdown = {}
 
         for row in rows:
             item = dict(row)
@@ -4111,12 +4110,33 @@ async def admin_vip_pick_distribution_history():
 
             totals["total"] += 1
             totals[result] += 1
-            history.append(item)
+
+            vip_key = str(item.get("number") or "unknown")
+            if vip_key not in vip_breakdown:
+                vip_breakdown[vip_key] = {
+                    "number": vip_key,
+                    "vip_name": item.get("vip_name") or "Unnamed VIP",
+                    "total": 0,
+                    "won": 0,
+                    "lost": 0,
+                    "pending": 0,
+                    "ungraded": 0,
+                }
+
+            vip_breakdown[vip_key]["total"] += 1
+            vip_breakdown[vip_key][result] += 1
+
+            # Keep the history response bounded, but calculate totals
+            # and subscriber breakdown from every matching record.
+            if len(history) < limit:
+                history.append(item)
 
         return jsonify({
             "history": history,
-            "count": len(history),
+            "count": totals["total"],
+            "returned_count": len(history),
             "totals": totals,
+            "vip_breakdown": list(vip_breakdown.values()),
             "timezone": "Africa/Nairobi",
         })
 

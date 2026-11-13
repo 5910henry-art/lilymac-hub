@@ -119,6 +119,15 @@ export const vipUpgrade = (token, plan) =>
     token,
   });
 
+export const vipDowngrade = (token, plan) =>
+  vipRequest("/vip/downgrade", {
+    method: "POST",
+    body: {
+      subscription: plan,
+    },
+    token,
+  });
+
 // ============================================================
 // VIP RENEWAL
 // ============================================================
