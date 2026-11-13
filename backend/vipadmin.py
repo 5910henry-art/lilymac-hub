@@ -198,6 +198,71 @@ async def _activate_next_vip_entitlement(conn, vip_id):
     if active:
         return None
 
+    # Recover legacy entitlements that were marked completed before
+    # their expiry date or before all paid picks had been delivered.
+    previous = await conn.fetchrow(
+        """
+        SELECT e.id, e.total_picks, e.delivered_picks, e.expires_at,
+               vu.subscription_expiry
+        FROM vip_subscription_entitlements e
+        JOIN vip_users vu ON vu.id = e.vip_id
+        WHERE e.vip_id = $1
+          AND e.status = 'completed'
+        ORDER BY COALESCE(e.activated_at, e.queued_at) DESC, e.id DESC
+        LIMIT 1
+        FOR UPDATE OF e
+        """,
+        vip_id,
+    )
+
+    if previous:
+        previous_expiry = previous["expires_at"]
+
+        if previous_expiry is None:
+            expiry_text = previous["subscription_expiry"]
+            try:
+                previous_expiry = datetime.fromisoformat(
+                    str(expiry_text).replace("Z", "+00:00")
+                )
+                if previous_expiry.tzinfo is None:
+                    previous_expiry = previous_expiry.replace(tzinfo=UTC)
+            except (ValueError, TypeError):
+                previous_expiry = None
+
+        previous_outstanding = max(
+            int(previous["total_picks"])
+            - int(previous["delivered_picks"]),
+            0,
+        )
+
+        previous_expired = False
+        if previous_expiry is not None:
+            previous_expired = (
+                previous_expiry.astimezone(KENYA).date()
+                < datetime.now(KENYA).date()
+            )
+
+        # Unknown expiry is treated conservatively: do not discard
+        # the previous subscription or activate its queued replacement.
+        if previous_outstanding > 0 or not previous_expired:
+            recovery_update = await conn.execute(
+                """
+                UPDATE vip_subscription_entitlements
+                SET status = 'active',
+                    completed_at = NULL
+                WHERE id = $1 AND status = 'completed'
+                """,
+                previous["id"],
+            )
+
+            if recovery_update != "UPDATE 1":
+                raise RuntimeError(
+                    "Previous entitlement recovery failed for "
+                    f"{previous['id']}: {recovery_update}"
+                )
+
+            return None
+
     queued = await conn.fetchrow(
         """
         SELECT id, plan, duration_days
@@ -931,36 +996,6 @@ async def admin_vip_expiry_monitor(interval_seconds=300):
                         if not active:
                             continue
 
-                        outstanding = max(
-                            int(active["total_picks"])
-                            - int(active["delivered_picks"]),
-                            0,
-                        )
-
-                        if outstanding <= 0:
-                            completion_update = await conn.execute(
-                                """
-                                UPDATE vip_subscription_entitlements
-                                SET status = 'completed',
-                                    completed_at = COALESCE(
-                                        completed_at, CURRENT_TIMESTAMP
-                                    )
-                                WHERE id = $1 AND status = 'active'
-                                """,
-                                active["id"],
-                            )
-
-                            if completion_update != "UPDATE 1":
-                                raise RuntimeError(
-                                    "Entitlement completion failed for "
-                                    f"{active['id']}: {completion_update}"
-                                )
-
-                            await _activate_next_vip_entitlement(
-                                conn, vip_row["id"]
-                            )
-                            continue
-
                         expiry = active["expires_at"]
                         if expiry is None:
                             expiry_text = vip_row["subscription_expiry"]
@@ -978,6 +1013,42 @@ async def admin_vip_expiry_monitor(interval_seconds=300):
                                 continue
 
                         expiry_date = expiry.astimezone(KENYA).date()
+
+                        outstanding = max(
+                            int(active["total_picks"])
+                            - int(active["delivered_picks"]),
+                            0,
+                        )
+
+                        # A plan ends only after BOTH its paid picks have
+                        # been delivered and its expiry date has passed.
+                        if outstanding <= 0:
+                            if expiry_date < today:
+                                completion_update = await conn.execute(
+                                    """
+                                    UPDATE vip_subscription_entitlements
+                                    SET status = 'completed',
+                                        completed_at = COALESCE(
+                                            completed_at, CURRENT_TIMESTAMP
+                                        )
+                                    WHERE id = $1 AND status = 'active'
+                                    """,
+                                    active["id"],
+                                )
+
+                                if completion_update != "UPDATE 1":
+                                    raise RuntimeError(
+                                        "Entitlement completion failed for "
+                                        f"{active['id']}: {completion_update}"
+                                    )
+
+                                await _activate_next_vip_entitlement(
+                                    conn, vip_row["id"]
+                                )
+
+                            # Fully delivered but still within its paid
+                            # period: keep this plan active until expiry.
+                            continue
 
                         if expiry_date < today:
                             days_to_add = (today - expiry_date).days
@@ -3300,34 +3371,59 @@ async def admin_distribute_vip_picks():
                         vip["id"],
                     )
 
-                # Recover safely if an active entitlement was already fulfilled.
+                # Recover a fulfilled entitlement only after its expiry date.
                 if entitlement and int(entitlement["delivered_picks"]) >= int(entitlement["total_picks"]):
-                    completion_update = await conn.execute(
-                        """
-                        UPDATE vip_subscription_entitlements
-                        SET status = 'completed',
-                            completed_at = COALESCE(completed_at, CURRENT_TIMESTAMP)
-                        WHERE id = $1 AND status = 'active'
-                        """,
-                        entitlement["id"],
+                    recovery_expiry = entitlement["expires_at"]
+
+                    if recovery_expiry is None:
+                        try:
+                            recovery_expiry = datetime.fromisoformat(
+                                str(vip["subscription_expiry"]).replace(
+                                    "Z", "+00:00"
+                                )
+                            )
+                            if recovery_expiry.tzinfo is None:
+                                recovery_expiry = recovery_expiry.replace(
+                                    tzinfo=UTC
+                                )
+                        except (ValueError, TypeError):
+                            recovery_expiry = None
+
+                    recovery_expired = (
+                        recovery_expiry is not None
+                        and recovery_expiry.astimezone(KENYA).date() < today
                     )
 
-                    if completion_update != "UPDATE 1":
-                        raise RuntimeError(
-                            "Entitlement completion failed for "
-                            f"{entitlement['id']}: {completion_update}"
+                    if recovery_expired:
+                        completion_update = await conn.execute(
+                            """
+                            UPDATE vip_subscription_entitlements
+                            SET status = 'completed',
+                                completed_at = COALESCE(
+                                    completed_at, CURRENT_TIMESTAMP
+                                )
+                            WHERE id = $1 AND status = 'active'
+                            """,
+                            entitlement["id"],
                         )
-                    await _activate_next_vip_entitlement(conn, vip["id"])
-                    entitlement = await conn.fetchrow(
-                        """
-                        SELECT id, plan, daily_quota, total_picks,
-                               delivered_picks, expires_at
-                        FROM vip_subscription_entitlements
-                        WHERE vip_id = $1 AND status = 'active'
-                        FOR UPDATE
-                        """,
-                        vip["id"],
-                    )
+
+                        if completion_update != "UPDATE 1":
+                            raise RuntimeError(
+                                "Entitlement completion failed for "
+                                f"{entitlement['id']}: {completion_update}"
+                            )
+
+                        await _activate_next_vip_entitlement(conn, vip["id"])
+                        entitlement = await conn.fetchrow(
+                            """
+                            SELECT id, plan, daily_quota, total_picks,
+                                   delivered_picks, expires_at
+                            FROM vip_subscription_entitlements
+                            WHERE vip_id = $1 AND status = 'active'
+                            FOR UPDATE
+                            """,
+                            vip["id"],
+                        )
 
                 if not entitlement:
                     failure = ({
@@ -3576,27 +3672,51 @@ async def admin_distribute_vip_picks():
                             total_picks = int(delivery["total_picks"])
 
                             if delivered_picks >= total_picks:
-                                completion_update = await conn.execute(
-                                    """
-                                    UPDATE vip_subscription_entitlements
-                                    SET status = 'completed',
-                                        completed_at = CURRENT_TIMESTAMP
-                                    WHERE id = $1 AND status = 'active'
-                                    """,
-                                    entitlement_id,
+                                final_expiry = entitlement["expires_at"]
+
+                                if final_expiry is None:
+                                    try:
+                                        final_expiry = datetime.fromisoformat(
+                                            str(vip["subscription_expiry"]).replace(
+                                                "Z", "+00:00"
+                                            )
+                                        )
+                                        if final_expiry.tzinfo is None:
+                                            final_expiry = final_expiry.replace(
+                                                tzinfo=UTC
+                                            )
+                                    except (ValueError, TypeError):
+                                        final_expiry = None
+
+                                final_expired = (
+                                    final_expiry is not None
+                                    and final_expiry.astimezone(KENYA).date()
+                                    < today
                                 )
 
-                                if completion_update != "UPDATE 1":
-                                    raise RuntimeError(
-                                        "Entitlement completion failed for "
-                                        f"{entitlement_id}: {completion_update}"
+                                if final_expired:
+                                    completion_update = await conn.execute(
+                                        """
+                                        UPDATE vip_subscription_entitlements
+                                        SET status = 'completed',
+                                            completed_at = CURRENT_TIMESTAMP
+                                        WHERE id = $1 AND status = 'active'
+                                        """,
+                                        entitlement_id,
                                     )
 
-                                # Activate the next paid entitlement immediately.
-                                # Do not reset today's Kenya-time quota ledger.
-                                await _activate_next_vip_entitlement(
-                                    conn, vip["id"]
-                                )
+                                    if completion_update != "UPDATE 1":
+                                        raise RuntimeError(
+                                            "Entitlement completion failed for "
+                                            f"{entitlement_id}: {completion_update}"
+                                        )
+
+                                    # Activate the next plan only after the old
+                                    # plan's expiry AND paid picks are exhausted.
+                                    # Today's subscriber-wide quota is preserved.
+                                    await _activate_next_vip_entitlement(
+                                        conn, vip["id"]
+                                    )
 
                             # Re-read the active entitlement so the response and
                             # daily ledger reflect the plan now in force.
