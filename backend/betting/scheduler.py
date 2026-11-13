@@ -261,7 +261,7 @@ def settle_single_bet(session, bet, match):
             Transaction(
                 user_id=user.id,
                 type="bet_loss",
-                amount=Decimal("0.00"),
+                amount=to_decimal(bet.amount),
                 balance_after=to_decimal(user.balance),
             )
         )
@@ -705,7 +705,7 @@ def settle_betslips(
                         Transaction(
                             user_id=user.id,
                             type="bet_loss",
-                            amount=Decimal("0.00"),
+                            amount=to_decimal(slip.stake),
                             balance_after=to_decimal(
                                 user.balance
                             ),
