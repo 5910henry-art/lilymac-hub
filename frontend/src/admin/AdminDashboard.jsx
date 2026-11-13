@@ -23,6 +23,7 @@ import {
   adminBettingOverview,
   adminHouseBalanceHistory,
   adminListBets,
+  adminListTransactions,
   adminListPendingVips,
   adminListUpgradeRequests,
   adminApproveVip,
@@ -142,6 +143,25 @@ const [selectedVIPs, setSelectedVIPs] = useState([]);
   const [betType, setBetType] = useState("all");
   const [betLoading, setBetLoading] = useState(false);
   const [expandedBet, setExpandedBet] = useState(null);
+
+  // Read-only transaction management
+  const [transactionRecords, setTransactionRecords] = useState([]);
+  const [transactionMeta, setTransactionMeta] = useState({
+    total: 0,
+    page: 1,
+    per_page: 20,
+    total_pages: 0,
+  });
+  const [transactionCounts, setTransactionCounts] = useState({
+    wallet: 0,
+    deposit_attempt: 0,
+    withdrawal: 0,
+  });
+  const [transactionSearch, setTransactionSearch] = useState("");
+  const [transactionCategory, setTransactionCategory] = useState("all");
+  const [transactionStatus, setTransactionStatus] = useState("all");
+  const [transactionLoading, setTransactionLoading] = useState(false);
+  const [expandedTransaction, setExpandedTransaction] = useState(null);
 
   useEffect(() => {
     document.documentElement.classList.add("dark");
@@ -683,6 +703,65 @@ setDistributionSummary([]);
       showError(error);
     } finally {
       setBetLoading(false);
+    }
+  };
+
+  const fetchTransactions = async (page = 1, filters = null) => {
+    if (!token || transactionLoading) return;
+
+    const activeFilters = filters || {
+      search: transactionSearch.trim(),
+      category: transactionCategory,
+      status: transactionStatus,
+    };
+
+    setTransactionLoading(true);
+
+    try {
+      const response = await adminListTransactions(token, {
+        ...activeFilters,
+        page,
+        per_page: 20,
+      });
+
+      let result = response;
+
+      if (result?.data?.success !== undefined) {
+        result = result.data;
+      }
+
+      if (result?.success === false) {
+        throw new Error(
+          result.error || result.message || "Could not load transactions."
+        );
+      }
+
+      const data = result?.data ?? result ?? {};
+      const rows = Array.isArray(data.transactions)
+        ? data.transactions
+        : [];
+
+      setTransactionRecords(rows);
+
+      setTransactionCounts({
+        wallet: Number(data.counts?.wallet || 0),
+        deposit_attempt: Number(data.counts?.deposit_attempt || 0),
+        withdrawal: Number(data.counts?.withdrawal || 0),
+      });
+
+      setTransactionMeta({
+        total: Number(data.pagination?.total || 0),
+        page: Number(data.pagination?.page || page),
+        per_page: Number(data.pagination?.per_page || 20),
+        total_pages: Number(data.pagination?.total_pages || 0),
+      });
+
+      setExpandedTransaction(null);
+    } catch (error) {
+      console.error("[ADMIN] Transaction management load failed:", error);
+      showError(error);
+    } finally {
+      setTransactionLoading(false);
     }
   };
 
@@ -1617,6 +1696,9 @@ setDistributionSummary([]);
                   if (id === "bets") {
                     fetchBets(1);
                   }
+                  if (id === "transactions") {
+                    fetchTransactions(1);
+                  }
                   if (id === "distribution") {
                     fetchVipPickHistory();
                   }
@@ -2460,16 +2542,34 @@ setDistributionSummary([]);
                 <div className="grid gap-2 md:grid-cols-2">
                   {distributionSummary.map(
                     (item, index) => (
-                      <pre
+                      <div
                         key={index}
-                        className="overflow-x-auto rounded-xl border border-white/5 bg-black/20 p-3 text-xs text-slate-300"
+                        className="rounded-xl border border-white/10 bg-black/20 p-4"
                       >
-                        {JSON.stringify(
-                          item,
-                          null,
-                          2
-                        )}
-                      </pre>
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="font-semibold text-white">
+                            VIP: {item.number || "Unknown"}
+                          </span>
+                          <span
+                            className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                              item.success
+                                ? "bg-emerald-500/10 text-emerald-400"
+                                : "bg-red-500/10 text-red-400"
+                            }`}
+                          >
+                            {item.success ? "Successful" : "Failed"}
+                          </span>
+                        </div>
+
+                        <p className="mt-2 text-sm text-slate-300">
+                          {item.success
+                            ? item.message ||
+                              (Array.isArray(item.results)
+                                ? `${item.results.length} pick result(s) returned.`
+                                : "Distribution completed successfully.")
+                            : item.error || "Distribution failed."}
+                        </p>
+                      </div>
                     )
                   )}
                 </div>
@@ -3081,26 +3181,313 @@ setDistributionSummary([]);
         )}
 
         {activeSection === "transactions" && (
-          <section className="grid gap-5">
+          <section className="space-y-5">
             <Card
-              title="Transactions"
-              subtitle="Manage and review financial transactions"
+              title="Transactions Management"
+              subtitle="Read-only wallet ledger, M-PESA deposit requests and withdrawals."
+              action={
+                <Btn
+                  small
+                  onClick={() => fetchTransactions(transactionMeta.page || 1)}
+                  disabled={transactionLoading}
+                >
+                  {transactionLoading ? "Loading…" : "Refresh"}
+                </Btn>
+              }
             >
-              <div className="flex min-h-56 flex-col items-center justify-center rounded-2xl border border-dashed border-cyan-400/20 bg-cyan-400/[0.03] px-5 py-10 text-center">
-                <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl border border-cyan-400/20 bg-cyan-400/10 text-2xl text-cyan-300">
-                  ⇄
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4">
+                  <p className="text-xs text-slate-500">Wallet ledger</p>
+                  <p className="mt-1 text-2xl font-bold text-white">
+                    {formatNumber(transactionCounts.wallet)}
+                  </p>
                 </div>
-                <h3 className="text-base font-bold text-white">
-                  Transaction Management
-                </h3>
-                <p className="mt-2 max-w-md text-sm leading-relaxed text-slate-400">
-                  Transaction management tools will appear here soon.
-                  You will be able to review and manage transactions from
-                  one place.
+
+                <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4">
+                  <p className="text-xs text-slate-500">Uncredited deposit attempts</p>
+                  <p className="mt-1 text-2xl font-bold text-white">
+                    {formatNumber(transactionCounts.deposit_attempt)}
+                  </p>
+                </div>
+
+                <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4">
+                  <p className="text-xs text-slate-500">M-PESA withdrawals</p>
+                  <p className="mt-1 text-2xl font-bold text-white">
+                    {formatNumber(transactionCounts.withdrawal)}
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="sm:col-span-2">
+                  <Input
+                    placeholder="Search phone, receipt, reference or description"
+                    value={transactionSearch}
+                    onChange={setTransactionSearch}
+                  />
+                </div>
+
+                <Select
+                  value={transactionCategory}
+                  onChange={setTransactionCategory}
+                >
+                  <option value="all">All categories</option>
+                  <option value="wallet">Wallet transactions</option>
+                  <option value="deposit_attempt">Deposit attempts</option>
+                  <option value="withdrawal">M-PESA withdrawals</option>
+                </Select>
+
+                <Select
+                  value={transactionStatus}
+                  onChange={setTransactionStatus}
+                >
+                  <option value="all">All statuses</option>
+                  <option value="completed">Completed</option>
+                  <option value="success">Success</option>
+                  <option value="pending">Pending</option>
+                  <option value="submitted">Submitted</option>
+                  <option value="processing">Processing</option>
+                  <option value="submission_unknown">Submission unknown</option>
+                  <option value="timeout">Timeout</option>
+                  <option value="failed">Failed</option>
+                  <option value="cancelled">Cancelled</option>
+                </Select>
+              </div>
+
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Btn
+                  small
+                  onClick={() => {
+                    setTransactionSearch("");
+                    setTransactionCategory("all");
+                    setTransactionStatus("all");
+                    fetchTransactions(1, {
+                      search: "",
+                      category: "all",
+                      status: "all",
+                    });
+                  }}
+                  disabled={transactionLoading}
+                >
+                  Reset
+                </Btn>
+
+                <Btn
+                  small
+                  success
+                  onClick={() => fetchTransactions(1)}
+                  disabled={transactionLoading}
+                >
+                  Apply filters
+                </Btn>
+              </div>
+            </Card>
+
+            <Card
+              title="Transaction records"
+              subtitle={`Page ${transactionMeta.page} of ${Math.max(1, transactionMeta.total_pages)}`}
+            >
+              {transactionLoading && !transactionRecords.length ? (
+                <Empty text="Loading transaction records…" />
+              ) : !transactionRecords.length ? (
+                <Empty text="No transactions match these filters." />
+              ) : (
+                <div className="space-y-3">
+                  {transactionRecords.map((item) => {
+                    const expanded =
+                      expandedTransaction === item.record_key;
+
+                    const categoryLabel =
+                      item.category === "wallet"
+                        ? "Wallet"
+                        : item.category === "deposit_attempt"
+                          ? "M-PESA deposit attempt"
+                          : "M-PESA withdrawal";
+
+                    const statusText = String(item.status || "unknown")
+                      .replaceAll("_", " ");
+
+                    return (
+                      <div
+                        key={item.record_key}
+                        className="overflow-hidden rounded-2xl border border-white/[0.08] bg-slate-950/50"
+                      >
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setExpandedTransaction(
+                              expanded ? null : item.record_key
+                            )
+                          }
+                          className="grid w-full gap-3 p-4 text-left sm:grid-cols-[1fr_auto] sm:items-center"
+                        >
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-sm font-bold text-white">
+                                {categoryLabel}
+                              </span>
+
+                              <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[10px] font-semibold uppercase text-slate-300">
+                                {statusText}
+                              </span>
+                            </div>
+
+                            <p className="mt-1 text-xs text-slate-400">
+                              User: {item.user_phone || "—"} · ID: {item.user_id}
+                            </p>
+
+                            <p className="mt-1 truncate text-xs text-slate-500">
+                              {item.description || item.type || "Transaction"}
+                              {item.reference ? ` · Ref: ${item.reference}` : ""}
+                            </p>
+
+                            <p className="mt-1 text-[11px] text-slate-600">
+                              {formatVipHistoryDate(item.created)}
+                            </p>
+                          </div>
+
+                          <div className="flex items-center justify-between gap-4 sm:justify-end">
+                            <span className="text-base font-bold tabular-nums text-white">
+                              KSh {formatNumber(item.amount)}
+                            </span>
+
+                            <span className="text-xs text-slate-500">
+                              {expanded ? "Hide details ▲" : "Details ▼"}
+                            </span>
+                          </div>
+                        </button>
+
+                        {expanded && (
+                          <div className="grid grid-cols-1 gap-3 border-t border-white/[0.08] bg-white/[0.02] p-4 text-xs sm:grid-cols-2 lg:grid-cols-3">
+                            <div>
+                              <p className="text-slate-500">Record type</p>
+                              <p className="mt-1 break-all text-slate-200">
+                                {item.type || "—"}
+                              </p>
+                            </div>
+
+                            <div>
+                              <p className="text-slate-500">Transaction phone</p>
+                              <p className="mt-1 break-all text-slate-200">
+                                {item.phone || "—"}
+                              </p>
+                            </div>
+
+                            <div>
+                              <p className="text-slate-500">M-PESA receipt</p>
+                              <p className="mt-1 break-all text-slate-200">
+                                {item.receipt || "—"}
+                              </p>
+                            </div>
+
+                            <div>
+                              <p className="text-slate-500">Reference</p>
+                              <p className="mt-1 break-all text-slate-200">
+                                {item.reference || "—"}
+                              </p>
+                            </div>
+
+                            <div>
+                              <p className="text-slate-500">Wallet balance after</p>
+                              <p className="mt-1 text-slate-200">
+                                {item.balance_after
+                                  ? `KSh ${formatNumber(item.balance_after)}`
+                                  : "—"}
+                              </p>
+                            </div>
+
+                            <div>
+                              <p className="text-slate-500">Credited to wallet</p>
+                              <p className="mt-1 text-slate-200">
+                                {item.credited === null ||
+                                item.credited === undefined
+                                  ? "—"
+                                  : item.credited
+                                    ? "Yes"
+                                    : "No"}
+                              </p>
+                            </div>
+
+                            <div>
+                              <p className="text-slate-500">Checkout request ID</p>
+                              <p className="mt-1 break-all text-slate-200">
+                                {item.checkout_request_id || "—"}
+                              </p>
+                            </div>
+
+                            <div>
+                              <p className="text-slate-500">Conversation ID</p>
+                              <p className="mt-1 break-all text-slate-200">
+                                {item.conversation_id ||
+                                  item.originator_conversation_id ||
+                                  "—"}
+                              </p>
+                            </div>
+
+                            <div>
+                              <p className="text-slate-500">Provider result code</p>
+                              <p className="mt-1 text-slate-200">
+                                {item.result_code === null ||
+                                item.result_code === undefined
+                                  ? "—"
+                                  : item.result_code}
+                              </p>
+                            </div>
+
+                            <div className="sm:col-span-2 lg:col-span-3">
+                              <p className="text-slate-500">Provider response</p>
+                              <p className="mt-1 break-words text-slate-200">
+                                {item.result_description || "—"}
+                              </p>
+                            </div>
+
+                            <div>
+                              <p className="text-slate-500">Last updated</p>
+                              <p className="mt-1 text-slate-200">
+                                {formatVipHistoryDate(item.updated)}
+                              </p>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              <div className="mt-5 flex flex-col flex-wrap items-start justify-between gap-3 border-t border-white/[0.08] pt-4 sm:flex-row sm:items-center">
+                <p className="text-xs text-slate-500">
+                  Showing {transactionRecords.length} of{" "}
+                  {formatNumber(transactionMeta.total)} records
                 </p>
-                <span className="mt-4 rounded-full border border-amber-400/20 bg-amber-400/10 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-amber-300">
-                  Coming soon
-                </span>
+
+                <div className="flex items-center gap-2">
+                  <Btn
+                    small
+                    onClick={() => fetchTransactions(transactionMeta.page - 1)}
+                    disabled={
+                      transactionLoading || transactionMeta.page <= 1
+                    }
+                  >
+                    Previous
+                  </Btn>
+
+                  <span className="px-2 text-xs text-slate-400">
+                    {transactionMeta.page} /{" "}
+                    {Math.max(1, transactionMeta.total_pages)}
+                  </span>
+
+                  <Btn
+                    small
+                    onClick={() => fetchTransactions(transactionMeta.page + 1)}
+                    disabled={
+                      transactionLoading ||
+                      transactionMeta.page >= transactionMeta.total_pages
+                    }
+                  >
+                    Next
+                  </Btn>
+                </div>
               </div>
             </Card>
           </section>

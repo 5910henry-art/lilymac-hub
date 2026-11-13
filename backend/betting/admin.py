@@ -1,7 +1,10 @@
 # backend/betting/admin.py
 
 import logging
+from datetime import datetime
 from decimal import Decimal, InvalidOperation
+from math import ceil
+from sqlalchemy import and_, or_
 from uuid import uuid4
 
 from flask import request, jsonify
@@ -11,6 +14,7 @@ from betting.models import (
     db,
     User,
     Transaction,
+    MpesaTransaction,
     Match,
     HouseWallet,
     HouseTransaction,
@@ -182,6 +186,293 @@ def register_admin_routes(app):
             "msg": "match created",
             "match_id": match.id,
         }), 201
+
+
+    # ========================================================
+    # ADMIN TRANSACTION MANAGEMENT (READ ONLY)
+    # ========================================================
+
+    @app.route("/admin/transactions", methods=["GET"])
+    @jwt_required()
+    def admin_transactions():
+
+        uid = int(get_jwt_identity())
+        admin_user = db.session.get(User, uid)
+
+        if not admin_user or not admin_user.is_admin:
+            return jsonify({"error": "forbidden"}), 403
+
+        try:
+            page = int(request.args.get("page", 1))
+            per_page = int(request.args.get("per_page", 20))
+        except (TypeError, ValueError):
+            return jsonify({"error": "invalid pagination"}), 400
+
+        if page < 1 or page > 100000:
+            return jsonify({"error": "invalid page"}), 400
+
+        if per_page < 1:
+            return jsonify({"error": "per_page must be at least 1"}), 400
+
+        per_page = min(per_page, 100)
+        offset = (page - 1) * per_page
+        fetch_limit = offset + per_page
+
+        search = (request.args.get("search") or "").strip()
+        category = (request.args.get("category") or "all").strip().lower()
+        status = (request.args.get("status") or "all").strip().lower()
+
+        allowed_categories = {
+            "all",
+            "wallet",
+            "deposit_attempt",
+            "withdrawal",
+        }
+
+        if category not in allowed_categories:
+            return jsonify({
+                "error": "invalid category",
+                "allowed_categories": sorted(allowed_categories),
+            }), 400
+
+        if len(search) > 120:
+            return jsonify({"error": "search is too long"}), 400
+
+        if len(status) > 40:
+            return jsonify({"error": "invalid status"}), 400
+
+        wallet_query = (
+            db.session.query(Transaction, User.phone.label("user_phone"))
+            .join(User, User.id == Transaction.user_id)
+        )
+
+        deposit_query = (
+            db.session.query(
+                MpesaTransaction,
+                User.phone.label("user_phone"),
+            )
+            .join(User, User.id == MpesaTransaction.user_id)
+            .filter(
+                ~and_(
+                    MpesaTransaction.status == "success",
+                    MpesaTransaction.credited.is_(True),
+                )
+            )
+        )
+
+        withdrawal_query = (
+            db.session.query(
+                MpesaWithdrawal,
+                User.phone.label("user_phone"),
+            )
+            .join(User, User.id == MpesaWithdrawal.user_id)
+        )
+
+        if search:
+            pattern = f"%{search}%"
+
+            wallet_query = wallet_query.filter(
+                or_(
+                    User.phone.ilike(pattern),
+                    Transaction.type.ilike(pattern),
+                    Transaction.description.ilike(pattern),
+                    Transaction.reference.ilike(pattern),
+                )
+            )
+
+            deposit_query = deposit_query.filter(
+                or_(
+                    User.phone.ilike(pattern),
+                    MpesaTransaction.phone.ilike(pattern),
+                    MpesaTransaction.mpesa_receipt.ilike(pattern),
+                    MpesaTransaction.checkout_request_id.ilike(pattern),
+                    MpesaTransaction.merchant_request_id.ilike(pattern),
+                    MpesaTransaction.result_description.ilike(pattern),
+                )
+            )
+
+            withdrawal_query = withdrawal_query.filter(
+                or_(
+                    User.phone.ilike(pattern),
+                    MpesaWithdrawal.phone.ilike(pattern),
+                    MpesaWithdrawal.reference.ilike(pattern),
+                    MpesaWithdrawal.mpesa_receipt.ilike(pattern),
+                    MpesaWithdrawal.conversation_id.ilike(pattern),
+                    MpesaWithdrawal.originator_conversation_id.ilike(pattern),
+                    MpesaWithdrawal.result_description.ilike(pattern),
+                )
+            )
+
+        if status != "all":
+            wallet_query = wallet_query.filter(
+                Transaction.status.ilike(status)
+            )
+            deposit_query = deposit_query.filter(
+                MpesaTransaction.status.ilike(status)
+            )
+            withdrawal_query = withdrawal_query.filter(
+                MpesaWithdrawal.status.ilike(status)
+            )
+
+        counts = {
+            "wallet": 0,
+            "deposit_attempt": 0,
+            "withdrawal": 0,
+        }
+
+        sources = []
+
+        if category in ("all", "wallet"):
+            counts["wallet"] = wallet_query.count()
+            sources.append((
+                "wallet",
+                wallet_query.order_by(
+                    Transaction.created.desc(),
+                    Transaction.id.desc(),
+                ).limit(fetch_limit).all(),
+            ))
+
+        if category in ("all", "deposit_attempt"):
+            counts["deposit_attempt"] = deposit_query.count()
+            sources.append((
+                "deposit_attempt",
+                deposit_query.order_by(
+                    MpesaTransaction.created.desc(),
+                    MpesaTransaction.id.desc(),
+                ).limit(fetch_limit).all(),
+            ))
+
+        if category in ("all", "withdrawal"):
+            counts["withdrawal"] = withdrawal_query.count()
+            sources.append((
+                "withdrawal",
+                withdrawal_query.order_by(
+                    MpesaWithdrawal.created.desc(),
+                    MpesaWithdrawal.id.desc(),
+                ).limit(fetch_limit).all(),
+            ))
+
+        records = []
+
+        for source, rows in sources:
+            for record, user_phone in rows:
+
+                created = record.created
+                created_text = created.isoformat() if created else None
+
+                common = {
+                    "id": record.id,
+                    "record_key": f"{source}:{record.id}",
+                    "category": source,
+                    "user_id": record.user_id,
+                    "user_phone": user_phone,
+                    "created": created_text,
+                }
+
+                if source == "wallet":
+                    item = {
+                        **common,
+                        "type": record.type or "wallet",
+                        "amount": str(_money(record.amount)),
+                        "balance_after": str(_money(record.balance_after)),
+                        "phone": None,
+                        "status": record.status,
+                        "description": record.description,
+                        "reference": record.reference,
+                        "receipt": (
+                            record.reference
+                            if record.type == "mpesa_deposit"
+                            else None
+                        ),
+                        "result_description": None,
+                        "credited": None,
+                        "merchant_request_id": None,
+                        "checkout_request_id": None,
+                        "conversation_id": None,
+                        "originator_conversation_id": None,
+                        "result_code": None,
+                        "updated": None,
+                    }
+
+                elif source == "deposit_attempt":
+                    item = {
+                        **common,
+                        "type": "mpesa_deposit_attempt",
+                        "amount": str(_money(record.amount)),
+                        "balance_after": None,
+                        "phone": record.phone,
+                        "status": record.status,
+                        "description": "M-PESA deposit request",
+                        "reference": (
+                            record.mpesa_receipt
+                            or record.checkout_request_id
+                            or record.merchant_request_id
+                        ),
+                        "receipt": record.mpesa_receipt,
+                        "result_description": record.result_description,
+                        "credited": bool(record.credited),
+                        "merchant_request_id": record.merchant_request_id,
+                        "checkout_request_id": record.checkout_request_id,
+                        "conversation_id": None,
+                        "originator_conversation_id": None,
+                        "result_code": record.result_code,
+                        "updated": (
+                            record.updated.isoformat()
+                            if record.updated else None
+                        ),
+                    }
+
+                else:
+                    item = {
+                        **common,
+                        "type": "mpesa_withdrawal",
+                        "amount": str(_money(record.amount)),
+                        "balance_after": None,
+                        "phone": record.phone,
+                        "status": record.status,
+                        "description": record.description,
+                        "reference": record.reference,
+                        "receipt": record.mpesa_receipt,
+                        "result_description": record.result_description,
+                        "credited": None,
+                        "merchant_request_id": None,
+                        "checkout_request_id": None,
+                        "conversation_id": record.conversation_id,
+                        "originator_conversation_id": (
+                            record.originator_conversation_id
+                        ),
+                        "result_code": record.result_code,
+                        "updated": (
+                            record.updated.isoformat()
+                            if record.updated else None
+                        ),
+                    }
+
+                records.append((created, record.id, item))
+
+        records.sort(
+            key=lambda entry: (
+                entry[0] is not None,
+                entry[0] or datetime.min,
+                entry[1],
+            ),
+            reverse=True,
+        )
+
+        total = sum(counts.values())
+        page_records = records[offset:offset + per_page]
+
+        return jsonify({
+            "transactions": [entry[2] for entry in page_records],
+            "counts": counts,
+            "pagination": {
+                "total": total,
+                "page": page,
+                "per_page": per_page,
+                "total_pages": ceil(total / per_page) if total else 0,
+                "returned": len(page_records),
+            },
+        }), 200
 
 
     # ========================================================

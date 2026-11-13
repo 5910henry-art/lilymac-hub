@@ -242,6 +242,12 @@ export const adminListBets = (token, filters = {}) =>
     token,
   });
 
+export const adminListTransactions = (token, filters = {}) =>
+  vipRequest(`/admin/transactions${qsFor(filters)}`, {
+    method: "GET",
+    token,
+  });
+
 export const adminListPendingVips = (token) =>
   vipRequest("/admin/vips/pending", {
     method: "GET",
