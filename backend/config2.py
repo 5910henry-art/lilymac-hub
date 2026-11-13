@@ -118,11 +118,14 @@ def _convert_named_to_positional(sql: str, params):
         return sql, (params,)
 
     keys = []
+    positions = {}
 
     def replacer(match):
         key = match.group(1)
-        keys.append(key)
-        return f"${len(keys)}"
+        if key not in positions:
+            positions[key] = len(keys) + 1
+            keys.append(key)
+        return f"${positions[key]}"
 
     new_sql = _named_param_pattern.sub(
         replacer,

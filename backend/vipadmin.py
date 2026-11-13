@@ -4322,6 +4322,283 @@ async def admin_house_balance_history():
 
 
 # ============================================================
+
+# ============================================================
+# ADMIN TRANSACTIONS — READ ONLY
+# Uses VIP admin authentication and shared betting tables.
+# ============================================================
+
+@app.get("/admin/transactions")
+@admin_required
+async def admin_transactions():
+    try:
+        try:
+            page = int(request.args.get("page", 1))
+            per_page = int(request.args.get("per_page", 20))
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "error": "invalid pagination"}), 400
+
+        if page < 1 or page > 100000:
+            return jsonify({"success": False, "error": "invalid page"}), 400
+
+        if per_page < 1:
+            return jsonify({"success": False, "error": "per_page must be at least 1"}), 400
+
+        per_page = min(per_page, 100)
+        offset = (page - 1) * per_page
+        fetch_limit = offset + per_page
+
+        search = (request.args.get("search") or "").strip()
+        category = (request.args.get("category") or "all").strip().lower()
+        status = (request.args.get("status") or "all").strip().lower()
+
+        allowed_categories = {"all", "wallet", "deposit_attempt", "withdrawal"}
+
+        if category not in allowed_categories:
+            return jsonify({
+                "success": False,
+                "error": "invalid category",
+                "allowed_categories": sorted(allowed_categories),
+            }), 400
+
+        if len(search) > 120:
+            return jsonify({"success": False, "error": "search is too long"}), 400
+
+        if len(status) > 40:
+            return jsonify({"success": False, "error": "invalid status"}), 400
+
+        params = {}
+        if search:
+            params["search"] = f"%{search}%"
+        if status != "all":
+            params["status"] = status
+
+        counts = {
+            "wallet": 0,
+            "deposit_attempt": 0,
+            "withdrawal": 0,
+        }
+        records = []
+
+        sources = {
+            "wallet": {
+                "table": '"transaction"',
+                "select": """
+                    t.id, t.user_id, u.phone AS user_phone,
+                    t.type, t.amount, t.balance_after, t.description,
+                    t.reference, t.status, t.created
+                """,
+                "search_fields": [
+                    "u.phone", "t.type", "t.description", "t.reference",
+                ],
+                "where": [],
+            },
+            "deposit_attempt": {
+                "table": "mpesa_transaction",
+                "select": """
+                    t.id, t.user_id, u.phone AS user_phone,
+                    t.amount, t.phone, t.status, t.mpesa_receipt,
+                    t.checkout_request_id, t.merchant_request_id,
+                    t.result_description, t.credited, t.result_code,
+                    t.created, t.updated
+                """,
+                "search_fields": [
+                    "u.phone", "t.phone", "t.mpesa_receipt",
+                    "t.checkout_request_id", "t.merchant_request_id",
+                    "t.result_description",
+                ],
+                "where": [
+                    "NOT (t.status = 'success' AND t.credited IS TRUE)"
+                ],
+            },
+            "withdrawal": {
+                "table": "mpesa_withdrawal",
+                "select": """
+                    t.id, t.user_id, u.phone AS user_phone,
+                    t.amount, t.phone, t.status, t.description,
+                    t.reference, t.mpesa_receipt, t.result_description,
+                    t.conversation_id, t.originator_conversation_id,
+                    t.result_code, t.created, t.updated
+                """,
+                "search_fields": [
+                    "u.phone", "t.phone", "t.reference", "t.mpesa_receipt",
+                    "t.conversation_id", "t.originator_conversation_id",
+                    "t.result_description",
+                ],
+                "where": [],
+            },
+        }
+
+        for source_name, config in sources.items():
+            if category not in ("all", source_name):
+                continue
+
+            where = list(config["where"])
+
+            if search:
+                where.append(
+                    "(" + " OR ".join(
+                        f"{field} ILIKE :search"
+                        for field in config["search_fields"]
+                    ) + ")"
+                )
+
+            if status != "all":
+                where.append("t.status ILIKE :status")
+
+            where_sql = (" WHERE " + " AND ".join(where)) if where else ""
+
+            count_row = await db_fetch_one(
+                f"""
+                SELECT COUNT(*) AS total
+                FROM {config["table"]} t
+                JOIN "user" u ON u.id = t.user_id
+                {where_sql}
+                """,
+                params,
+            )
+            counts[source_name] = int(count_row["total"] if count_row else 0)
+
+            rows = await db_fetch_all(
+                f"""
+                SELECT {config["select"]}
+                FROM {config["table"]} t
+                JOIN "user" u ON u.id = t.user_id
+                {where_sql}
+                ORDER BY t.created DESC NULLS LAST, t.id DESC
+                LIMIT :fetch_limit
+                """,
+                {**params, "fetch_limit": fetch_limit},
+            )
+
+            for row in rows:
+                created = row.get("created")
+                updated = row.get("updated")
+
+                common = {
+                    "id": int(row["id"]),
+                    "record_key": f"{source_name}:{row['id']}",
+                    "category": source_name,
+                    "user_id": int(row["user_id"]),
+                    "user_phone": row.get("user_phone"),
+                    "created": created.isoformat() if created else None,
+                }
+
+                amount = str(row["amount"])
+
+                if source_name == "wallet":
+                    item = {
+                        **common,
+                        "type": row.get("type") or "wallet",
+                        "amount": amount,
+                        "balance_after": str(row["balance_after"]),
+                        "phone": None,
+                        "status": row.get("status"),
+                        "description": row.get("description"),
+                        "reference": row.get("reference"),
+                        "receipt": (
+                            row.get("reference")
+                            if row.get("type") == "mpesa_deposit"
+                            else None
+                        ),
+                        "result_description": None,
+                        "credited": None,
+                        "merchant_request_id": None,
+                        "checkout_request_id": None,
+                        "conversation_id": None,
+                        "originator_conversation_id": None,
+                        "result_code": None,
+                        "updated": None,
+                    }
+
+                elif source_name == "deposit_attempt":
+                    receipt = row.get("mpesa_receipt")
+                    checkout_id = row.get("checkout_request_id")
+                    merchant_id = row.get("merchant_request_id")
+
+                    item = {
+                        **common,
+                        "type": "mpesa_deposit_attempt",
+                        "amount": amount,
+                        "balance_after": None,
+                        "phone": row.get("phone"),
+                        "status": row.get("status"),
+                        "description": "M-PESA deposit request",
+                        "reference": receipt or checkout_id or merchant_id,
+                        "receipt": receipt,
+                        "result_description": row.get("result_description"),
+                        "credited": bool(row.get("credited")),
+                        "merchant_request_id": merchant_id,
+                        "checkout_request_id": checkout_id,
+                        "conversation_id": None,
+                        "originator_conversation_id": None,
+                        "result_code": row.get("result_code"),
+                        "updated": updated.isoformat() if updated else None,
+                    }
+
+                else:
+                    item = {
+                        **common,
+                        "type": "mpesa_withdrawal",
+                        "amount": amount,
+                        "balance_after": None,
+                        "phone": row.get("phone"),
+                        "status": row.get("status"),
+                        "description": row.get("description"),
+                        "reference": row.get("reference"),
+                        "receipt": row.get("mpesa_receipt"),
+                        "result_description": row.get("result_description"),
+                        "credited": None,
+                        "merchant_request_id": None,
+                        "checkout_request_id": None,
+                        "conversation_id": row.get("conversation_id"),
+                        "originator_conversation_id": row.get(
+                            "originator_conversation_id"
+                        ),
+                        "result_code": row.get("result_code"),
+                        "updated": updated.isoformat() if updated else None,
+                    }
+
+                records.append((created, int(row["id"]), item))
+
+        records.sort(
+            key=lambda entry: (
+                entry[0] is not None,
+                entry[0] or datetime.min,
+                entry[1],
+            ),
+            reverse=True,
+        )
+
+        total = sum(counts.values())
+        page_records = records[offset:offset + per_page]
+
+        return jsonify({
+            "success": True,
+            "data": {
+                "transactions": [entry[2] for entry in page_records],
+                "counts": counts,
+                "pagination": {
+                    "total": total,
+                    "page": page,
+                    "per_page": per_page,
+                    "total_pages": (
+                        (total + per_page - 1) // per_page if total else 0
+                    ),
+                    "returned": len(page_records),
+                },
+            },
+        }), 200
+
+    except Exception:
+        logger.exception("Admin transactions query failed")
+        return jsonify({
+            "success": False,
+            "error": "Could not load transactions",
+        }), 500
+
+
+
 # ADMIN BET MANAGEMENT — READ ONLY
 # ============================================================
 
