@@ -2136,22 +2136,23 @@ async def vip_picks():
     rows = await db_fetch_all(
         """
         SELECT
-            vp.id, vp.number, vp.match_id,
-            vp.home_team, vp.away_team, vp.match_time,
-            vp.pick, vp.odds, vp.created_at,
-            (
-                SELECT h.delivered_at
-                FROM vip_pick_distribution_history h
-                WHERE h.number = vp.number
-                  AND h.match_id = vp.match_id
-                ORDER BY h.delivered_at DESC, h.id DESC
-                LIMIT 1
-            ) AS delivered_at
-        FROM vip_picks vp
-        LEFT JOIN matches m ON m.id = vp.match_id
-        WHERE vp.number = :number
-          AND UPPER(COALESCE(m.status, '')) <> 'FINISHED'
-        ORDER BY vp.created_at DESC
+            h.id,
+            h.number,
+            h.match_id,
+            h.home_team,
+            h.away_team,
+            h.match_time,
+            h.selection AS pick,
+            h.selection AS tip,
+            h.odds,
+            h.competition,
+            h.delivered_at,
+            h.delivered_at AS created_at,
+            h.plan,
+            h.entitlement_id
+        FROM vip_pick_distribution_history h
+        WHERE h.number = :number
+        ORDER BY h.delivered_at DESC, h.id DESC
         """,
         {"number": vip["number"]},
     )
