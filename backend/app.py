@@ -1352,6 +1352,7 @@ def debug_db():
             conn.close()
 
 
+@app.route("/dashboard", methods=["GET"])
 def dashboard():
 
     prediction_filter = (
