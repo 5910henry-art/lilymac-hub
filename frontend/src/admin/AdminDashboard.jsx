@@ -2055,10 +2055,18 @@ setDistributionSummary([]);
                             </td>
 
                             <td className="px-4 py-3">
-                              <Badge>
-                                {v.subscription ||
-                                  "—"}
-                              </Badge>
+                              <div className="flex flex-col items-start gap-1">
+                                <Badge>
+                                  {v.subscription ||
+                                    "—"}
+                                </Badge>
+
+                                {v.queued_subscription && (
+                                  <span className="text-[11px] font-semibold text-amber-300">
+                                    Queued: {v.queued_subscription}
+                                  </span>
+                                )}
+                              </div>
                             </td>
 
                             <td className="px-4 py-3">

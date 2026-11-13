@@ -2834,6 +2834,7 @@ async def admin_vips():
             v.name,
             v.number,
             v.subscription,
+            queued.plan AS queued_subscription,
             v.subscription_expiry,
             v.approved,
             (v.password_hash IS NOT NULL) AS has_password,
@@ -2872,6 +2873,14 @@ async def admin_vips():
             ORDER BY id DESC
             LIMIT 1
         ) active ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT plan
+            FROM vip_subscription_entitlements
+            WHERE vip_id = v.id
+              AND status = 'queued'
+            ORDER BY queued_at ASC, id ASC
+            LIMIT 1
+        ) queued ON TRUE
         LEFT JOIN LATERAL (
             SELECT GREATEST(
                 COALESCE((
