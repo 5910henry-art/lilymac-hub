@@ -2133,6 +2133,47 @@ async def vip_me():
 async def vip_picks():
     vip = request.vip_user
 
+    try:
+        page = max(1, int(request.args.get("page", "1")))
+    except (TypeError, ValueError):
+        page = 1
+
+    entitlement = await db_fetch_one(
+        """
+        SELECT daily_quota
+        FROM vip_subscription_entitlements
+        WHERE vip_id = :vip_id
+          AND status = 'active'
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        {"vip_id": vip["id"]},
+    )
+
+    plan = str(vip.get("subscription") or "").lower()
+    fallback_quota = SUBSCRIPTION_QUOTA.get(plan, 3)
+
+    per_page = (
+        int(entitlement["daily_quota"])
+        if entitlement and entitlement["daily_quota"] is not None
+        else fallback_quota
+    )
+    per_page = max(1, per_page)
+
+    count_row = await db_fetch_one(
+        """
+        SELECT COUNT(*)::BIGINT AS total
+        FROM vip_pick_distribution_history
+        WHERE number = :number
+        """,
+        {"number": vip["number"]},
+    )
+
+    total_picks = int(count_row["total"]) if count_row else 0
+    total_pages = max(1, (total_picks + per_page - 1) // per_page)
+    page = min(page, total_pages)
+    offset = (page - 1) * per_page
+
     rows = await db_fetch_all(
         """
         SELECT
@@ -2153,11 +2194,23 @@ async def vip_picks():
         FROM vip_pick_distribution_history h
         WHERE h.number = :number
         ORDER BY h.delivered_at DESC, h.id DESC
+        LIMIT :limit
+        OFFSET :offset
         """,
-        {"number": vip["number"]},
+        {
+            "number": vip["number"],
+            "limit": per_page,
+            "offset": offset,
+        },
     )
 
-    return jsonify({"picks": rows})
+    return jsonify({
+        "picks": rows,
+        "page": page,
+        "per_page": per_page,
+        "total_picks": total_picks,
+        "total_pages": total_pages,
+    })
 
 
 # ============================================================
