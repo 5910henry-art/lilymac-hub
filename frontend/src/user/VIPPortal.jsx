@@ -1016,6 +1016,12 @@ export default function VIPPortal() {
   const [picks, setPicks] =
     useState([]);
 
+  const [picksPage, setPicksPage] =
+    useState(1);
+
+  const [picksPagination, setPicksPagination] =
+    useState(null);
+
   const [notifications, setNotifications] =
     useState([]);
 
@@ -1124,7 +1130,7 @@ export default function VIPPortal() {
 
   const fetchVipDataOnce =
     useCallback(
-      async (token) => {
+      async (token, requestedPage = picksPage) => {
         if (!token) {
           return null;
         }
@@ -1138,7 +1144,7 @@ export default function VIPPortal() {
           ] = await Promise.all([
             api.vipMe(token),
             api.vipQuota(token),
-            api.vipPicks(token),
+            api.vipPicks(token, requestedPage),
             api.vipNotifications(token),
           ]);
 
@@ -1186,6 +1192,17 @@ export default function VIPPortal() {
                   : [];
 
             setPicks(vipPicksList);
+
+            if (!Array.isArray(picksResponse)) {
+              const serverPage = Number(picksResponse?.page || requestedPage);
+              setPicksPagination({
+                page: serverPage,
+                per_page: Number(picksResponse?.per_page || 0),
+                total_picks: Number(picksResponse?.total_picks || 0),
+                total_pages: Number(picksResponse?.total_pages || 1),
+              });
+              setPicksPage(serverPage);
+            }
           }
 
           if (notificationsData?.success) {
@@ -1226,7 +1243,7 @@ export default function VIPPortal() {
           return null;
         }
       },
-      []
+      [picksPage]
     );
 
   /* ==========================================================
@@ -1243,6 +1260,8 @@ export default function VIPPortal() {
       setMe(null);
       setQuota(null);
       setPicks([]);
+      setPicksPage(1);
+      setPicksPagination(null);
       setNotifications([]);
       setUnreadNotifications(0);
       setNotificationsOpen(false);
@@ -1390,8 +1409,10 @@ export default function VIPPortal() {
         /*
          * Fetch latest profile, quota and picks.
          */
+        setPicksPage(1);
         await fetchVipDataOnce(
-          token
+          token,
+          1
         );
 
         push(
@@ -2039,10 +2060,27 @@ export default function VIPPortal() {
     focus:ring-blue-600/15
   `;
 
-  const visiblePicks =
-    logged
-      ? picks
-      : picks.slice(0, 2);
+  const planPageSizes = {
+    daily: 3,
+    weekly: 5,
+    monthly: 7,
+    yearly: 10,
+    annual: 10,
+  };
+
+  const totalPicksPages = Math.max(
+    1,
+    Number(picksPagination?.total_pages) || 1
+  );
+
+  const currentPicksPage = Math.min(
+    Number(picksPagination?.page) || picksPage,
+    totalPicksPages
+  );
+
+  const visiblePicks = logged
+    ? picks
+    : picks.slice(0, 2);
 
   const visiblePickGroups = [];
   const pickGroupMap = new Map();
@@ -3266,6 +3304,38 @@ export default function VIPPortal() {
                       ))}
                     </div>
                   )}
+
+                {logged && totalPicksPages > 1 && (
+                  <div className="mt-6 flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-3">
+                    <button
+                      type="button"
+                      disabled={currentPicksPage <= 1}
+                      onClick={() =>
+                        setPicksPage((page) => Math.max(1, page - 1))
+                      }
+                      className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      Previous
+                    </button>
+
+                    <span className="text-xs font-bold text-slate-600">
+                      Page {currentPicksPage} of {totalPicksPages}
+                    </span>
+
+                    <button
+                      type="button"
+                      disabled={currentPicksPage >= totalPicksPages}
+                      onClick={() =>
+                        setPicksPage((page) =>
+                          Math.min(totalPicksPages, page + 1)
+                        )
+                      }
+                      className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      Next
+                    </button>
+                  </div>
+                )}
 
                 {!logged &&
                   picks.length >

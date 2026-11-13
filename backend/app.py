@@ -1280,100 +1280,52 @@ def health():
     methods=["GET"]
 )
 def debug_db():
+    import time
 
     conn = None
+    started = time.perf_counter()
+    connection_seconds = None
 
     try:
-
         conn = _connect_db()
+        connection_seconds = time.perf_counter() - started
+
+        query_started = time.perf_counter()
+
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT
+                    current_database() AS database,
+                    current_schema() AS schema
+            """)
+            identity = cur.fetchone()
+
+            cur.execute("SHOW search_path")
+            search_path_row = cur.fetchone()
+
+            cur.execute("SELECT COUNT(*) AS total FROM matches")
+            matches_row = cur.fetchone()
+
+            cur.execute("""
+                SELECT COUNT(*) AS total
+                FROM matches
+                WHERE status IN ('SCHEDULED', 'TIMED')
+            """)
+            upcoming_row = cur.fetchone()
+
+        query_seconds = time.perf_counter() - query_started
 
         if _PSYCOPG3:
-
-            with conn.cursor() as cur:
-
-                cur.execute("""
-                    SELECT
-                        current_database(),
-                        current_schema()
-                """)
-
-                db, schema = (
-                    cur.fetchone()
-                )
-
-                cur.execute(
-                    "SHOW search_path"
-                )
-
-                search_path = (
-                    cur.fetchone()[0]
-                )
-
-                cur.execute("""
-                    SELECT COUNT(*)
-                    FROM matches
-                """)
-
-                matches = (
-                    cur.fetchone()[0]
-                )
-
-                cur.execute("""
-                    SELECT COUNT(*)
-                    FROM matches
-                    WHERE status IN (
-                        'SCHEDULED',
-                        'TIMED'
-                    )
-                """)
-
-                upcoming = (
-                    cur.fetchone()[0]
-                )
-
+            db = identity["database"]
+            schema = identity["schema"]
+            search_path = search_path_row["search_path"]
+            matches = matches_row["total"]
+            upcoming = upcoming_row["total"]
         else:
-
-            with conn.cursor() as cur:
-
-                cur.execute("""
-                    SELECT
-                        current_database(),
-                        current_schema()
-                """)
-
-                db, schema = (
-                    cur.fetchone()
-                )
-
-                cur.execute(
-                    "SHOW search_path"
-                )
-
-                search_path = (
-                    cur.fetchone()[0]
-                )
-
-                cur.execute("""
-                    SELECT COUNT(*)
-                    FROM matches
-                """)
-
-                matches = (
-                    cur.fetchone()[0]
-                )
-
-                cur.execute("""
-                    SELECT COUNT(*)
-                    FROM matches
-                    WHERE status IN (
-                        'SCHEDULED',
-                        'TIMED'
-                    )
-                """)
-
-                upcoming = (
-                    cur.fetchone()[0]
-                )
+            db, schema = identity
+            search_path = search_path_row[0]
+            matches = matches_row[0]
+            upcoming = upcoming_row[0]
 
         return jsonify({
             "database": db,
@@ -1381,28 +1333,25 @@ def debug_db():
             "search_path": search_path,
             "matches": matches,
             "upcoming": upcoming,
+            "connection_seconds": round(connection_seconds, 3),
+            "query_seconds": round(query_seconds, 3),
+            "total_seconds": round(time.perf_counter() - started, 3),
         })
 
     except Exception as exc:
-
         return jsonify({
-            "error": str(exc)
+            "error": str(exc),
+            "connection_seconds": (
+                round(connection_seconds, 3)
+                if connection_seconds is not None else None
+            ),
         }), 500
 
     finally:
-
         if conn:
             conn.close()
 
 
-# =========================================================
-# OPTIMIZED DASHBOARD
-# =========================================================
-
-@app.route(
-    "/dashboard",
-    methods=["GET"]
-)
 def dashboard():
 
     prediction_filter = (

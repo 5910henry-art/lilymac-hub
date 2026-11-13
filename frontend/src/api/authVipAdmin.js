@@ -145,8 +145,8 @@ export const vipRenew = (token, plan) =>
 // VIP PICKS
 // ============================================================
 
-export const vipPicks = (token) =>
-  vipRequest("/vip/picks", {
+export const vipPicks = (token, page = 1) =>
+  vipRequest(`/vip/picks${qsFor({ page })}`, {
     method: "GET",
     token,
   });
